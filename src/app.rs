@@ -1,0 +1,454 @@
+// Top-level application logic: parse CLI, load config, run modules,
+// render against the logo and print.
+
+use crate::config::configfile::{Config, LogoConfig, ModuleEntry};
+use crate::modules::{self, ModuleInstance};
+use crate::print::color;
+
+#[derive(Debug, Default)]
+pub struct CliOptions {
+    pub structure: Option<String>,
+    pub structure_disabled: Vec<String>,
+    pub config_path: Option<String>,
+    pub no_config: bool,
+    pub json: bool,
+}
+
+/// A resolved logo: plain lines plus the ANSI color for each line.
+pub struct ResolvedLogo {
+    pub lines: Vec<String>,
+    pub colors: Vec<String>,
+    pub width: usize,
+}
+
+pub struct App {
+    pub options: CliOptions,
+    pub config: Config,
+    pub logo: Option<ResolvedLogo>,
+}
+
+impl App {
+    pub fn new(options: CliOptions) -> App {
+        App {
+            options,
+            config: Config::default(),
+            logo: None,
+        }
+    }
+
+    /// Load config from `-c` path, default paths, or fall back to defaults.
+    pub fn load_config(&mut self) {
+        if !self.options.no_config {
+            if let Some(p) = &self.options.config_path {
+                if let Some(cfg) = load_config_file(p) {
+                    self.config = cfg;
+                    return;
+                }
+            }
+            for dir in config_search_dirs() {
+                let candidate = format!("{}/fastfetch/config.jsonc", dir);
+                if let Some(cfg) = load_config_file(&candidate) {
+                    self.config = cfg;
+                    return;
+                }
+            }
+        }
+    }
+
+    pub fn run(&mut self) -> i32 {
+        self.load_config();
+        self.pick_logo();
+
+        // Build the ordered list of module entries to run.
+        let entries: Vec<ModuleEntry> = if let Some(s) = &self.options.structure {
+            s.split(':')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .map(|name| {
+                    self.config
+                        .modules
+                        .iter()
+                        .find(|m| m.module().eq_ignore_ascii_case(&name))
+                        .cloned()
+                        .unwrap_or_else(|| ModuleEntry::Name(name))
+                })
+                .collect()
+        } else if !self.config.modules.is_empty() {
+            self.config.modules.clone()
+        } else {
+            // No config: default structure.
+            default_structure()
+                .into_iter()
+                .map(ModuleEntry::Name)
+                .collect()
+        };
+
+        if self.options.json {
+            self.print_json(&entries);
+            return 0;
+        }
+
+        let lines = self.render_modules(&entries);
+
+        // Print, respecting logo width.
+        let logo_pad = self
+            .logo
+            .as_ref()
+            .map(|l| l.width)
+            .unwrap_or(0);
+        let mut out = String::new();
+
+        if let Some(l) = &self.logo {
+            // Print logo lines combined with module lines.
+            let n = lines.len().max(l.lines.len());
+            for row in 0..n {
+                let logo_line = l
+                    .lines
+                    .get(row)
+                    .map(|s| s.clone())
+                    .unwrap_or_else(|| " ".repeat(logo_pad));
+                let text_line = lines.get(row).map(|s| s.as_str()).unwrap_or("");
+                let color_name = l.colors.get(row).map(|s| s.as_str()).unwrap_or("");
+                let lcol = colorize_logo(&logo_line, color_name);
+                let line = format!("{}{}{}", lcol, " ".repeat(PADDING_RIGHT), text_line);
+                out.push_str(line.trim_end());
+                out.push('\n');
+            }
+        } else {
+            for line in &lines {
+                out.push_str(line.trim_end());
+                out.push('\n');
+            }
+        }
+
+        print!("{}", out);
+        0
+    }
+
+    fn pick_logo(&mut self) {
+        self.logo = resolve_logo(&self.config);
+        if self.logo.is_none() {
+            self.logo = builtin_logo_v("linux");
+        }
+        if self.logo.is_none() {
+            self.logo = builtin_logo_v("nixos");
+        }
+    }
+
+    /// --json output: an array of per-module objects, fastfetch-style.
+    fn print_json(&self, entries: &[ModuleEntry]) {
+        use crate::config::json::JsonValue;
+        let mut items: Vec<JsonValue> = Vec::new();
+        for entry in entries {
+            let name = entry.module().to_string();
+            if self
+                .options
+                .structure_disabled
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(&name))
+            {
+                continue;
+            }
+            let inst = self.instance_for(entry.clone());
+            let type_name = modules::exec_impl::json_type_name(&name);
+            if let Some(err) = modules::exec_impl::json_error(&name, &inst, &self.config) {
+                items.push(JsonValue::Obj(vec![
+                    ("type".to_string(), JsonValue::Str(type_name.to_string())),
+                    ("error".to_string(), JsonValue::Str(err)),
+                ]));
+                continue;
+            }
+            if let Some(result) = modules::exec_impl::json_result(&name, &inst, &self.config) {
+                items.push(JsonValue::Obj(vec![
+                    ("type".to_string(), JsonValue::Str(type_name.to_string())),
+                    ("result".to_string(), result),
+                ]));
+            }
+        }
+        print!("{}", JsonValue::Arr(items).to_json_pretty());
+    }
+
+    fn render_modules(&self, entries: &[ModuleEntry]) -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        for entry in entries {
+            let name = entry.module().to_string();
+            if self
+                .options
+                .structure_disabled
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(&name))
+            {
+                continue;
+            }
+            let inst = self.instance_for(entry.clone());
+            match modules::run_instance(&inst, &self.config) {
+                Some(out) => {
+                    if out.blank {
+                        lines.push(String::new());
+                        continue;
+                    }
+                    if !out.supported || out.values.is_empty() {
+                        continue;
+                    }
+                    let key_visible = crate::print::format::visible_len(&out.key);
+                    if key_visible == 0 {
+                        // Bare line (custom/command/colors/separator): no key.
+                        for v in &out.values {
+                            lines.push(v.clone());
+                        }
+                        continue;
+                    }
+                    let padding = self.config.display.padding;
+                    let sep_render = separator_colored(self.config.display.separator.as_str(), &self.config);
+                    let indent = key_visible + crate::print::format::visible_len(&sep_render) + padding;
+                    for (idx, v) in out.values.iter().enumerate() {
+                        if idx == 0 {
+                            lines.push(format!(
+                                "{}{}{}{}",
+                                out.key,
+                                sep_render,
+                                " ".repeat(padding),
+                                v
+                            ));
+                        } else {
+                            lines.push(format!("{}{}", " ".repeat(indent), v));
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        lines
+    }
+
+    fn instance_for(&self, entry: ModuleEntry) -> ModuleInstance {
+        let name = entry.module();
+
+        let args = match &entry {
+            ModuleEntry::Object { args, .. } => args.clone(),
+            ModuleEntry::Name(_) => crate::config::moduleargs::ModuleArgs::default(),
+        };
+
+        let raw = match &entry {
+            ModuleEntry::Object { raw, .. } => Some(raw.clone()),
+            ModuleEntry::Name(_) => None,
+        };
+
+        ModuleInstance {
+            module: name.to_string(),
+            entry,
+            args,
+            raw,
+        }
+    }
+}
+
+/// Render the separator string with the configured separator color.
+fn separator_colored(_sep: &str, cfg: &crate::config::configfile::Config) -> String {
+    let s = cfg.display.separator.clone();
+    match &cfg.display.separator_color {
+        Some(c) => match color::color_code_to_ansi(c) {
+            color::ApplyResult::Ansi { start, end } => format!("{}{}{}", start, s, end),
+            _ => s,
+        },
+        None => s,
+    }
+}
+
+/// Build a ResolvedLogo from config: file logos, custom logos, or builtin.
+fn resolve_logo(cfg: &Config) -> Option<ResolvedLogo> {
+    // File logo (e.g. "type": "file", "source": ".../shork.txt").
+    if let Some(src) = &cfg.logo.source {
+        let expanded = expand_tilde(src);
+        if let Ok(text) = std::fs::read_to_string(&expanded) {
+            return Some(logo_from_lines(&text, &cfg.logo));
+        }
+    }
+
+    // Custom source string.
+    if let Some(src) = &cfg.logo.source {
+        if src.contains('\n') {
+            return Some(logo_from_lines(src, &cfg.logo));
+        }
+    }
+
+    // Builtin logo by type.
+    let id = crate::detection::os::detect().id;
+    let name = cfg
+        .logo
+        .logo_type
+        .clone()
+        .filter(|t| !t.eq_ignore_ascii_case("auto"))
+        .filter(|t| !t.eq_ignore_ascii_case("none"))
+        .unwrap_or(id);
+    builtin_logo_v(name.to_ascii_lowercase().as_str())
+}
+
+/// Turn raw logo text lines into a ResolvedLogo, applying color map + padding.
+fn logo_from_lines(text: &str, lc: &LogoConfig) -> ResolvedLogo {
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect();
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    // Per-line colors from `color: { "1": "green", "2-3": "blue" }`.
+    let mut colors: Vec<String> = vec![String::new(); lines.len()];
+    for (spec, cname) in &lc.color_map {
+        let ansi = color::named_color_sgr(cname).unwrap_or_default();
+        apply_line_spec(&mut colors, spec, &ansi);
+    }
+    // A plain `color: "green"` string applies to all lines.
+    if let Some(c) = &lc.color {
+        if let Some(ansi) = color::named_color_sgr(c) {
+            for c in colors.iter_mut() {
+                *c = ansi.clone();
+            }
+        }
+    }
+
+    // Padding: left prefix, top blank lines.
+    if let Some(top) = lc.padding_top {
+        for _ in 0..top {
+            lines.insert(0, String::new());
+            colors.insert(0, String::new());
+        }
+    }
+    if let Some(left) = lc.padding_left {
+        for l in lines.iter_mut() {
+            *l = format!("{}{}", " ".repeat(left), l);
+        }
+    }
+
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    ResolvedLogo {
+        lines,
+        colors,
+        width,
+    }
+}
+
+fn builtin_logo_v(name: &str) -> Option<ResolvedLogo> {
+    let logo = crate::logo::by_name(name)?;
+    let c = color::named_color_sgr(logo.color).unwrap_or_default();
+    let colors = vec![c; logo.lines.len()];
+    Some(ResolvedLogo {
+        lines: logo.lines.iter().map(|s| s.to_string()).collect(),
+        colors,
+        width: logo.lines.iter().map(|l| l.chars().count()).max().unwrap_or(0),
+    })
+}
+
+fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("{}/{}", home.to_string_lossy(), rest);
+        }
+    }
+    path.to_string()
+}
+
+/// Apply a line spec like "1", "3", "1-4" (fastfetch uses 1-based indexing)
+/// or "0" (0-based) to set the ANSI color on the matching logo lines.
+fn apply_line_spec(colors: &mut [String], spec: &str, ansi: &str) {
+    let parse = |s: &str| s.trim().parse::<usize>().ok();
+    if let Some((a, b)) = spec.split_once('-') {
+        let a = parse(a);
+        let b = parse(b);
+        if let (Some(a), Some(b)) = (a, b) {
+            for i in a.saturating_sub(1)..=b.saturating_sub(1) {
+                if i < colors.len() {
+                    colors[i] = ansi.to_string();
+                }
+            }
+            return;
+        }
+    }
+    if let Some(i) = parse(spec) {
+        let idx = if i == 0 { 0 } else { i.saturating_sub(1) };
+        if idx < colors.len() {
+            colors[idx] = ansi.to_string();
+        }
+    }
+}
+
+fn colorize_logo(line: &str, color_name: &str) -> String {
+    match color::color_code_to_ansi(color_name) {
+        color::ApplyResult::Ansi { start, end } => format!("{}{}{}", start, line, end),
+        _ => line.to_string(),
+    }
+}
+
+/// Padding to the right of the logo before module text.
+pub const PADDING_RIGHT: usize = 2;
+
+fn default_structure() -> Vec<String> {
+    // Default modules similar to fastfetch.
+    [
+        "title", "separator", "os", "host", "kernel", "uptime", "packages", "shell",
+        "display", "wm", "theme", "terminal", "cpu", "gpu", "memory", "swap",
+        "disk", "localip", "battery", "break", "colors",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Config search dirs in the order fastfetch checks them (config-first).
+/// Exposed as `_pub` so the CLI can print `--list-config-paths`.
+pub fn config_search_dirs_pub() -> Vec<String> {
+    config_search_dirs()
+}
+
+fn config_search_dirs() -> Vec<String> {
+    let mut dirs = Vec::new();
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        dirs.push(xdg.to_string_lossy().into_owned());
+    } else if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(format!("{}/.config", home.to_string_lossy()));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(format!("{}/.config", home.to_string_lossy()));
+    }
+    dirs
+}
+
+pub fn load_config_file(path: &str) -> Option<Config> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut cfg = Config::from_jsonc(&text).ok()?;
+    cfg.loaded_from = Some(path.to_string());
+    Some(cfg)
+}
+
+/// Strip ANSI codes; keep for tests.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::new();
+    let mut i = 0;
+    let b = s.as_bytes();
+    while i < b.len() {
+        if b[i] == 0x1b && i + 1 < b.len() && b[i + 1] == b'[' {
+            let mut j = i + 2;
+            while j < b.len() && !b[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            i = (j + 1).min(b.len());
+            continue;
+        }
+        let len = utf8_len(b[i]);
+        out.push_str(&s[i..i + len]);
+        i += len;
+    }
+    out
+}
+
+#[inline]
+fn utf8_len(first: u8) -> usize {
+    match first {
+        0x00..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        _ => 4,
+    }
+}

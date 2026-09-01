@@ -1,0 +1,16 @@
+[package]
+name = "sharkfetch"
+version = "0.1.0"
+edition = "2021"
+description = "A fastfetch clone written in pure Rust, statically linked against musl"
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
