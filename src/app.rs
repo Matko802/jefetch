@@ -195,35 +195,9 @@ impl App {
     }
 
     fn run_animated(&mut self, _entries: &[ModuleEntry]) -> i32 {
-        // 1:1 areofetch: delegate to the real `fetch` binary for identical 3D spinning
-        // when stdout is a tty (so fetch can do its z-buffer). When piped (e.g., `| cat` or `> file`
-        // or `timeout ... > file`), fall back to our simple 2D spin which works with any stdout.
-        let is_tty_out = unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 };
-        if is_tty_out {
-            let logo_name = self.config.logo.source.clone().filter(|s| !s.is_empty())
-                .or_else(|| {
-                    let id = crate::detection::os::detect().id.to_ascii_lowercase();
-                    crate::logo::by_name(&id).map(|l| l.name.to_string())
-                })
-                .unwrap_or_else(|| "nixos".to_string());
-            let mut cmd = std::process::Command::new("fetch");
-            cmd.arg("-l").arg(&logo_name);
-            if let Some(anim) = &self.config.logo.animation {
-                let low = anim.to_ascii_lowercase();
-                if low.contains("spin=x") || low == "x" {
-                    cmd.arg("--rotate-x");
-                } else if low.contains("spin=y") || low == "y" {
-                    cmd.arg("--rotate-y");
-                }
-            }
-            cmd.stdin(std::process::Stdio::inherit());
-            cmd.stdout(std::process::Stdio::inherit());
-            cmd.stderr(std::process::Stdio::inherit());
-            if let Ok(status) = cmd.status() {
-                return status.code().unwrap_or(0);
-            }
-        }
-        // Fallback: simple 2D 4-frame spin (works with piped stdout, no tty needed)
+        // Use our own 2D spin with the same base_lines as static, so system stats are identical.
+        // The areofyl 3D fetch can still be invoked manually via `fetch -l <logo>` if installed,
+        // but sharkfetch's own spin keeps the text column fixed and the info live-updating.
         self.run_animated_fallback()
     }
 
@@ -264,9 +238,13 @@ impl App {
         let _tty_guard = tty_file;
         let mut frame: usize = 0;
         let mut out = String::new();
+        // Keep text column fixed - use base logo's width, not per-frame animated width
+        let base_pad = base_logo.width;
+        let base_gap = base_logo.padding_right;
         loop {
+            // Build animated logo for this frame (spin)
             let anim_logo = Self::animated_logo(&base_logo, frame);
-            let logo_pad = anim_logo.width;
+            let logo_pad = base_pad;
             out.clear();
             out.push_str("\x1b[2J\x1b[H");
             let n = base_lines.len().max(anim_logo.lines.len());
@@ -284,7 +262,7 @@ impl App {
                 };
                 let lcol_visible = crate::print::format::visible_len(&lcol);
                 let pad_needed = logo_pad.saturating_sub(lcol_visible);
-                let gap = anim_logo.padding_right;
+                let gap = base_gap;
                 let mut line = String::new();
                 if !lcol.trim().is_empty() {
                     line.push_str(&lcol);
