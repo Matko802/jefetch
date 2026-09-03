@@ -24,17 +24,6 @@ make
 sudo make install
 ```
 
-On NixOS or any distro with Nix:
-
-```sh
-nix develop   # drop into a shell with cargo
-make          # build inside the dev shell
-```
-Or
-```sh
-nix run github:Matko802/sharkfetch
-```
-
 ## Usage
 
 ```sh
@@ -51,6 +40,16 @@ sharkfetch --help
 
 The config file is located in `~/.config/sharkfetch/`
 
+##Any distro with Nix:
+
+```sh
+nix develop   # drop into a shell with cargo
+make          # build inside the dev shell
+```
+Or
+```sh
+nix run github:Matko802/sharkfetch
+```
 
 ## As a flake input
 
