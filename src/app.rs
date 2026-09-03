@@ -195,9 +195,34 @@ impl App {
     }
 
     fn run_animated(&mut self, _entries: &[ModuleEntry]) -> i32 {
-        // Use our own 2D spin with the same base_lines as static, so system stats are identical.
-        // The areofyl 3D fetch can still be invoked manually via `fetch -l <logo>` if installed,
-        // but sharkfetch's own spin keeps the text column fixed and the info live-updating.
+        // 1:1 areofyl/fetch when stdout is a tty — delegate to `fetch` for true 3D donut.c.
+        // When piped (e.g., `| cat`, `> file`, `timeout ... > file`), use our 2D fallback
+        // which works with any stdout and keeps stats identical (only logo spins).
+        let is_tty_out = unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 };
+        if is_tty_out {
+            let logo_name = self.config.logo.source.clone().filter(|s| !s.is_empty())
+                .or_else(|| {
+                    let id = crate::detection::os::detect().id.to_ascii_lowercase();
+                    crate::logo::by_name(&id).map(|l| l.name.to_string())
+                })
+                .unwrap_or_else(|| "nixos".to_string());
+            let mut cmd = std::process::Command::new("fetch");
+            cmd.arg("-l").arg(&logo_name);
+            if let Some(anim) = &self.config.logo.animation {
+                let low = anim.to_ascii_lowercase();
+                if low.contains("spin=x") || low == "x" {
+                    cmd.arg("--rotate-x");
+                } else if low.contains("spin=y") || low == "y" {
+                    cmd.arg("--rotate-y");
+                }
+            }
+            cmd.stdin(std::process::Stdio::inherit());
+            cmd.stdout(std::process::Stdio::inherit());
+            cmd.stderr(std::process::Stdio::inherit());
+            if let Ok(status) = cmd.status() {
+                return status.code().unwrap_or(0);
+            }
+        }
         self.run_animated_fallback()
     }
 
@@ -323,87 +348,69 @@ impl App {
         }
     }
 
-    /// Areofetch-like spin: 4-frame 90° rotation of the ASCII art.
-    /// For non-square logos we pad to a square, rotate, then trim.
+    /// Areofetch-like spin: lightweight horizontal sine-shift that keeps the
+    /// text column fixed and looks smooth. For true 3D donut.c 1:1, `run_animated`
+    /// delegates to the real `fetch` binary when stdout is a tty.
     fn animated_logo(base: &ResolvedLogo, frame: usize) -> ResolvedLogo {
-        let spin = frame % 4;
-        if spin == 0 {
-            return base.clone();
-        }
-        // Strip ANSI for geometry, keep original lines for fallback
+        // Simple smooth horizontal spin: each row shifts by sine wave
         let stripped: Vec<String> = base.lines.iter().map(|l| strip_ansi(l)).collect();
         let h = stripped.len();
         let w = stripped.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-        let n = h.max(w).max(1);
-        // Build n x n grid padded with spaces
-        let mut grid: Vec<Vec<char>> = vec![vec![' '; n]; n];
-        for (y, line) in stripped.iter().enumerate() {
-            for (x, ch) in line.chars().enumerate() {
-                if y < n && x < n {
-                    grid[y][x] = ch;
-                }
-            }
+        if w == 0 || h == 0 {
+            return base.clone();
         }
-        // Rotate
-        let rotated: Vec<Vec<char>> = match spin {
-            1 => { // 90° clockwise
-                let mut r = vec![vec![' '; n]; n];
-                for y in 0..n { for x in 0..n { r[x][n-1-y] = grid[y][x]; } }
-                r
-            }
-            2 => { // 180°
-                let mut r = vec![vec![' '; n]; n];
-                for y in 0..n { for x in 0..n { r[n-1-y][n-1-x] = grid[y][x]; } }
-                r
-            }
-            3 => { // 270° clockwise (90° ccw)
-                let mut r = vec![vec![' '; n]; n];
-                for y in 0..n { for x in 0..n { r[n-1-x][y] = grid[y][x]; } }
-                r
-            }
-            _ => grid,
-        };
-        // Convert back to lines, trim trailing spaces, re-add simple color (first line's color)
+        // 24 frames per cycle, shift up to 2 chars with sine
+        let shift = ((frame as f32 * 0.5).sin() * 2.0) as isize;
         let mut out_lines: Vec<String> = Vec::new();
-        for row in rotated {
-            let s: String = row.into_iter().collect();
-            let trimmed = s.trim_end().to_string();
-            if trimmed.is_empty() {
+        for line in stripped {
+            let len = line.chars().count() as isize;
+            if len == 0 {
                 out_lines.push(String::new());
-            } else {
-                // Keep original first color for the whole logo during spin (simple)
-                let color = base.lines.first().map(|l| {
-                    // Extract leading ANSI if any
-                    if let Some(start) = l.find("\x1b[") {
-                        if let Some(end) = l[start..].find('m') {
-                            return l[start..start+end+1].to_string();
-                        }
-                    }
-                    String::new()
-                }).unwrap_or_default();
-                let reset = crate::print::color::RESET;
-                if color.is_empty() {
-                    out_lines.push(trimmed);
-                } else {
-                    out_lines.push(format!("{}{}{}", color, trimmed, reset));
+                continue;
+            }
+            // Cyclic shift
+            let s = (shift % len + len) % len;
+            let chars: Vec<char> = line.chars().collect();
+            let mut shifted = String::new();
+            for i in 0..len as usize {
+                shifted.push(chars[(i + s as usize) % len as usize]);
+            }
+            // Keep original padding (visible width stays the same, so text column doesn't jump)
+            let orig_width = line.chars().count();
+            let shifted_width = shifted.chars().count();
+            if shifted_width < orig_width {
+                shifted.push_str(&" ".repeat(orig_width - shifted_width));
+            }
+            out_lines.push(shifted);
+        }
+        // Re-add simple color (first line's color) for the whole logo during spin
+        let color = base.lines.first().and_then(|l| {
+            if let Some(start) = l.find("\x1b[") {
+                if let Some(end) = l[start..].find('m') {
+                    return Some(l[start..start+end+1].to_string());
                 }
             }
+            None
+        }).unwrap_or_default();
+        let reset = crate::print::color::RESET;
+        let mut colored: Vec<String> = Vec::new();
+        for line in out_lines {
+            if line.trim().is_empty() {
+                colored.push(String::new());
+            } else if color.is_empty() {
+                colored.push(line);
+            } else {
+                colored.push(format!("{}{}{}", color, line, reset));
+            }
         }
-        // Trim leading/trailing empty lines for tighter spin
-        while out_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) && out_lines.len() > 1 {
-            out_lines.remove(0);
-        }
-        while out_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) && out_lines.len() > 1 {
-            out_lines.pop();
-        }
-        let width = out_lines.iter().map(|l| crate::print::format::visible_len(l)).max().unwrap_or(0);
-        let n_lines = out_lines.len();
-        ResolvedLogo {
-            lines: out_lines,
-            colors: vec![String::new(); n_lines],
+        let n = colored.len();
+        let width = colored.iter().map(|l| crate::print::format::visible_len(l)).max().unwrap_or(0);
+        return ResolvedLogo {
+            lines: colored,
+            colors: vec![String::new(); n],
             width,
             padding_right: base.padding_right,
-        }
+        };
     }
 
     fn pick_logo(&mut self) {
