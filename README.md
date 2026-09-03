@@ -16,9 +16,6 @@ Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 - Uses Musl
 
 ## Building
-
-Only Rust (cargo) is required — no system libraries.
-
 ```sh
 git clone https://github.com/Matko802/sharkfetch.git
 cd sharkfetch
