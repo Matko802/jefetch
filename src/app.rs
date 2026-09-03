@@ -245,14 +245,13 @@ impl App {
         print!("\x1b[?25l\x1b[?1049h");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
-        let mut raw_term = orig_term;
         let mut tty_fd: i32 = -1;
         let tty_file = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").ok();
         if let Some(f) = &tty_file {
             use std::os::unix::io::AsRawFd;
             tty_fd = f.as_raw_fd();
             if unsafe { libc::tcgetattr(tty_fd, &mut orig_term) } == 0 {
-                raw_term = orig_term;
+                let mut raw_term = orig_term;
                 raw_term.c_lflag &= !(libc::ICANON | libc::ECHO);
                 raw_term.c_cc[libc::VMIN as usize] = 0;
                 raw_term.c_cc[libc::VTIME as usize] = 0;

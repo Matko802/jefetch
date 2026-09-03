@@ -26,7 +26,7 @@ fn main() {
     {
         let _ = std::process::Command::new("stty").arg("sane").output();
         // Drain any pending kitty-query response (ESC P1+r...) that would otherwise be printed as garbage at the top
-        if let Ok(mut f) = std::fs::OpenOptions::new().read(true).open("/dev/tty") {
+        if let Ok(f) = std::fs::OpenOptions::new().read(true).open("/dev/tty") {
             use std::os::unix::io::AsRawFd;
             let fd = f.as_raw_fd();
             let mut term = unsafe { std::mem::zeroed::<libc::termios>() };
