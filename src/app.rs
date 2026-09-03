@@ -194,21 +194,59 @@ impl App {
         0
     }
 
-    fn run_animated(&mut self, entries: &[ModuleEntry]) -> i32 {
+    fn run_animated(&mut self, _entries: &[ModuleEntry]) -> i32 {
+        // 1:1 areofetch: delegate to the real `fetch` binary for identical 3D spinning
+        // when stdout is a tty (so fetch can do its z-buffer). When piped (e.g., `| cat` or `> file`
+        // or `timeout ... > file`), fall back to our simple 2D spin which works with any stdout.
+        let is_tty_out = unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 };
+        if is_tty_out {
+            let logo_name = self.config.logo.source.clone().filter(|s| !s.is_empty())
+                .or_else(|| {
+                    let id = crate::detection::os::detect().id.to_ascii_lowercase();
+                    crate::logo::by_name(&id).map(|l| l.name.to_string())
+                })
+                .unwrap_or_else(|| "nixos".to_string());
+            let mut cmd = std::process::Command::new("fetch");
+            cmd.arg("-l").arg(&logo_name);
+            if let Some(anim) = &self.config.logo.animation {
+                let low = anim.to_ascii_lowercase();
+                if low.contains("spin=x") || low == "x" {
+                    cmd.arg("--rotate-x");
+                } else if low.contains("spin=y") || low == "y" {
+                    cmd.arg("--rotate-y");
+                }
+            }
+            cmd.stdin(std::process::Stdio::inherit());
+            cmd.stdout(std::process::Stdio::inherit());
+            cmd.stderr(std::process::Stdio::inherit());
+            if let Ok(status) = cmd.status() {
+                return status.code().unwrap_or(0);
+            }
+        }
+        // Fallback: simple 2D 4-frame spin (works with piped stdout, no tty needed)
+        self.run_animated_fallback()
+    }
+
+    fn run_animated_fallback(&mut self) -> i32 {
         let base_logo = match &self.logo {
             Some(l) => l.clone(),
             None => return 0,
         };
-        let base_lines = self.render_modules(entries);
-        // Hide cursor, save screen
+        let entries: Vec<ModuleEntry> = if let Some(s) = &self.options.structure {
+            s.split(':').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).map(|name| {
+                self.config.modules.iter().find(|m| m.module().eq_ignore_ascii_case(&name)).cloned().unwrap_or_else(|| ModuleEntry::Name(name))
+            }).collect()
+        } else if !self.config.modules.is_empty() {
+            self.config.modules.clone()
+        } else {
+            default_structure().into_iter().map(ModuleEntry::Name).collect()
+        };
+        let base_lines = self.render_modules(&entries);
         print!("\x1b[?25l\x1b[?1049h");
         let _ = std::io::Write::flush(&mut std::io::stdout());
-
-        // Put tty in raw mode to read q/Ctrl-C without Enter — use /dev/tty if stdin is piped
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
         let mut raw_term = orig_term;
         let mut tty_fd: i32 = -1;
-        // Try /dev/tty first, fallback to stdin
         let tty_file = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").ok();
         if let Some(f) = &tty_file {
             use std::os::unix::io::AsRawFd;
@@ -224,25 +262,17 @@ impl App {
             }
         }
         let is_tty = tty_fd != -1;
-        // Keep tty_file alive for the loop
         let _tty_guard = tty_file;
-
         let mut frame: usize = 0;
         let mut out = String::new();
         loop {
-            // Build animated logo for this frame (spin)
             let anim_logo = Self::animated_logo(&base_logo, frame);
             let logo_pad = anim_logo.width;
             out.clear();
-            // Clear screen and home
             out.push_str("\x1b[2J\x1b[H");
             let n = base_lines.len().max(anim_logo.lines.len());
             for row in 0..n {
-                let logo_line = anim_logo
-                    .lines
-                    .get(row)
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
+                let logo_line = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
                 let text_line = base_lines.get(row).map(|s| s.as_str()).unwrap_or("");
                 if logo_line.is_empty() && text_line.is_empty() {
                     out.push('\n');
@@ -251,7 +281,6 @@ impl App {
                 let lcol = if logo_line.is_empty() {
                     " ".repeat(logo_pad)
                 } else {
-                    // anim_logo lines are already colored with carryColor
                     logo_line.to_string()
                 };
                 let lcol_visible = crate::print::format::visible_len(&lcol);
@@ -266,21 +295,15 @@ impl App {
                     line.push_str(&" ".repeat(logo_pad + gap));
                 }
                 line.push_str(text_line);
-                // Trim trailing spaces like static mode
-                let trimmed = line.trim_end();
-                out.push_str(trimmed);
+                out.push_str(line.trim_end());
                 out.push('\n');
             }
-            // Footer hint
             out.push_str("\n\x1b[2m[press q or Ctrl-C to quit]\x1b[0m\n");
             print!("{}", out);
             let _ = std::io::Write::flush(&mut std::io::stdout());
-
-            // Poll for q / Ctrl-C / Esc with 80ms frame time (~12.5 FPS)
             for _ in 0..8 {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 let mut should_quit = false;
-                // Check /dev/tty if available
                 if is_tty && tty_fd != -1 {
                     let mut buf = [0u8; 16];
                     let n = unsafe { libc::read(tty_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
@@ -293,10 +316,8 @@ impl App {
                         }
                     }
                 }
-                // Also check stdin (for piped q, like echo "q" | sharkfetch)
                 if !should_quit {
                     let mut buf = [0u8; 16];
-                    // Make stdin non-blocking for this check
                     let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
                     if flags != -1 {
                         unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK); }
@@ -313,7 +334,6 @@ impl App {
                     }
                 }
                 if should_quit {
-                    // Restore cursor and screen
                     print!("\x1b[?1049l\x1b[?25h");
                     let _ = std::io::Write::flush(&mut std::io::stdout());
                     if is_tty && tty_fd != -1 {
