@@ -40,7 +40,7 @@ sharkfetch --help
 
 The config file is located in `~/.config/sharkfetch/`
 
-##Any distro with Nix:
+## Any distro with Nix:
 
 ```sh
 nix develop   # drop into a shell with cargo
