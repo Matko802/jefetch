@@ -24,29 +24,15 @@ make
 sudo make install
 ```
 
-On NixOS or any distro with Nix, prefer the flake (no system packages needed):
+On NixOS or any distro with Nix:
 
 ```sh
 nix develop   # drop into a shell with cargo
 make          # build inside the dev shell
 ```
-
-Prefer not to touch your system at all?
-
+Or
 ```sh
 nix run github:Matko802/sharkfetch
-```
-
-To install somewhere else instead of `/usr/local`:
-
-```sh
-make PREFIX=$HOME/.local install
-```
-
-### Run it
-
-```sh
-sharkfetch
 ```
 
 ## Usage
@@ -63,14 +49,10 @@ sharkfetch --help
 | `--list-logos` | list 530 logos |
 | `--list-modules` | list available modules |
 
-The config file is looked up in `~/.config/sharkfetch/config.toml`, then
-`~/.config/fastfetch/config.jsonc`. It is auto-created on first run.
+The config file is located in `~/.config/sharkfetch/`
 
-## Nix flakes
 
-sharkfetch ships with its own flake, so you can pull it straight from GitHub.
-
-### As a flake input
+## As a flake input
 
 ```nix
 {
@@ -88,12 +70,8 @@ sharkfetch ships with its own flake, so you can pull it straight from GitHub.
 }
 ```
 
-### As an overlay
+## As an overlay
 
-The flake also exposes `overlays.default`, so you can enable it with
-`nixpkgs.overlays = [ sharkfetch.overlays.default ];` and get `pkgs.sharkfetch`.
-
-A full NixOS example that pulls the flake in as both an overlay and a package:
 
 ```nix
 {
@@ -124,14 +102,14 @@ A full NixOS example that pulls the flake in as both an overlay and a package:
 }
 ```
 
-### Standalone build from source
+## Standalone build from source
 
 ```sh
 nix build github:Matko802/sharkfetch
 nix run github:Matko802/sharkfetch
 ```
 
-### Development
+## Develop
 
 ```sh
 nix develop github:Matko802/sharkfetch
