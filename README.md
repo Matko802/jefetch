@@ -35,8 +35,8 @@ sharkfetch --help
 | Option | Description |
 | ------ | ----------- |
 | `--help` | show help |
-| `--list-logos` | list 530 logos |
-| `--list-modules` | list available modules |
+| `--list-logos` | show all logos |
+| `--list-modules` | list of available modules |
 
 The config file is located in `~/.config/sharkfetch/`
 
