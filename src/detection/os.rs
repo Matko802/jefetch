@@ -15,7 +15,13 @@ pub struct OSInfo {
     pub variant_id: String,
 }
 
+static CACHE: std::sync::OnceLock<OSInfo> = std::sync::OnceLock::new();
+
 pub fn detect() -> OSInfo {
+    CACHE.get_or_init(detect_uncached).clone()
+}
+
+fn detect_uncached() -> OSInfo {
     let mut info = OSInfo::default();
     info.arch = arch();
 

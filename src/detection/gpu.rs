@@ -89,6 +89,7 @@ fn vendor_name(id: &str) -> String {
 }
 
 /// Minimal pci.ids parser ("XXXX  <vendor>" / "  XXXX  <device>").
+#[derive(Clone)]
 struct PciIds {
     map: Vec<(String, String, String)>, // (vendor, device, device_name)
 }
@@ -140,10 +141,18 @@ fn split_ids_line(line: &str) -> Option<(String, String)> {
     Some((id.to_ascii_lowercase(), rest.trim().to_string()))
 }
 
+static PCI_CACHE: std::sync::OnceLock<PciIds> = std::sync::OnceLock::new();
+
 fn parse_pci_ids() -> PciIds {
+    // Clone from cache if already loaded; pci.ids is 1-2 MB, don't re-read.
+    if let Some(cached) = PCI_CACHE.get() {
+        return PciIds { map: cached.map.clone() };
+    }
     for path in ["/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"] {
         if let Ok(text) = std::fs::read_to_string(path) {
-            return PciIds::parse(&text);
+            let ids = PciIds::parse(&text);
+            let _ = PCI_CACHE.set(PciIds { map: ids.map.clone() });
+            return ids;
         }
     }
     PciIds { map: Vec::new() }

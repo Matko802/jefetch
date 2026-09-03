@@ -70,6 +70,62 @@ pub fn getenv(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+/// Cached fastfetch --json output (60s TTL) for use by modules that want to
+/// be exactly like fastfetch without reimplementing every detection.
+/// Excludes terminalfont which does a DECRQSS kitty-query that leaks as ^[P1+r garbage
+/// and causes the 1s stutter when cache misses.
+pub fn fastfetch_json() -> Option<String> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<String>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let cache_path = {
+            if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
+                format!("{}/sharkfetch/fastfetch.json", dir.to_string_lossy())
+            } else if let Some(home) = std::env::var_os("HOME") {
+                format!("{}/.cache/sharkfetch/fastfetch.json", home.to_string_lossy())
+            } else {
+                "/tmp/sharkfetch-fastfetch.json".to_string()
+            }
+        };
+        // Use file cache if fresh (<60s) — keeps warm runs instant (4 ms) and avoids the kitty-query stutter
+        // If stale, return stale immediately and refresh in background so the next run is instant too
+        if let Ok(meta) = std::fs::metadata(&cache_path) {
+            if let Ok(mtime) = meta.modified() {
+                let is_fresh = mtime.elapsed().map(|e| e.as_secs() < 60).unwrap_or(false);
+                if let Ok(txt) = std::fs::read_to_string(&cache_path) {
+                    if !txt.is_empty() {
+                        if is_fresh {
+                            return Some(txt);
+                        }
+                        // Stale: return stale now, refresh in background
+                        let cache_clone = cache_path.clone();
+                        std::thread::spawn(move || {
+                            if let Some(out) = run_capture_timeout(
+                                "/run/current-system/sw/bin/fastfetch",
+                                &["--json", "--structure", "title:separator:os:host:kernel:uptime:packages:shell:display:wm:theme:icons:font:cursor:terminal:cpu:gpu:memory:swap:disk:localip:locale:break:colors"],
+                                800,
+                            ) {
+                                let _ = std::fs::create_dir_all(std::path::Path::new(&cache_clone).parent().unwrap_or(std::path::Path::new("/tmp")));
+                                let _ = std::fs::write(&cache_clone, &out);
+                            }
+                        });
+                        return Some(txt);
+                    }
+                }
+            }
+        }
+        // No cache: synchronous (first run ever)
+        let out = run_capture_timeout(
+            "/run/current-system/sw/bin/fastfetch",
+            &["--json", "--structure", "title:separator:os:host:kernel:uptime:packages:shell:display:wm:theme:icons:font:cursor:terminal:cpu:gpu:memory:swap:disk:localip:locale:break:colors"],
+            800,
+        )?;
+        let _ = std::fs::create_dir_all(std::path::Path::new(&cache_path).parent().unwrap_or(std::path::Path::new("/tmp")));
+        let _ = std::fs::write(&cache_path, &out);
+        Some(out)
+    }).clone()
+}
+
 /// Run a command and return trimmed stdout (used sparingly, prefer /proc).
 pub fn run_capture(cmd: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(cmd)

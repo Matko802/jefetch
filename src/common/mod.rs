@@ -32,7 +32,7 @@ pub fn format_bytes_plain(bytes: u64) -> String {
     format!("{:.2} {}", value, suffix)
 }
 
-/// Convert a duration in seconds to a human-readable format like `1 day 2 hrs 3 mins`.
+/// Convert a duration in seconds to a human-readable format like `1 day 2 hours, 3 mins`.
 pub fn format_uptime(secs: u64) -> String {
     let days = secs / 86400;
     let hours = (secs % 86400) / 3600;
@@ -42,7 +42,7 @@ pub fn format_uptime(secs: u64) -> String {
         parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
     }
     if hours > 0 {
-        parts.push(format!("{} hr{}", hours, if hours == 1 { "" } else { "s" }));
+        parts.push(format!("{} hour{}", hours, if hours == 1 { "" } else { "s" }));
     }
     if mins > 0 {
         parts.push(format!("{} min{}", mins, if mins == 1 { "" } else { "s" }));
@@ -50,7 +50,7 @@ pub fn format_uptime(secs: u64) -> String {
     if parts.is_empty() {
         parts.push(format!("{} secs", secs));
     }
-    parts.join(" ")
+    parts.join(", ")
 }
 
 /// Compute a percentage string (integer) between 0 and 100.

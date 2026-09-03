@@ -3,10 +3,10 @@ use std::collections::HashMap;
 
 // SIOC* request codes are not exported by libc for musl; the values are ABI
 // stable across Linux architectures.
-const SIOCGIFFLAGS: libc::c_int = 0x8913;
-const SIOCGIFMTU: libc::c_int = 0x8921;
-const SIOCGIFHWADDR: libc::c_int = 0x8927;
-const SIOCETHTOOL: libc::c_int = 0x8946;
+const SIOCGIFFLAGS: libc::Ioctl = 0x8913;
+const SIOCGIFMTU: libc::Ioctl = 0x8921;
+const SIOCGIFHWADDR: libc::Ioctl = 0x8927;
+const SIOCETHTOOL: libc::Ioctl = 0x8946;
 
 #[derive(Debug, Clone, Default)]
 pub struct IpInfo {

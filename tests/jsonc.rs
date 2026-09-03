@@ -1,4 +1,3 @@
-use sharkfetch::config::json::JsonValue;
 use sharkfetch::config::parse;
 
 #[test]

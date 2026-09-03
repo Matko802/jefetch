@@ -27,13 +27,13 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         DisplayConfig {
-            separator: ":".to_string(),
-            separator_color: Some("32".to_string()),
+            separator: ": ".to_string(),
+            separator_color: None,
             key_color: None,
-            title_color: Some("34".to_string()),
+            title_color: None,
             key_width: 0,
             key_width_right_aligned: false,
-            padding: 1,
+            padding: 0,
             bar_border_left: "[".to_string(),
             bar_border_right: "]".to_string(),
             bar_char_elapsed: "-".to_string(),

@@ -152,16 +152,16 @@ impl<'a> Resolver for ValueResolver<'a> {
 #[allow(unused_variables)]
 fn render_empty(_: &str) {}
 
-fn render_separator(cfg: &Config) -> ModuleOutput {
-    let w = crate::common::terminal_width();
-    let sep = &cfg.display.separator;
+fn render_separator(_cfg: &Config) -> ModuleOutput {
+    // fastfetch's separator prints `-` repeated across the title width
+    // (1 + username + hostname), not the full terminal width.
+    let u = crate::detection::user::detect();
+    let title_len = 1
+        + crate::print::format::visible_len(&u.user_name_part)
+        + crate::print::format::visible_len(&u.host_name_part);
     let mut line = String::new();
-    while crate::print::format::visible_len(&line) + separator_width(sep) <= w.saturating_sub(2) {
-        line.push_str(sep);
+    while crate::print::format::visible_len(&line) < title_len {
+        line.push('-');
     }
     ModuleOutput::supported("", vec![line])
-}
-
-fn separator_width(sep: &str) -> usize {
-    crate::print::format::visible_len(sep).max(1)
 }

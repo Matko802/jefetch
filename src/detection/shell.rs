@@ -11,13 +11,14 @@ pub struct ShellInfo {
 
 pub fn detect() -> ShellInfo {
     let mut info = ShellInfo::default();
-    // Prefer $SHELL, fall back to the parent process (fastfetch reads /proc).
-    info.shell_path = getenv("SHELL").unwrap_or_else(|| {
-        parent_comm().unwrap_or_else(|| "".to_string())
-    });
-    if info.shell_path.is_empty() {
+
+    // Walk up the process tree to find the actual shell, like fastfetch's getShellInfo.
+    // $SHELL is the login shell, not necessarily the current shell (e.g., fish login, bash subshell).
+    let shell_path = find_shell_via_proc().or_else(|| getenv("SHELL")).unwrap_or_default();
+    if shell_path.is_empty() {
         return info;
     }
+    info.shell_path = shell_path;
 
     // Basename without leading '-'
     let base = info
@@ -32,6 +33,71 @@ pub fn detect() -> ShellInfo {
     let raw = version_output(&info.shell_path);
     info.shell_version = parse_version(&raw, &base);
     info
+}
+
+fn find_shell_via_proc() -> Option<String> {
+    const KNOWN_SHELLS: &[&str] = &[
+        "sh", "bash", "zsh", "fish", "csh", "tcsh", "ksh", "dash", "ash", "posh", "elvish", "oil", "nushell",
+        "pwsh", "yash", "busybox", "nu", "xonsh", "elvish", "oil.ovm",
+    ];
+    const SKIP: &[&str] = &[
+        "sudo", "su", "doas", "strace", "gdb", "lldb", "login", "ltrace", "perf", "time", "script", "proot", "fastfetch", "sharkfetch", "flatpak",
+    ];
+    let mut pid: u32 = unsafe { libc::getppid() as u32 };
+    for _ in 0..20 {
+        if pid == 0 || pid == 1 {
+            break;
+        }
+        let exe_path = std::fs::read_link(format!("/proc/{}/exe", pid)).ok().and_then(|p| Some(p.to_string_lossy().into_owned())).unwrap_or_default();
+        let comm = std::fs::read_to_string(format!("/proc/{}/comm", pid)).ok().map(|s| s.trim().to_string()).unwrap_or_default();
+        let base = comm.rsplit('/').next().unwrap_or(&comm).trim_start_matches('-').to_ascii_lowercase();
+        let base_exe = exe_path.rsplit('/').next().unwrap_or(&exe_path).trim_start_matches('-').to_ascii_lowercase();
+        // Check if this is a known shell (by comm or exe)
+        let is_shell = KNOWN_SHELLS.iter().any(|s| base == *s || base_exe == *s);
+        let is_skip = SKIP.iter().any(|s| base == *s || base_exe == *s) || base == "sh" || comm == "sh";
+        if is_shell && !is_skip {
+            // Return the exe path if available, else comm
+            if !exe_path.is_empty() && !exe_path.contains(" (deleted)") {
+                return Some(exe_path);
+            }
+            return Some(comm);
+        }
+        // If it's a skip wrapper, continue walking
+        if is_skip || base == "sh" {
+            // get ppid
+            if let Ok(status) = std::fs::read_to_string(format!("/proc/{}/status", pid)) {
+                for line in status.lines() {
+                    if let Some(rest) = line.strip_prefix("PPid:") {
+                        pid = rest.trim().parse().unwrap_or(0);
+                        break;
+                    }
+                }
+                continue;
+            }
+            break;
+        }
+        // If it's not a known shell and not a skip, check parent
+        // For unknown shells, we still walk one more step to find a known shell
+        if let Ok(status) = std::fs::read_to_string(format!("/proc/{}/status", pid)) {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("PPid:") {
+                    let ppid: u32 = rest.trim().parse().unwrap_or(0);
+                    // If parent is a known shell, return it
+                    let parent_comm = std::fs::read_to_string(format!("/proc/{}/comm", ppid)).ok().map(|s| s.trim().to_string()).unwrap_or_default();
+                    let parent_base = parent_comm.rsplit('/').next().unwrap_or(&parent_comm).trim_start_matches('-').to_ascii_lowercase();
+                    if KNOWN_SHELLS.iter().any(|s| parent_base == *s) {
+                        let parent_exe = std::fs::read_link(format!("/proc/{}/exe", ppid)).ok().map(|p| p.to_string_lossy().into_owned()).unwrap_or(parent_comm);
+                        return Some(parent_exe);
+                    }
+                    pid = ppid;
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    None
 }
 
 /// Extract a clean version from `--version` output like
@@ -63,25 +129,6 @@ fn parse_version(raw: &str, base: &str) -> String {
     } else {
         line.trim().to_string()
     }
-}
-
-fn parent_comm() -> Option<String> {
-    let ppid = std::fs::read_to_string("/proc/self/stat")
-        .ok()
-        .and_then(|s| {
-            // comm may contain spaces/parens; find last ')'
-            let close = s.rfind(')')?;
-            let after = &s[close + 1..];
-            after.split_whitespace().nth(1).and_then(|v| v.parse::<u32>().ok())
-        })?;
-    let name = getenv("SHELL").unwrap_or_default();
-    if !name.is_empty() {
-        return Some(name);
-    }
-    let dir = format!("/proc/{}/exe", ppid);
-    std::fs::read_link(dir)
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
 }
 
 fn version_output(path: &str) -> String {

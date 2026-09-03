@@ -3,6 +3,7 @@
 // nested objects/arrays, all JSON string escapes, numbers, booleans and null.
 
 pub mod json;
+pub mod toml;
 
 use crate::config::json::{JsonResult, JsonValue};
 
@@ -10,6 +11,7 @@ pub mod configfile;
 pub mod display;
 pub mod general;
 pub mod moduleargs;
+pub mod toml_config;
 
 pub fn parse(input: &str) -> JsonResult<JsonValue> {
     let mut p = Parser {

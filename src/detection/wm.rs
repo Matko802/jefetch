@@ -29,9 +29,16 @@ const WMS: &[&str] = &[
     "dwl",
     "labwc",
     "niri",
+    "mango",
 ];
 
+static CACHE: std::sync::OnceLock<WmInfo> = std::sync::OnceLock::new();
+
 pub fn detect() -> WmInfo {
+    CACHE.get_or_init(detect_uncached).clone()
+}
+
+fn detect_uncached() -> WmInfo {
     let mut info = WmInfo::default();
 
     // Prefer the compositor name found in /proc (fastfetch scans /proc).
