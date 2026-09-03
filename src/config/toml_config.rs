@@ -37,6 +37,9 @@ brightColor = true
 # Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
 name = ""
 # Areofetch-like animation: "off" (static, default) or "spin" (animated, q/Ctrl-C to quit)
+# Axes: x / y / z (e.g. "spin x", "spin y", "spin z", "spin xyz", "spin yz")
+# Speed/direction: speed=1.0, speed_x=1.0, speed_y=1.0, speed_z=1.0 (negative = reverse)
+# Full example: animation = "spin y speed=2.0" or "spin xyz speed=1.5 speed_z=-1"
 # animation = "spin"
 
 [logo.padding]

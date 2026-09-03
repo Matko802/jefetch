@@ -18,7 +18,12 @@ const DEFAULT_SHADING: &[&str] = &["░", "▒", "▓", "█"];
 pub struct AnimConfig {
     pub spin_x: bool,
     pub spin_y: bool,
+    pub spin_z: bool,
     pub speed: f32,
+    /// per-axis speed multipliers (1.0 = normal, negative = reverse)
+    pub speed_x: f32,
+    pub speed_y: f32,
+    pub speed_z: f32,
     pub size: f32,
     pub depth: f32,
     pub depth_user_set: bool,
@@ -34,7 +39,11 @@ impl Default for AnimConfig {
         Self {
             spin_x: false,
             spin_y: true,
+            spin_z: false,
             speed: 2.0,
+            speed_x: 1.0,
+            speed_y: 1.0,
+            speed_z: 1.0,
             size: 2.0,
             depth: 2.0,
             depth_user_set: true,
@@ -52,16 +61,32 @@ impl AnimConfig {
         let mut cfg = Self::default();
         if let Some(raw) = s {
             let low = raw.to_ascii_lowercase();
+            // detect axes: tolerate "spin x", "spin=x", "spin: x y z", "xyz", etc.
             let has_x = low.contains('x');
             let has_y = low.contains('y');
-            cfg.spin_x = has_x;
-            cfg.spin_y = has_y;
-            if low.contains("spin") {
-                if !has_x && !has_y {
-                    cfg.spin_y = true;
+            let has_z = low.contains('z');
+            // Only override spin if animation string mentions axes/spin
+            if low.contains("spin") || has_x || has_y || has_z || low.contains("rotate") {
+                if has_x || has_y || has_z {
+                    cfg.spin_x = has_x;
+                    cfg.spin_y = has_y;
+                    cfg.spin_z = has_z;
+                } else if low.contains("spin") {
+                    // bare "spin" -> keep default (spin_y)
                 }
             }
+            if let Some(v) = extract_number(&low, "speed_x") {
+                cfg.speed_x = v;
+            }
+            if let Some(v) = extract_number(&low, "speed_y") {
+                cfg.speed_y = v;
+            }
+            if let Some(v) = extract_number(&low, "speed_z") {
+                cfg.speed_z = v;
+            }
             if let Some(v) = extract_number(&low, "speed") {
+                // generic speed scales all axes unless per-axis already set
+                // (and keeps sign for direction: negative = reverse)
                 cfg.speed = v;
             }
             if let Some(v) = extract_number(&low, "size") {
@@ -566,10 +591,12 @@ pub fn render_frame(
     let mut colorbuf = vec![0i32; h * w];
 
     let mul = frame as f32;
-    let a = if config.spin_x { mul * 0.04 * config.speed } else { 0.0 };
-    let b = if config.spin_y { mul * 0.06 * config.speed } else { 0.0 };
+    let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
+    let b = if config.spin_y { mul * 0.06 * config.speed * config.speed_y } else { 0.0 };
+    let c_ang = if config.spin_z { mul * 0.05 * config.speed * config.speed_z } else { 0.0 };
     let (ca, sa) = (a.cos(), a.sin());
     let (cb, sb) = (b.cos(), b.sin());
+    let (cc, sc) = (c_ang.cos(), c_ang.sin());
 
     let lx = config.light_x;
     let ly = config.light_y;
@@ -605,24 +632,31 @@ pub fn render_frame(
         let nx2 = nx * cb + nz1 * sb;
         let nz2 = -nx * sb + nz1 * cb;
         let ny2 = ny1;
+        // Z rotation (around view axis) — enabled via `spin z`
+        let x3 = x2 * cc - y2 * sc;
+        let y3 = x2 * sc + y2 * cc;
+        let z3 = z2;
+        let nx3 = nx2 * cc - ny2 * sc;
+        let ny3 = nx2 * sc + ny2 * cc;
+        let nz3 = nz2;
 
-        let zc = z2 + K2;
+        let zc = z3 + K2;
         if zc < 0.1 {
             continue;
         }
         let ooz = 1.0 / zc;
-        let xs = (half_aw + k1x2 * x2 * ooz) as i32;
-        let ys = (y_center - k1 * y2 * ooz) as i32;
+        let xs = (half_aw + k1x2 * x3 * ooz) as i32;
+        let ys = (y_center - k1 * y3 * ooz) as i32;
         if xs < 0 || xs >= w as i32 || ys < 0 || ys >= h as i32 {
             continue;
         }
         let idx = ys as usize * w + xs as usize;
         if ooz > zbuf[idx] {
-            let mut diff = nx2 * lx + ny2 * ly + nz2 * lz;
+            let mut diff = nx3 * lx + ny3 * ly + nz3 * lz;
             if diff < 0.0 {
                 diff = 0.0;
             }
-            let mut spec_dot = nx2 * hlx + ny2 * hly + nz2 * hlz;
+            let mut spec_dot = nx3 * hlx + ny3 * hly + nz3 * hlz;
             if spec_dot < 0.0 {
                 spec_dot = 0.0;
             }
