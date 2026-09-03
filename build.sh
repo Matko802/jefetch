@@ -4,16 +4,6 @@
 # musl target, so we route through rustup and pin the toolchain rustc.
 set -euo pipefail
 
-export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-TC="$RUSTUP_HOME/toolchains/stable-x86_64-unknown-linux-gnu"
-
-if [ ! -x "$TC/bin/cargo" ]; then
-    echo "rustup stable toolchain not found at $TC" >&2
-    echo "Run: nix-shell -p rustup --run 'rustup default stable && rustup target add x86_64-unknown-linux-musl'" >&2
-    exit 1
-fi
-
 MODE="${1:-release}"
 TFLAG=""
 if [ "$MODE" = "release" ]; then
@@ -22,14 +12,52 @@ fi
 
 # shellcheck disable=SC2086
 if [ "$MODE" = "test" ]; then
-    RUSTC="$TC/bin/rustc" "$TC/bin/cargo" test --target x86_64-unknown-linux-musl --lib --tests
+    if [ -x "${HOME:-$HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" ] && "${HOME:-$HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" --version >/dev/null 2>&1; then
+        RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" \
+        RUSTC="$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc" \
+        "$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" test --target x86_64-unknown-linux-musl --lib --tests
+    else
+        cargo test --lib --tests
+    fi
     exit $?
 fi
 
-# shellcheck disable=SC2086
-RUSTC="$TC/bin/rustc" "$TC/bin/cargo" build $TFLAG --target x86_64-unknown-linux-musl
+# Prefer rustup musl for static binary, but fall back to plain cargo (works with normal rust)
+if [ -x "${HOME:-$HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" ]; then
+    TC="$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu"
+    export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+    export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+    if "$TC/bin/cargo" --version >/dev/null 2>&1 && "$TC/bin/rustc" --print target-list 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then
+        # shellcheck disable=SC2086
+        RUSTC="$TC/bin/rustc" "$TC/bin/cargo" build $TFLAG --target x86_64-unknown-linux-musl
+        BIN="target/x86_64-unknown-linux-musl/${MODE}/sharkfetch"
+        echo
+        echo "Built (static musl): $BIN"
+        echo "To verify it is static:  ldd $BIN  (should say 'not a dynamic executable')"
+        exit 0
+    fi
+fi
 
-BIN="target/x86_64-unknown-linux-musl/${MODE}/sharkfetch"
+if cargo --version >/dev/null 2>&1; then
+    # Try musl if the toolchain actually has it (rustup or nix develop)
+    if (command -v rustup >/dev/null 2>&1 && rustup target list --installed 2>/dev/null | grep -q "x86_64-unknown-linux-musl") || \
+       (cargo --print target-list 2>/dev/null | grep -q "x86_64-unknown-linux-musl" && rustc --print sysroot 2>/dev/null | xargs -I{} sh -c 'ls {}/lib/rustlib/x86_64-unknown-linux-musl/lib/libcore.rlib 2>/dev/null | grep -q .'); then
+        echo "Building static musl with system cargo..."
+        if cargo build $TFLAG --target x86_64-unknown-linux-musl 2>&1; then
+            BIN="target/x86_64-unknown-linux-musl/${MODE}/sharkfetch"
+            echo
+            echo "Built (static musl): $BIN"
+            echo "To verify it is static:  ldd $BIN  (should say 'not a dynamic executable')"
+            exit 0
+        fi
+        echo "Musl build failed, falling back to dynamic..." >&2
+    fi
+fi
+
+# Fallback: normal cargo (dynamic, works with vanilla rust)
+echo "Building with system cargo (dynamic)..."
+# shellcheck disable=SC2086
+cargo build $TFLAG
+BIN="target/${MODE}/sharkfetch"
 echo
 echo "Built: $BIN"
-echo "To verify it is static:  ldd $BIN  (should say 'not a dynamic executable')"

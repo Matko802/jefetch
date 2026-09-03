@@ -1,15 +1,20 @@
 VERSION ?= 0.1.0
 PREFIX ?= /usr/local
 
-# Build through build.sh which uses rustup musl toolchain for a fully
-# static binary. On NixOS, run inside `nix develop` or use `nix build`.
-all: target/x86_64-unknown-linux-musl/release/sharkfetch
-
-target/x86_64-unknown-linux-musl/release/sharkfetch: Cargo.toml Cargo.lock $(wildcard src/*.rs) $(wildcard src/**/*.rs)
+# Build through build.sh — uses rustup musl if available for a fully
+# static binary, otherwise falls back to plain `cargo build --release`
+# (works with vanilla rust). On NixOS, run inside `nix develop` or use `nix build`.
+all:
 	./build.sh
 
-install: target/x86_64-unknown-linux-musl/release/sharkfetch
-	install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch $(DESTDIR)$(PREFIX)/bin/sharkfetch
+install: all
+	@if [ -f target/x86_64-unknown-linux-musl/release/sharkfetch ]; then \
+		install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch $(DESTDIR)$(PREFIX)/bin/sharkfetch; \
+	elif [ -f target/release/sharkfetch ]; then \
+		install -Dm755 target/release/sharkfetch $(DESTDIR)$(PREFIX)/bin/sharkfetch; \
+	else \
+		echo "No binary found. Run 'make' first." >&2; exit 1; \
+	fi
 
 clean:
 	cargo clean
@@ -36,9 +41,13 @@ deps:
 	else \
 		echo "Unsupported package manager. Install cargo and rustc."; \
 	fi
-	@if ! rustup target list --installed 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then \
-		echo "Adding musl target..."; \
-		rustup target add x86_64-unknown-linux-musl; \
+	@if command -v rustup >/dev/null 2>&1; then \
+		if ! rustup target list --installed 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then \
+			echo "Adding musl target..."; \
+			rustup target add x86_64-unknown-linux-musl || true; \
+		fi; \
+	elif command -v cargo >/dev/null 2>&1; then \
+		echo "Using system cargo (no rustup) — will build dynamic binary if musl target missing"; \
 	fi
 
 .PHONY: all install clean deps
