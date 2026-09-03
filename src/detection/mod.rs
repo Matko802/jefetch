@@ -114,15 +114,19 @@ pub fn fastfetch_json() -> Option<String> {
                 }
             }
         }
-        // No cache: synchronous (first run ever)
-        let out = run_capture_timeout(
-            "/run/current-system/sw/bin/fastfetch",
-            &["--json", "--structure", "title:separator:os:host:kernel:uptime:packages:shell:display:wm:theme:icons:font:cursor:terminal:cpu:gpu:memory:swap:disk:localip:locale:break:colors"],
-            800,
-        )?;
-        let _ = std::fs::create_dir_all(std::path::Path::new(&cache_path).parent().unwrap_or(std::path::Path::new("/tmp")));
-        let _ = std::fs::write(&cache_path, &out);
-        Some(out)
+        // No cache: spawn in background and return None immediately so first run is instant (4 ms) via native detection
+        let cache_clone = cache_path.clone();
+        std::thread::spawn(move || {
+            if let Some(out) = run_capture_timeout(
+                "/run/current-system/sw/bin/fastfetch",
+                &["--json", "--structure", "title:separator:os:host:kernel:uptime:packages:shell:display:wm:theme:icons:font:cursor:terminal:cpu:gpu:memory:swap:disk:localip:locale:break:colors"],
+                800,
+            ) {
+                let _ = std::fs::create_dir_all(std::path::Path::new(&cache_clone).parent().unwrap_or(std::path::Path::new("/tmp")));
+                let _ = std::fs::write(&cache_clone, &out);
+            }
+        });
+        None
     }).clone()
 }
 
@@ -147,29 +151,54 @@ pub fn run_capture_lines(cmd: &str, args: &[&str]) -> Vec<String> {
 }
 
 /// Run a command with a hard timeout and return trimmed stdout on success.
-/// Uses a reader thread so large outputs can't deadlock the child on a full pipe.
+/// Saves/restores termios so a killed `fastfetch` (DECRQSS kitty-query) doesn't leave ECHO off.
 pub fn run_capture_timeout(cmd: &str, args: &[&str], timeout_ms: u64) -> Option<String> {
-    use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel();
-    let cmd = cmd.to_string();
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let saved_stdin = termios_save(libc::STDIN_FILENO);
+    let saved_stdout = termios_save(libc::STDOUT_FILENO);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cmd_s = cmd.to_string();
+    let args_s: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
-        let out = std::process::Command::new(&cmd)
-            .args(&args)
-            .output();
+        let out = std::process::Command::new(&cmd_s).args(&args_s).output();
         let _ = tx.send(out);
     });
-    match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-        Ok(Ok(out)) => {
-            if !out.status.success() {
-                return None;
-            }
-            String::from_utf8(out.stdout)
-                .ok()
-                .map(|s| s.trim().to_string())
-        }
-        Ok(Err(_)) | Err(_) => None,
+    let res = rx.recv_timeout(std::time::Duration::from_millis(timeout_ms));
+    termios_restore(libc::STDIN_FILENO, &saved_stdin);
+    termios_restore(libc::STDOUT_FILENO, &saved_stdout);
+    if res.is_err() {
+        let _ = std::process::Command::new("stty").arg("sane").output();
+        let _ = std::process::Command::new("pkill").args(["-f", cmd]).output();
     }
+    match res {
+        Ok(Ok(out)) if out.status.success() => String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        _ => None,
+    }
+}
+
+fn termios_save(fd: i32) -> Option<libc::termios> {
+    let mut term = unsafe { std::mem::zeroed::<libc::termios>() };
+    if unsafe { libc::tcgetattr(fd, &mut term) } == 0 {
+        Some(term)
+    } else {
+        None
+    }
+}
+fn termios_restore(fd: i32, saved: &Option<libc::termios>) {
+    // Always ensure ECHO and ICANON are on, even if saved state had them off (e.g., after a killed fastfetch)
+    if let Some(mut term) = saved.clone() {
+        term.c_lflag |= libc::ECHO | libc::ICANON;
+        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &term as *const libc::termios); }
+    } else {
+        unsafe {
+            let mut t: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(fd, &mut t) == 0 {
+                t.c_lflag |= libc::ECHO | libc::ICANON;
+                libc::tcsetattr(fd, libc::TCSANOW, &t);
+            }
+        }
+    }
+    // Best-effort stty sane as well, in case tcsetattr didn't cover all flags
+    let _ = std::process::Command::new("stty").arg("sane").output();
 }
 
 /// Scan /proc/<pid>/comm for a process whose basename is in `names`

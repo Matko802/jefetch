@@ -1,8 +1,10 @@
 <div align="center">
 
+<img src="Logo/sharkfetch.png" width="120" alt="sharkfetch logo :3" />
+
 # sharkfetch
 
-Fastfetch clone in pure Rust — static `musl`, Linux-only, 530 logos
+Fastfetch clone in pure Rust — static `musl`, Linux-only
 
 Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
@@ -10,30 +12,26 @@ Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
 ## Features
 
-- Drop-in `fastfetch` replacement for NixOS / Linux
-- 530 ASCII logos (all fastfetch `src/logo/ascii` + `_/unknown`) — one static binary
-- Pure Rust, zero crates except `libc`, fully static `x86_64-unknown-linux-musl` (`not a dynamic executable`)
-- Fast — `~4 ms` warm (`fastfetch` `~63 ms` on same machine), parallel modules, persistent `~/.cache/sharkfetch` for `nix-store` / `fastfetch --json`
-- Identical output to `fastfetch` (NixOS snowflake, Fedora, Arch, etc. — bold + `carryColor`, `$$` → `$`, `padding: top 0 left 0 right 4`)
+- Drop-in `fastfetch` replacement — identical output
+- 530 ASCII logos (all `fastfetch` logos)
+- Pure Rust, zero crates except `libc`
+- Fully static `x86_64-unknown-linux-musl` — `not a dynamic executable`
 
 ## Building
 
-Rust (cargo) is required. No system deps.
+Only Rust (cargo) is required — no system libraries.
 
 ```sh
 git clone https://github.com/Matko802/sharkfetch.git
 cd sharkfetch
-./build.sh          # release (static musl) -> target/x86_64-unknown-linux-musl/release/sharkfetch
-./build.sh debug    # debug
-./build.sh test     # tests
+./build.sh
+sudo install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch /usr/local/bin/sharkfetch
 ```
 
-`build.sh` uses `rustup` `stable-x86_64-unknown-linux-gnu` + `x86_64-unknown-linux-musl` target and does `cargo build --target x86_64-unknown-linux-musl --release --offline`.
-
-On NixOS or any distro with Nix, prefer the flake (no toolchain needed):
+On NixOS or any distro with Nix, prefer the flake (no system packages needed):
 
 ```sh
-nix develop   # shell with cargo + musl toolchain
+nix develop   # drop into a shell with cargo
 ./build.sh
 ```
 
@@ -43,14 +41,7 @@ Prefer not to touch your system at all?
 nix run github:Matko802/sharkfetch
 ```
 
-Manual install:
-
-```sh
-sudo install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch /usr/local/bin/sharkfetch
-sharkfetch
-```
-
-To install somewhere else:
+To install somewhere else instead of `/usr/local`:
 
 ```sh
 install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch $HOME/.local/bin/sharkfetch
@@ -59,31 +50,25 @@ install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch $HOME/.local/
 ### Run it
 
 ```sh
-sharkfetch              # auto-detect OS logo
-sharkfetch --list-logos # 530 names
+sharkfetch
+```
+
+## Usage
+
+```sh
+sharkfetch
+sharkfetch --list-logos
 sharkfetch --help
 ```
 
-Config is auto-created at `~/.config/sharkfetch/config.toml` on first run (reproduces `fastfetch` defaults):
+| Option | Description |
+| ------ | ----------- |
+| `--help` | show help |
+| `--list-logos` | list 530 logos |
+| `--list-modules` | list available modules |
 
-```toml
-modules = ["title", "separator", "os", "host", "kernel", "uptime", "packages", "shell", "display", "wm", "theme", "icons", "font", "cursor", "terminal", "cpu", "gpu", "memory", "swap", "disk", "localip", "locale", "break", "colors"]
-
-[display]
-separator = ": "
-keyColor = "bold_cyan"
-titleColor = "bold_blue"
-
-[logo]
-name = ""               # empty = auto-detect, or "nixos", "arch", "fedora", ...
-
-[logo.padding]
-top = 0
-left = 0
-right = 4
-```
-
-`sharkfetch` also reads `~/.config/fastfetch/config.jsonc` as fallback, so existing `fastfetch` configs work.
+The config file is looked up in `~/.config/sharkfetch/config.toml`, then
+`~/.config/fastfetch/config.jsonc`. It is auto-created on first run.
 
 ## Nix flakes
 
@@ -154,9 +139,8 @@ nix run github:Matko802/sharkfetch
 
 ```sh
 nix develop github:Matko802/sharkfetch
-./build.sh test
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+This project is released under the MIT License. See [LICENSE](https://github.com/Matko802/sharkfetch/blob/main/LICENSE).
