@@ -1,3 +1,4 @@
+pub mod anim;
 pub mod app;
 pub mod common;
 pub mod config;

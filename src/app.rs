@@ -195,7 +195,6 @@ impl App {
     }
 
     fn run_animated(&mut self, _entries: &[ModuleEntry]) -> i32 {
-        // Keep stats identical to static — only the logo spins (areofyl-like fallback)
         self.run_animated_fallback()
     }
 
@@ -214,6 +213,8 @@ impl App {
             default_structure().into_iter().map(ModuleEntry::Name).collect()
         };
         let base_lines = self.render_modules(&entries);
+        // Build anim config from logo.animation ("spin", "spin x", "spin y", etc.)
+        let anim_cfg = crate::anim::AnimConfig::from_animation_str(self.config.logo.animation.as_deref());
         print!("\x1b[?25l\x1b[?1049h");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
@@ -236,40 +237,30 @@ impl App {
         let _tty_guard = tty_file;
         let mut frame: usize = 0;
         let mut out = String::new();
-        // Keep text column fixed - use base logo's width, not per-frame animated width
-        let base_pad = base_logo.width;
-        let base_gap = base_logo.padding_right;
+        // areofyl-style layout: logo canvas (ANIM_WIDTH) on the left, info on
+        // the right, globally centred on the info block.
+        let info_count = base_lines.len();
+        // areofyl-style canvas: tall enough that logo_height reaches 36 (K1=37),
+        // so the projected logo matches areofyl's default size=2 look.
+        let render_height = (info_count + 2).max(36);
+        const GAP: usize = 2;
         loop {
-            // Build animated logo for this frame (spin)
-            let anim_logo = Self::animated_logo(&base_logo, frame);
-            let logo_pad = base_pad;
+            // True 3D port: per-frame 3D projection + Blinn-Phong
+            let anim_logo = crate::anim::render_frame(&base_logo, frame, &anim_cfg, render_height, info_count);
             out.clear();
             out.push_str("\x1b[2J\x1b[H");
-            let n = base_lines.len().max(anim_logo.lines.len());
+            let n = anim_logo.lines.len();
             for row in 0..n {
-                let logo_line = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
-                let text_line = base_lines.get(row).map(|s| s.as_str()).unwrap_or("");
-                if logo_line.is_empty() && text_line.is_empty() {
-                    out.push('\n');
-                    continue;
-                }
-                let lcol = if logo_line.is_empty() {
-                    " ".repeat(logo_pad)
-                } else {
-                    logo_line.to_string()
-                };
-                let lcol_visible = crate::print::format::visible_len(&lcol);
-                let pad_needed = logo_pad.saturating_sub(lcol_visible);
-                let gap = base_gap;
+                // Logo canvas row (blank-filled to ANIM_WIDTH); already coloured.
+                let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
                 let mut line = String::new();
-                if !lcol.trim().is_empty() {
-                    line.push_str(&lcol);
-                    line.push_str(&" ".repeat(pad_needed));
-                    line.push_str(&" ".repeat(gap));
-                } else if !text_line.is_empty() {
-                    line.push_str(&" ".repeat(logo_pad + gap));
+                line.push_str(logo_canvas);
+                // Info line: row 1..=info_count holds the k-th info line.
+                let info_row = row as isize - 1;
+                if info_row >= 0 && (info_row as usize) < info_count {
+                    line.push_str(&" ".repeat(GAP));
+                    line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                 }
-                line.push_str(text_line);
                 out.push_str(line.trim_end());
                 out.push('\n');
             }
@@ -321,69 +312,10 @@ impl App {
         }
     }
 
-    /// Areofetch-like spin: lightweight horizontal sine-shift that keeps the
-    /// text column fixed and looks smooth. For true 3D donut.c 1:1, `run_animated`
-    /// delegates to the real `fetch` binary when stdout is a tty.
-    fn animated_logo(base: &ResolvedLogo, frame: usize) -> ResolvedLogo {
-        // Simple smooth horizontal spin: each row shifts by sine wave
-        let stripped: Vec<String> = base.lines.iter().map(|l| strip_ansi(l)).collect();
-        let h = stripped.len();
-        let w = stripped.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-        if w == 0 || h == 0 {
-            return base.clone();
-        }
-        // 24 frames per cycle, shift up to 2 chars with sine
-        let shift = ((frame as f32 * 0.5).sin() * 2.0) as isize;
-        let mut out_lines: Vec<String> = Vec::new();
-        for line in stripped {
-            let len = line.chars().count() as isize;
-            if len == 0 {
-                out_lines.push(String::new());
-                continue;
-            }
-            // Cyclic shift
-            let s = (shift % len + len) % len;
-            let chars: Vec<char> = line.chars().collect();
-            let mut shifted = String::new();
-            for i in 0..len as usize {
-                shifted.push(chars[(i + s as usize) % len as usize]);
-            }
-            // Keep original padding (visible width stays the same, so text column doesn't jump)
-            let orig_width = line.chars().count();
-            let shifted_width = shifted.chars().count();
-            if shifted_width < orig_width {
-                shifted.push_str(&" ".repeat(orig_width - shifted_width));
-            }
-            out_lines.push(shifted);
-        }
-        // Re-add simple color (first line's color) for the whole logo during spin
-        let color = base.lines.first().and_then(|l| {
-            if let Some(start) = l.find("\x1b[") {
-                if let Some(end) = l[start..].find('m') {
-                    return Some(l[start..start+end+1].to_string());
-                }
-            }
-            None
-        }).unwrap_or_default();
-        let reset = crate::print::color::RESET;
-        let mut colored: Vec<String> = Vec::new();
-        for line in out_lines {
-            if line.trim().is_empty() {
-                colored.push(String::new());
-            } else if color.is_empty() {
-                colored.push(line);
-            } else {
-                colored.push(format!("{}{}{}", color, line, reset));
-            }
-        }
-        let n = colored.len();
-        let width = colored.iter().map(|l| crate::print::format::visible_len(l)).max().unwrap_or(0);
-        return ResolvedLogo {
-            lines: colored,
-            colors: vec![String::new(); n],
-            width,
-            padding_right: base.padding_right,
-        };
+    // Kept for compatibility but now unused; 3D lives in `crate::anim`.
+    #[allow(dead_code)]
+    fn animated_logo(base: &ResolvedLogo, _frame: usize) -> ResolvedLogo {
+        base.clone()
     }
 
     fn pick_logo(&mut self) {
