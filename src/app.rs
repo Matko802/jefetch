@@ -237,25 +237,23 @@ impl App {
         let _tty_guard = tty_file;
         let mut frame: usize = 0;
         let mut out = String::new();
-        // areofyl-style layout: logo canvas (ANIM_WIDTH) on the left, info on
-        // the right, globally centred on the info block.
+        // areofyl 1:1 layout: logo canvas (ANIM_WIDTH=60) on the left,
+        // info on the right, logo vertically centred on the info block.
         let info_count = base_lines.len();
-        // areofyl-style canvas: tall enough that logo_height reaches 36 (K1=37),
-        // so the projected logo matches areofyl's default size=2 look.
         let render_height = (info_count + 2).max(36);
         const GAP: usize = 2;
         loop {
-            // True 3D port: per-frame 3D projection + Blinn-Phong
+            // True 3D port: per-frame 3D projection + Blinn-Phong — 1:1 fetch.c
             let anim_logo = crate::anim::render_frame(&base_logo, frame, &anim_cfg, render_height, info_count);
             out.clear();
             out.push_str("\x1b[2J\x1b[H");
             let n = anim_logo.lines.len();
             for row in 0..n {
-                // Logo canvas row (blank-filled to ANIM_WIDTH); already coloured.
+                // Logo canvas row (blank-filled to ANIM_WIDTH=60); already coloured.
                 let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
                 let mut line = String::new();
                 line.push_str(logo_canvas);
-                // Info line: row 1..=info_count holds the k-th info line.
+                // Info line: row 1..=info_count holds the k-th info line (fetch_start=1).
                 let info_row = row as isize - 1;
                 if info_row >= 0 && (info_row as usize) < info_count {
                     line.push_str(&" ".repeat(GAP));

@@ -10,9 +10,9 @@ const ANIM_WIDTH: i32 = 60;
 const GAP: usize = 2;
 const MAX_POINTS: usize = 400_000;
 
-// Default shading used when no custom ramp is configured: solid blocks so the
-// spinning logo reads as a solid coloured object (matches areofyl's solid look).
-const DEFAULT_SHADING: &[&str] = &["▀", "▁", "▂", "█"];
+// Solid blocks — 1:1 to fetch --shading-mode blocks (visually matches
+// areofyl's solid look; ascii ".,-~:;=!*#$@" is fetch default but too faint)
+const DEFAULT_SHADING: &[&str] = &["░", "▒", "▓", "█"];
 
 #[derive(Debug, Clone)]
 pub struct AnimConfig {
@@ -37,10 +37,10 @@ impl Default for AnimConfig {
             speed: 2.0,
             size: 2.0,
             depth: 2.0,
-            depth_user_set: false,
+            depth_user_set: true,
             height: 0,
-            light_x: 0.8165,
-            light_y: -0.4082,
+            light_x: -0.4082,
+            light_y: 0.8165,
             light_z: -0.4082,
             shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
         }
@@ -235,9 +235,7 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
                 actual = 1;
             }
             let ch = &s[i..i + actual];
-            if ch != " " {
-                row.push((ch.to_string(), cur));
-            }
+            row.push((ch.to_string(), cur));
             i += actual;
         }
         if row.len() > max_cols {
@@ -246,6 +244,48 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
         cells.push(row);
     }
     let rows = cells.len();
+    // Fallback: many builtin logos store colour in `logo.colors` (e.g. "34")
+    // not inline ANSI. Treat that as has_ansi so the 3D keeps the logo colour.
+    if !has_ansi {
+        for c in &logo.colors {
+            if !c.is_empty() {
+                // c is like "34" or "1;34" — extract the fg number
+                for part in c.split(';') {
+                    if let Ok(num) = part.parse::<i32>() {
+                        if (30..=37).contains(&num) || (90..=97).contains(&num) {
+                            has_ansi = true;
+                            break;
+                        }
+                    }
+                }
+                if has_ansi { break; }
+            }
+        }
+    }
+    // If still no ANSI but we have a base colour, inject it into cells
+    // so the point cloud gets coloured instead of grey.
+    if has_ansi {
+        // Fill in per-cell colour from logo.colors where cell colour is 0
+        for (r, row) in cells.iter_mut().enumerate() {
+            if r >= logo.colors.len() { break; }
+            let col_s = &logo.colors[r];
+            if col_s.is_empty() { continue; }
+            let mut col_num = 0;
+            for part in col_s.split(';') {
+                if let Ok(num) = part.parse::<i32>() {
+                    if (30..=37).contains(&num) || (90..=97).contains(&num) {
+                        col_num = num;
+                    }
+                }
+            }
+            if col_num == 0 { continue; }
+            for cell in row.iter_mut() {
+                if cell.1 == 0 {
+                    cell.1 = col_num;
+                }
+            }
+        }
+    }
     (cells, has_ansi, rows, max_cols)
 }
 
