@@ -2,7 +2,7 @@
 
 # sharkfetch
 
-Rust Based Musl binary Cli System stat fetcher
+Rust Based Cli System Stat fetcher
 
 Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
@@ -10,10 +10,10 @@ Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
 ## Features
 
-- Drop-in `fastfetch` replacement — identical output
-- 530 ASCII logos (all `fastfetch` logos)
-- Pure Rust, zero crates except `libc`
-- Fully static `x86_64-unknown-linux-musl` — `not a dynamic executable`
+- Drop-in `fastfetch` replacement
+- All ASCII logos from  `fastfetch`
+- Pure Rust
+- Uses Musl
 
 ## Building
 
