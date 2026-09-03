@@ -195,34 +195,7 @@ impl App {
     }
 
     fn run_animated(&mut self, _entries: &[ModuleEntry]) -> i32 {
-        // 1:1 areofyl/fetch when stdout is a tty — delegate to `fetch` for true 3D donut.c.
-        // When piped (e.g., `| cat`, `> file`, `timeout ... > file`), use our 2D fallback
-        // which works with any stdout and keeps stats identical (only logo spins).
-        let is_tty_out = unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 };
-        if is_tty_out {
-            let logo_name = self.config.logo.source.clone().filter(|s| !s.is_empty())
-                .or_else(|| {
-                    let id = crate::detection::os::detect().id.to_ascii_lowercase();
-                    crate::logo::by_name(&id).map(|l| l.name.to_string())
-                })
-                .unwrap_or_else(|| "nixos".to_string());
-            let mut cmd = std::process::Command::new("fetch");
-            cmd.arg("-l").arg(&logo_name);
-            if let Some(anim) = &self.config.logo.animation {
-                let low = anim.to_ascii_lowercase();
-                if low.contains("spin=x") || low == "x" {
-                    cmd.arg("--rotate-x");
-                } else if low.contains("spin=y") || low == "y" {
-                    cmd.arg("--rotate-y");
-                }
-            }
-            cmd.stdin(std::process::Stdio::inherit());
-            cmd.stdout(std::process::Stdio::inherit());
-            cmd.stderr(std::process::Stdio::inherit());
-            if let Ok(status) = cmd.status() {
-                return status.code().unwrap_or(0);
-            }
-        }
+        // Keep stats identical to static — only the logo spins (areofyl-like fallback)
         self.run_animated_fallback()
     }
 
