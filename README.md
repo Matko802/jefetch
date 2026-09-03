@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="Logo/sharkfetch.png" width="120" alt="sharkfetch logo :3" />
-
 # sharkfetch
 
 Fastfetch clone in pure Rust — static `musl`, Linux-only
