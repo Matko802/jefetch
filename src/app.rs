@@ -62,14 +62,7 @@ impl App {
                     return;
                 }
             }
-            // Check fastfetch's jsonc config as a fallback for compatibility.
-            for dir in config_search_dirs() {
-                let candidate = format!("{}/fastfetch/config.jsonc", dir);
-                if let Some(cfg) = load_config_file(&candidate) {
-                    self.config = cfg;
-                    return;
-                }
-            }
+
         }
     }
 

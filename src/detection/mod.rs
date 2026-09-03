@@ -74,17 +74,18 @@ pub fn getenv(name: &str) -> Option<String> {
 /// be exactly like fastfetch without reimplementing every detection.
 /// Excludes terminalfont which does a DECRQSS kitty-query that leaks as ^[P1+r garbage
 /// and causes the 1s stutter when cache misses.
+#[allow(dead_code)]
 pub fn fastfetch_json() -> Option<String> {
     use std::sync::OnceLock;
     static CACHE: OnceLock<Option<String>> = OnceLock::new();
     CACHE.get_or_init(|| {
         let cache_path = {
             if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
-                format!("{}/sharkfetch/fastfetch.json", dir.to_string_lossy())
+                format!("{}/sharkfetch/cache.json", dir.to_string_lossy())
             } else if let Some(home) = std::env::var_os("HOME") {
-                format!("{}/.cache/sharkfetch/fastfetch.json", home.to_string_lossy())
+                format!("{}/.cache/sharkfetch/cache.json", home.to_string_lossy())
             } else {
-                "/tmp/sharkfetch-fastfetch.json".to_string()
+                "/tmp/sharkfetch-cache.json".to_string()
             }
         };
         // Use file cache if fresh (<60s) — keeps warm runs instant (4 ms) and avoids the kitty-query stutter

@@ -299,9 +299,6 @@ fn render_de(cfg: &Config) -> Option<ModuleOutput> {
 }
 
 fn render_terminal(cfg: &Config) -> Option<ModuleOutput> {
-    if let Some(v) = fastfetch_terminal() {
-        return Some(render_single("Terminal", v, cfg));
-    }
     let t = crate::detection::terminal::detect();
     if t.name.is_empty() {
         return None;
@@ -317,6 +314,7 @@ fn render_terminal(cfg: &Config) -> Option<ModuleOutput> {
     Some(render_single("Terminal", value, cfg))
 }
 
+#[allow(dead_code)]
 fn fastfetch_terminal() -> Option<String> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;
@@ -412,9 +410,6 @@ fn render_host(_cfg: &Config) -> Option<ModuleOutput> {
 }
 
 fn render_cpu(inst: &ModuleInstance) -> Option<ModuleOutput> {
-    if let Some(v) = fastfetch_cpu() {
-        return Some(render_single("CPU", v, &Config::default()));
-    }
     use crate::config::json::JsonValue;
     let c = crate::detection::cpu::detect();
     if c.model.is_empty() {
@@ -461,6 +456,7 @@ fn render_cpu(inst: &ModuleInstance) -> Option<ModuleOutput> {
     Some(render_single("CPU", value, &Config::default()))
 }
 
+#[allow(dead_code)]
 fn fastfetch_cpu() -> Option<String> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;
@@ -489,9 +485,6 @@ fn fastfetch_cpu() -> Option<String> {
 }
 
 fn render_gpu(_cfg: &Config) -> Option<ModuleOutput> {
-    if let Some(vals) = fastfetch_gpu() {
-        return Some(ModuleOutput::supported("GPU", vals));
-    }
     let gpus = crate::detection::gpu::detect();
     if gpus.is_empty() {
         return None;
@@ -508,6 +501,7 @@ fn render_gpu(_cfg: &Config) -> Option<ModuleOutput> {
     Some(ModuleOutput::supported("GPU", values))
 }
 
+#[allow(dead_code)]
 fn fastfetch_gpu() -> Option<Vec<String>> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;
@@ -536,10 +530,6 @@ fn fastfetch_gpu() -> Option<Vec<String>> {
 }
 
 fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
-    // Try fastfetch JSON first for identical output.
-    if let Some(out) = fastfetch_display() {
-        return Some(out);
-    }
     let ds = crate::detection::display::detect();
     if ds.is_empty() {
         return None;
@@ -562,6 +552,7 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
     Some(ModuleOutput::supported("Display", values))
 }
 
+#[allow(dead_code)]
 fn fastfetch_display() -> Option<ModuleOutput> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;
@@ -607,6 +598,7 @@ fn fastfetch_display() -> Option<ModuleOutput> {
     None
 }
 
+#[allow(dead_code)]
 fn fastfetch_disk(_inst: &ModuleInstance) -> Option<ModuleOutput> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;
@@ -663,9 +655,6 @@ fn fastfetch_disk(_inst: &ModuleInstance) -> Option<ModuleOutput> {
 }
 
 fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
-    if let Some(out) = fastfetch_disk(inst) {
-        return Some(out);
-    }
     use crate::config::json::JsonValue;
     let folders: Vec<String> = if let Some(raw) = &inst.raw {
         if let JsonValue::Obj(m) = raw {
@@ -778,9 +767,6 @@ fn render_dns(_cfg: &Config) -> Option<ModuleOutput> {
 }
 
 fn render_localip(_cfg: &Config) -> Option<ModuleOutput> {
-    if let Some(v) = fastfetch_localip() {
-        return Some(v);
-    }
     let ips = crate::detection::localip::detect();
     if ips.is_empty() {
         return None;
@@ -799,6 +785,7 @@ fn render_localip(_cfg: &Config) -> Option<ModuleOutput> {
     Some(ModuleOutput::supported("Local IP", values))
 }
 
+#[allow(dead_code)]
 fn fastfetch_localip() -> Option<ModuleOutput> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;
@@ -870,16 +857,6 @@ fn render_publicip(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput>
 }
 
 fn render_theme(_cfg: &Config, which: &str) -> Option<ModuleOutput> {
-    if let Some(v) = fastfetch_theme(which) {
-        let key = match which {
-            "theme" => "Theme",
-            "icons" => "Icons",
-            "cursor" => "Cursor",
-            "font" => "Font",
-            _ => "Theme",
-        };
-        return Some(render_single(key, v, _cfg));
-    }
     let t = crate::detection::theme::detect();
     let mut value = String::new();
     let mut key = "Theme";
@@ -908,6 +885,7 @@ fn render_theme(_cfg: &Config, which: &str) -> Option<ModuleOutput> {
     Some(render_single(key, value, _cfg))
 }
 
+#[allow(dead_code)]
 fn fastfetch_theme(which: &str) -> Option<String> {
     let json = crate::detection::fastfetch_json()?;
     let root = crate::config::parse(&json).ok()?;

@@ -10,20 +10,7 @@ pub struct PackagesInfo {
 pub fn detect() -> PackagesInfo {
     let mut info = PackagesInfo::default();
 
-    // Try to get exact counts from fastfetch's JSON (most accurate, matches fastfetch 1:1).
-    // Fastfetch is at /run/current-system/sw/bin/fastfetch on NixOS.
-    if let Some(fast) = try_fastfetch_json() {
-        for (k, v) in fast {
-            if v > 0 {
-                info.amounts.push((k, v));
-            }
-        }
-        if !info.amounts.is_empty() {
-            return info;
-        }
-    }
-
-    // Fallback: manual Nix + flatpak counts with fastfetch's isValidNixPkg filtering.
+    // Manual Nix + flatpak counts with fastfetch's isValidNixPkg filtering.
     let mut nix_system = 0;
     let mut nix_user = 0;
     if std::path::Path::new("/nix/var/nix/profiles/system").exists() {
@@ -60,57 +47,6 @@ pub fn detect() -> PackagesInfo {
     }
 
     info
-}
-
-fn try_fastfetch_json() -> Option<Vec<(String, usize)>> {
-    // Use cached fastfetch JSON if recent (10s) to avoid spawning fastfetch every run.
-    let cache_path = {
-        if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
-            format!("{}/sharkfetch/fastfetch-packages.json", dir.to_string_lossy())
-        } else if let Some(home) = std::env::var_os("HOME") {
-            format!("{}/.cache/sharkfetch/fastfetch-packages.json", home.to_string_lossy())
-        } else {
-            "/tmp/sharkfetch-fastfetch-packages.json".to_string()
-        }
-    };
-    let use_cache = std::fs::metadata(&cache_path)
-        .and_then(|m| m.modified())
-        .map(|t| t.elapsed().map(|e| e.as_secs() < 10).unwrap_or(false))
-        .unwrap_or(false);
-    let json_str = if use_cache {
-        std::fs::read_to_string(&cache_path).ok()?
-    } else {
-        let out = run_capture_timeout(
-            "/run/current-system/sw/bin/fastfetch",
-            &["--json"],
-            800,
-        )?;
-        let _ = std::fs::create_dir_all(std::path::Path::new(&cache_path).parent().unwrap_or(std::path::Path::new("/tmp")));
-        let _ = std::fs::write(&cache_path, &out);
-        out
-    };
-    // Very cheap parse: look for "flatpakSystem", "flatpakUser", "nixSystem", "nixUser"
-    let mut res = Vec::new();
-    for (key, label) in [
-        ("flatpakSystem", "flatpak-system"),
-        ("flatpakUser", "flatpak-user"),
-        ("nixSystem", "nix-system"),
-        ("nixUser", "nix-user"),
-    ] {
-        if let Some(idx) = json_str.find(&format!("\"{}\"", key)) {
-            let substr = &json_str[idx..];
-            if let Some(colon) = substr.find(':') {
-                let rest = &substr[colon + 1..];
-                let num_str: String = rest.chars().skip_while(|c| !c.is_ascii_digit()).take_while(|c| c.is_ascii_digit()).collect();
-                if let Ok(n) = num_str.parse::<usize>() {
-                    if n > 0 {
-                        res.push((label.to_string(), n));
-                    }
-                }
-            }
-        }
-    }
-    if res.is_empty() { None } else { Some(res) }
 }
 
 fn count_flatpak_system() -> usize {
