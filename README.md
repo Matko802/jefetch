@@ -2,7 +2,7 @@
 
 # sharkfetch
 
-Fastfetch clone in pure Rust — static `musl`, Linux-only
+Rust Based Musl binary Cli System stat fetcher
 
 Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
