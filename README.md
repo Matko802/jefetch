@@ -1,8 +1,10 @@
 <div align="center">
 
+<img src="Logo/sharkfetch.png" width="120" alt="sharkfetch logo :3" />
+
 # sharkfetch
 
-Rust Based Cli System Stat fetcher
+Fastfetch clone in pure Rust — static `musl`, Linux-only
 
 Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
@@ -10,10 +12,11 @@ Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 
 ## Features
 
-- Drop-in `fastfetch` replacement
-- All ASCII logos from  `fastfetch`
-- Pure Rust
-- Uses Musl
+- Drop-in `fastfetch` replacement — identical output
+- 530 ASCII logos (all `fastfetch` logos)
+- Pure Rust, zero crates except `libc`
+- Fully static `x86_64-unknown-linux-musl` — `not a dynamic executable`
+- Areofetch-like animated logo (`animation = "spin"` in config, `--static` to force static, `q`/`Ctrl-C` to quit)
 
 ## Building
 ```sh
@@ -27,7 +30,8 @@ sudo make install
 ## Usage
 
 ```sh
-sharkfetch
+sharkfetch                 # static (default)
+sharkfetch --static        # force static even if config has animation=spin
 sharkfetch --list-logos
 sharkfetch --help
 ```
@@ -35,10 +39,21 @@ sharkfetch --help
 | Option | Description |
 | ------ | ----------- |
 | `--help` | show help |
+| `--static` | force static (no animation) |
 | `--list-logos` | show all logos |
 | `--list-modules` | list of available modules |
 
-The config file is located in `~/.config/sharkfetch/`
+The config file is looked up in `~/.config/sharkfetch/config.toml`, then `~/.config/fastfetch/config.jsonc`. It is auto-created on first run.
+
+Animated like `areofetch` — add to `~/.config/sharkfetch/config.toml`:
+
+```toml
+[logo]
+name = "nixos"
+animation = "spin"  # "spin" to animate, "off"/"static" for static
+```
+
+Then `sharkfetch` will animate until you press `q` or `Ctrl-C`; `sharkfetch --static` forces one static frame.
 
 ## Any distro with Nix:
 
