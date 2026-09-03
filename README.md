@@ -24,15 +24,16 @@ Only Rust (cargo) is required — no system libraries.
 ```sh
 git clone https://github.com/Matko802/sharkfetch.git
 cd sharkfetch
-./build.sh
-sudo install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch /usr/local/bin/sharkfetch
+make deps
+make
+sudo make install
 ```
 
 On NixOS or any distro with Nix, prefer the flake (no system packages needed):
 
 ```sh
 nix develop   # drop into a shell with cargo
-./build.sh
+make          # build inside the dev shell
 ```
 
 Prefer not to touch your system at all?
@@ -44,7 +45,7 @@ nix run github:Matko802/sharkfetch
 To install somewhere else instead of `/usr/local`:
 
 ```sh
-install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch $HOME/.local/bin/sharkfetch
+make PREFIX=$HOME/.local install
 ```
 
 ### Run it
