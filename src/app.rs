@@ -12,9 +12,11 @@ pub struct CliOptions {
     pub config_path: Option<String>,
     pub no_config: bool,
     pub json: bool,
+    pub force_static: bool,
 }
 
 /// A resolved logo: plain lines plus the ANSI color for each line.
+#[derive(Debug, Clone)]
 pub struct ResolvedLogo {
     pub lines: Vec<String>,
     pub colors: Vec<String>,
@@ -41,7 +43,13 @@ impl App {
     pub fn load_config(&mut self) {
         if !self.options.no_config {
             if let Some(p) = &self.options.config_path {
-                if let Some(cfg) = load_config_file(p) {
+                // Handle both .toml (sharkfetch) and .jsonc (fastfetch) for -c
+                let cfg = if p.ends_with(".toml") {
+                    load_toml_config_file(p)
+                } else {
+                    load_config_file(p)
+                };
+                if let Some(cfg) = cfg {
                     self.config = cfg;
                     return;
                 }
@@ -81,6 +89,28 @@ impl App {
         None
     }
 
+    fn should_animate(&self) -> bool {
+        if self.options.force_static {
+            return false;
+        }
+        if let Some(anim) = &self.config.logo.animation {
+            let a = anim.to_ascii_lowercase();
+            // "off", "none", "static", "false" => no animation
+            if a == "off" || a == "none" || a == "static" || a == "false" || a == "0" {
+                return false;
+            }
+            // "spin", "spin xyz", "areofetch", etc. => animate
+            if a.contains("spin") || a.contains("areo") || a.contains("rotate") || a == "on" || a == "true" || a == "1" {
+                return true;
+            }
+            // Any non-empty animation string means animate (for future types)
+            if !a.trim().is_empty() {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn run(&mut self) -> i32 {
         self.load_config();
         // Create default config only if none was loaded (first run).
@@ -116,6 +146,11 @@ impl App {
         if self.options.json {
             self.print_json(&entries);
             return 0;
+        }
+
+        // Areofetch-like animated mode
+        if self.should_animate() {
+            return self.run_animated(&entries);
         }
 
         let lines = self.render_modules(&entries);
@@ -164,6 +199,221 @@ impl App {
 
         print!("{}", out);
         0
+    }
+
+    fn run_animated(&mut self, entries: &[ModuleEntry]) -> i32 {
+        let base_logo = match &self.logo {
+            Some(l) => l.clone(),
+            None => return 0,
+        };
+        let base_lines = self.render_modules(entries);
+        // Hide cursor, save screen
+        print!("\x1b[?25l\x1b[?1049h");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+
+        // Put tty in raw mode to read q/Ctrl-C without Enter — use /dev/tty if stdin is piped
+        let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
+        let mut raw_term = orig_term;
+        let mut tty_fd: i32 = -1;
+        // Try /dev/tty first, fallback to stdin
+        let tty_file = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").ok();
+        if let Some(f) = &tty_file {
+            use std::os::unix::io::AsRawFd;
+            tty_fd = f.as_raw_fd();
+            if unsafe { libc::tcgetattr(tty_fd, &mut orig_term) } == 0 {
+                raw_term = orig_term;
+                raw_term.c_lflag &= !(libc::ICANON | libc::ECHO);
+                raw_term.c_cc[libc::VMIN as usize] = 0;
+                raw_term.c_cc[libc::VTIME as usize] = 0;
+                unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, &raw_term); }
+            } else {
+                tty_fd = -1;
+            }
+        }
+        let is_tty = tty_fd != -1;
+        // Keep tty_file alive for the loop
+        let _tty_guard = tty_file;
+
+        let mut frame: usize = 0;
+        let mut out = String::new();
+        loop {
+            // Build animated logo for this frame (spin)
+            let anim_logo = Self::animated_logo(&base_logo, frame);
+            let logo_pad = anim_logo.width;
+            out.clear();
+            // Clear screen and home
+            out.push_str("\x1b[2J\x1b[H");
+            let n = base_lines.len().max(anim_logo.lines.len());
+            for row in 0..n {
+                let logo_line = anim_logo
+                    .lines
+                    .get(row)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let text_line = base_lines.get(row).map(|s| s.as_str()).unwrap_or("");
+                if logo_line.is_empty() && text_line.is_empty() {
+                    out.push('\n');
+                    continue;
+                }
+                let lcol = if logo_line.is_empty() {
+                    " ".repeat(logo_pad)
+                } else {
+                    // anim_logo lines are already colored with carryColor
+                    logo_line.to_string()
+                };
+                let lcol_visible = crate::print::format::visible_len(&lcol);
+                let pad_needed = logo_pad.saturating_sub(lcol_visible);
+                let gap = anim_logo.padding_right;
+                let mut line = String::new();
+                if !lcol.trim().is_empty() {
+                    line.push_str(&lcol);
+                    line.push_str(&" ".repeat(pad_needed));
+                    line.push_str(&" ".repeat(gap));
+                } else if !text_line.is_empty() {
+                    line.push_str(&" ".repeat(logo_pad + gap));
+                }
+                line.push_str(text_line);
+                // Trim trailing spaces like static mode
+                let trimmed = line.trim_end();
+                out.push_str(trimmed);
+                out.push('\n');
+            }
+            // Footer hint
+            out.push_str("\n\x1b[2m[press q or Ctrl-C to quit]\x1b[0m\n");
+            print!("{}", out);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+
+            // Poll for q / Ctrl-C / Esc with 80ms frame time (~12.5 FPS)
+            for _ in 0..8 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                let mut should_quit = false;
+                // Check /dev/tty if available
+                if is_tty && tty_fd != -1 {
+                    let mut buf = [0u8; 16];
+                    let n = unsafe { libc::read(tty_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                    if n > 0 {
+                        for &b in &buf[..n as usize] {
+                            if b == b'q' || b == b'Q' || b == 0x03 || b == 0x1b {
+                                should_quit = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Also check stdin (for piped q, like echo "q" | sharkfetch)
+                if !should_quit {
+                    let mut buf = [0u8; 16];
+                    // Make stdin non-blocking for this check
+                    let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
+                    if flags != -1 {
+                        unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK); }
+                        let n = unsafe { libc::read(libc::STDIN_FILENO, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                        if n > 0 {
+                            for &b in &buf[..n as usize] {
+                                if b == b'q' || b == b'Q' || b == 0x03 {
+                                    should_quit = true;
+                                    break;
+                                }
+                            }
+                        }
+                        unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags); }
+                    }
+                }
+                if should_quit {
+                    // Restore cursor and screen
+                    print!("\x1b[?1049l\x1b[?25h");
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    if is_tty && tty_fd != -1 {
+                        unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, &orig_term); }
+                    }
+                    return 0;
+                }
+            }
+            frame = frame.wrapping_add(1);
+        }
+    }
+
+    /// Areofetch-like spin: 4-frame 90° rotation of the ASCII art.
+    /// For non-square logos we pad to a square, rotate, then trim.
+    fn animated_logo(base: &ResolvedLogo, frame: usize) -> ResolvedLogo {
+        let spin = frame % 4;
+        if spin == 0 {
+            return base.clone();
+        }
+        // Strip ANSI for geometry, keep original lines for fallback
+        let stripped: Vec<String> = base.lines.iter().map(|l| strip_ansi(l)).collect();
+        let h = stripped.len();
+        let w = stripped.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let n = h.max(w).max(1);
+        // Build n x n grid padded with spaces
+        let mut grid: Vec<Vec<char>> = vec![vec![' '; n]; n];
+        for (y, line) in stripped.iter().enumerate() {
+            for (x, ch) in line.chars().enumerate() {
+                if y < n && x < n {
+                    grid[y][x] = ch;
+                }
+            }
+        }
+        // Rotate
+        let rotated: Vec<Vec<char>> = match spin {
+            1 => { // 90° clockwise
+                let mut r = vec![vec![' '; n]; n];
+                for y in 0..n { for x in 0..n { r[x][n-1-y] = grid[y][x]; } }
+                r
+            }
+            2 => { // 180°
+                let mut r = vec![vec![' '; n]; n];
+                for y in 0..n { for x in 0..n { r[n-1-y][n-1-x] = grid[y][x]; } }
+                r
+            }
+            3 => { // 270° clockwise (90° ccw)
+                let mut r = vec![vec![' '; n]; n];
+                for y in 0..n { for x in 0..n { r[n-1-x][y] = grid[y][x]; } }
+                r
+            }
+            _ => grid,
+        };
+        // Convert back to lines, trim trailing spaces, re-add simple color (first line's color)
+        let mut out_lines: Vec<String> = Vec::new();
+        for row in rotated {
+            let s: String = row.into_iter().collect();
+            let trimmed = s.trim_end().to_string();
+            if trimmed.is_empty() {
+                out_lines.push(String::new());
+            } else {
+                // Keep original first color for the whole logo during spin (simple)
+                let color = base.lines.first().map(|l| {
+                    // Extract leading ANSI if any
+                    if let Some(start) = l.find("\x1b[") {
+                        if let Some(end) = l[start..].find('m') {
+                            return l[start..start+end+1].to_string();
+                        }
+                    }
+                    String::new()
+                }).unwrap_or_default();
+                let reset = crate::print::color::RESET;
+                if color.is_empty() {
+                    out_lines.push(trimmed);
+                } else {
+                    out_lines.push(format!("{}{}{}", color, trimmed, reset));
+                }
+            }
+        }
+        // Trim leading/trailing empty lines for tighter spin
+        while out_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) && out_lines.len() > 1 {
+            out_lines.remove(0);
+        }
+        while out_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) && out_lines.len() > 1 {
+            out_lines.pop();
+        }
+        let width = out_lines.iter().map(|l| crate::print::format::visible_len(l)).max().unwrap_or(0);
+        let n_lines = out_lines.len();
+        ResolvedLogo {
+            lines: out_lines,
+            colors: vec![String::new(); n_lines],
+            width,
+            padding_right: base.padding_right,
+        }
     }
 
     fn pick_logo(&mut self) {

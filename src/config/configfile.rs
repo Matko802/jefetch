@@ -19,6 +19,8 @@ pub struct LogoConfig {
     pub logo_key: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Areofetch-like animation: "off"/"static" = no animation, "spin" = spinning logo
+    pub animation: Option<String>,
 }
 
 impl LogoConfig {
@@ -75,8 +77,19 @@ impl LogoConfig {
                     }
                     "width" => l.width = v.as_u64().map(|x| x as u32),
                     "height" => l.height = v.as_u64().map(|x| x as u32),
+                    "animation" => {
+                        if let Some(s) = v.as_str() {
+                            l.animation = Some(s.to_string());
+                        }
+                    }
                     _ => {}
                 }
+            }
+        }
+        // Also support top-level "animation" string like "spin" or "spin xyz"
+        if l.animation.is_none() {
+            if let Some(v) = root.get("animation").and_then(|v| v.as_str()) {
+                l.animation = Some(v.to_string());
             }
         }
         l

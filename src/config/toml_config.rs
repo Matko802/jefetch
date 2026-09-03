@@ -36,6 +36,8 @@ brightColor = true
 [logo]
 # Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
 name = ""
+# Areofetch-like animation: "off" (static, default) or "spin" (animated, q/Ctrl-C to quit)
+# animation = "spin"
 
 [logo.padding]
 top = 0
@@ -146,6 +148,12 @@ fn parse_logo(doc: &TomlDoc) -> LogoConfig {
                 }
             }
         }
+    }
+    // Areofetch-like animation: animation = "spin" or "off"/"static"
+    if let Some(v) = doc.get_in("logo", "animation").and_then(|v| v.as_str()) {
+        l.animation = Some(v.to_string());
+    } else if let Some(v) = doc.get("animation").and_then(|v| v.as_str()) {
+        l.animation = Some(v.to_string());
     }
     l
 }

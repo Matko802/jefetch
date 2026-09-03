@@ -17,6 +17,7 @@ Options:
       --list-data-paths       List search paths for presets and logos
       --list-logos            List available logos
   -j, --json                  Enable JSON output (NYI in phase 1)
+      --static                Force static display (no animation) even if config has animation=spin
 "#;
 
 fn main() {
@@ -86,6 +87,9 @@ fn main() {
             }
             "--no-config" => {
                 opts.no_config = true;
+            }
+            "--static" => {
+                opts.force_static = true;
             }
             "-s" | "--structure" => {
                 if i + 1 < args.len() {

@@ -339,4 +339,11 @@ mod tests {
         assert_eq!(doc.get("a").and_then(|v| v.as_str()), Some("x"));
         assert_eq!(doc.get("b").and_then(|v| v.as_i64()), Some(1));
     }
+
+    #[test]
+    fn parses_animation() {
+        let doc = parse("[logo]\nname = \"nixos\"\nanimation = \"spin\"\n\n[logo.padding]\ntop = 0\n").unwrap();
+        assert_eq!(doc.get_in("logo", "animation").and_then(|v| v.as_str()), Some("spin"));
+        assert_eq!(doc.get_in("logo", "name").and_then(|v| v.as_str()), Some("nixos"));
+    }
 }
