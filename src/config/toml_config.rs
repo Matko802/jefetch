@@ -36,9 +36,7 @@ brightColor = true
 [logo]
 # Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
 name = ""
-# animation = "spin"                      # "off" = static
-# animation = "spin y speed=2.0"          # spin_x/y/z, negative speed = reverse
-# animation = "spin xyz speed=1.5 speed_z=-1"
+#  "animation": "spin z speed=1.5",
 
 [logo.padding]
 top = 0
@@ -69,9 +67,7 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     "logo": {
         // Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
         "source": "",
-        // "animation": "spin",                     // "off" = static
-        // "animation": "spin y speed=2.0",         // spin_x/y/z, negative = reverse
-        // "animation": "spin xyz speed=1.5 speed_z=-1",
+        //  "animation": "spin z speed=1.5",
         "padding": {
             "top": 0,
             "left": 0,
