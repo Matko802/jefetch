@@ -29,6 +29,7 @@ pub struct AnimConfig {
     pub flat: bool,
 
     pub original_glyphs: bool,
+    pub fps: f32,
 }
 
 impl Default for AnimConfig {
@@ -51,6 +52,7 @@ impl Default for AnimConfig {
             shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
             flat: false,
             original_glyphs: false,
+            fps: 12.0,
         }
     }
 }
@@ -58,7 +60,7 @@ impl Default for AnimConfig {
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
-    "symbols", "symbol", "ramp",
+    "symbols", "symbol", "ramp", "fps", "refresh", "rate",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -155,8 +157,18 @@ impl AnimConfig {
             if let Some(v) = extract_number(&low, "height") {
                 cfg.height = v as i32;
             }
+            if let Some(v) = extract_number(&low, "fps")
+                .or_else(|| extract_number(&low, "refresh"))
+                .or_else(|| extract_number(&low, "rate"))
+            {
+                cfg.fps = v.clamp(1.0, 120.0);
+            }
         }
         cfg
+    }
+
+    pub fn frame_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f32(1.0 / self.fps.clamp(1.0, 120.0))
     }
 
     fn parse_style_value(v: &str) -> Option<bool> {
@@ -1110,6 +1122,31 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
         assert!(!cfg.flat && !cfg.original_glyphs);
         assert_eq!(cfg.shading.len(), 4);
+    }
+
+    #[test]
+    fn fps_parses_and_clamps() {
+        let cfg = AnimConfig::from_animation_str(Some("spin z fps=30"));
+        assert!((cfg.fps - 30.0).abs() < 1e-4);
+        assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y refresh=60"));
+        assert!((cfg.fps - 60.0).abs() < 1e-4);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y rate:24"));
+        assert!((cfg.fps - 24.0).abs() < 1e-4);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin"));
+        assert!((cfg.fps - 12.0).abs() < 1e-4);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin fps=500"));
+        assert!((cfg.fps - 120.0).abs() < 1e-4);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin fps=0"));
+        assert!((cfg.fps - 1.0).abs() < 1e-4);
+
+        let d = AnimConfig::from_animation_str(Some("spin fps=20")).frame_interval();
+        assert!((d.as_secs_f32() - 0.05).abs() < 1e-3);
     }
 
     fn test_logo() -> ResolvedLogo {

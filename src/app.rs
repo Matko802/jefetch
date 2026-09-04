@@ -311,7 +311,8 @@ impl App {
             }
 
             let mut quit = false;
-            for _ in 0..8 {
+            let slices = (anim_cfg.frame_interval().as_millis() / 10).clamp(1, 200) as usize;
+            for _ in 0..slices {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 if let Some(b) = poll_key_byte(tty_fd, is_tty) {
                     match classify_key(b) {

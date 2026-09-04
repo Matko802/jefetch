@@ -37,6 +37,12 @@ system info refreshes every second (uptime, memory, swap, disk, ...).
 |-----|--------|
 | `speed=N` | Overall multiplier |
 | `speed_x` / `speed_y` / `speed_z` | Per-axis (negative reverses) |
+| `fps=N` | Refresh rate in frames per second (default 12, clamped 1–120) |
+
+```jsonc
+"animation": "spin y speed=2.0 fps=30"   // smoother spin
+"animation": "spin z fps=60"             // max smoothness
+```
 
 ## Style: flat or 3d
 
