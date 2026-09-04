@@ -48,6 +48,43 @@ left = 0
 right = 4
 "#;
 
+/// Equivalent default config in JSONC — use as `~/.config/sharkfetch/config.jsonc`
+/// if you prefer JSONC over TOML. sharkfetch auto-detects whichever exists
+/// (JSONC takes precedence over TOML).
+pub const DEFAULT_JSONC_CONFIG: &str = r#"{
+    // sharkfetch configuration (JSONC) — fastfetch-compatible
+    // Default structure (implemented subset)
+    "modules": [
+        "title", "separator", "os", "host", "kernel", "uptime", "packages",
+        "shell", "display", "wm", "theme", "icons", "font", "cursor", "terminal",
+        "cpu", "gpu", "memory", "swap", "disk", "localip", "locale", "break",
+        "colors"
+    ],
+    "display": {
+        "separator": ": ",
+        "separatorColor": "",
+        "keyColor": "bold_cyan",
+        "titleColor": "bold_blue",
+        "padding": 0,
+        "brightColor": true
+    },
+    "logo": {
+        // Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
+        "source": "",
+        // Areofetch-like animation: "off" (static) or "spin" (animated, q/Ctrl-C to quit)
+        // Axes: x / y / z  e.g. "spin x", "spin y", "spin z", "spin xyz"
+        // Speed/direction: speed=1.0, speed_x=1.0, speed_y=1.0, speed_z=1.0 (negative = reverse)
+        // e.g. "spin y speed=2.0" or "spin xyz speed=1.5 speed_z=-1"
+        // "animation": "spin",
+        "padding": {
+            "top": 0,
+            "left": 0,
+            "right": 4
+        }
+    }
+}
+"#;
+
 /// True when the given path looks like our TOML config (ends in .toml).
 pub fn is_toml_path(path: &str) -> bool {
     path.ends_with(".toml")

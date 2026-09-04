@@ -54,10 +54,15 @@ impl App {
                     return;
                 }
             }
-            // sharkfetch's own TOML config takes precedence.
+            // sharkfetch's own config: prefer JSONC if present, else TOML (both supported).
             for dir in config_search_dirs() {
-                let candidate = format!("{}/sharkfetch/config.toml", dir);
-                if let Some(cfg) = load_toml_config_file(&candidate) {
+                let candidate_jsonc = format!("{}/sharkfetch/config.jsonc", dir);
+                if let Some(cfg) = load_config_file(&candidate_jsonc) {
+                    self.config = cfg;
+                    return;
+                }
+                let candidate_toml = format!("{}/sharkfetch/config.toml", dir);
+                if let Some(cfg) = load_toml_config_file(&candidate_toml) {
                     self.config = cfg;
                     return;
                 }
@@ -66,17 +71,22 @@ impl App {
         }
     }
 
-    /// Ensure a default `~/.config/sharkfetch/config.toml` exists, creating the
-    /// directory and file on first run. Returns the created/updated path.
+    /// Ensure a default config exists, creating the directory and file on
+    /// first run. Supports both JSONC and TOML — if either
+    /// `~/.config/sharkfetch/config.jsonc` or `config.toml` already exists,
+    /// nothing is created. Otherwise a `config.toml` is generated.
+    /// If you prefer JSONC, just create `config.jsonc` manually (empty or with
+    /// your own JSONC) — it will take precedence over TOML.
     pub fn ensure_default_config(&self) -> Option<String> {
         let dir = config_search_dirs().first()?.to_string();
-        let path = format!("{}/sharkfetch/config.toml", dir);
-        if std::path::Path::new(&path).exists() {
+        let path_toml = format!("{}/sharkfetch/config.toml", dir);
+        let path_jsonc = format!("{}/sharkfetch/config.jsonc", dir);
+        if std::path::Path::new(&path_toml).exists() || std::path::Path::new(&path_jsonc).exists() {
             return None;
         }
         if let Ok(_) = std::fs::create_dir_all(format!("{}/sharkfetch", dir)) {
-            if let Ok(_) = std::fs::write(&path, crate::config::toml_config::DEFAULT_TOML_CONFIG) {
-                return Some(path);
+            if let Ok(_) = std::fs::write(&path_toml, crate::config::toml_config::DEFAULT_TOML_CONFIG) {
+                return Some(path_toml);
             }
         }
         None
