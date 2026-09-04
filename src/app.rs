@@ -221,7 +221,7 @@ impl App {
         anim_cfg.apply_logo_overrides(&self.config.logo);
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
-        print!("\x1b[?25l\x1b[?1049h");
+        print!("\x1b[0m\x1b[2J\x1b[H\x1b[?25l");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
         let mut tty_fd: i32 = -1;
@@ -235,6 +235,10 @@ impl App {
                 raw_term.c_cc[libc::VMIN as usize] = 0;
                 raw_term.c_cc[libc::VTIME as usize] = 0;
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, &raw_term); }
+                unsafe {
+                    LIVE_SAVED_TERM = Some(orig_term);
+                }
+                install_live_signal_handlers();
             } else {
                 tty_fd = -1;
             }
@@ -249,7 +253,7 @@ impl App {
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
-            print!("\x1b[?1049l\x1b[?25h");
+            print!("\x1b[?25h\x1b[0m\x1b[2J\x1b[H");
             let _ = std::io::Write::flush(&mut std::io::stdout());
             if is_tty && tty_fd != -1 {
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, orig_term); }
@@ -951,6 +955,45 @@ fn poll_key_byte(
 
 pub fn stdout_is_tty() -> bool {
     unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 }
+}
+
+static mut LIVE_SAVED_TERM: Option<libc::termios> = None;
+
+extern "C" fn live_signal_restore(sig: libc::c_int) {
+    unsafe {
+        let seq = b"\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
+        let _ = libc::write(
+            libc::STDOUT_FILENO,
+            seq.as_ptr() as *const libc::c_void,
+            seq.len(),
+        );
+        let saved: Option<libc::termios> = std::ptr::addr_of!(LIVE_SAVED_TERM).read();
+        if let Some(t) = saved {
+            libc::tcsetattr(libc::STDOUT_FILENO, libc::TCSANOW, &t);
+        }
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+fn install_live_signal_handlers() {
+    for sig in [
+        libc::SIGTERM,
+        libc::SIGINT,
+        libc::SIGHUP,
+        libc::SIGBUS,
+        libc::SIGFPE,
+        libc::SIGILL,
+        libc::SIGSEGV,
+        libc::SIGABRT,
+    ] {
+        unsafe {
+            libc::signal(
+                sig,
+                live_signal_restore as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+        }
+    }
 }
 
 fn config_stamp(path: &str) -> Option<(std::time::SystemTime, u64)> {
