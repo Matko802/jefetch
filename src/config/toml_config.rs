@@ -48,8 +48,6 @@ right = 4
 /// if you prefer JSONC over TOML. sharkfetch auto-detects whichever exists
 /// (JSONC takes precedence over TOML).
 pub const DEFAULT_JSONC_CONFIG: &str = r#"{
-    // sharkfetch configuration (JSONC) — fastfetch-compatible
-    // Default structure (implemented subset)
     "modules": [
         "title", "separator", "os", "host", "kernel", "uptime", "packages",
         "shell", "display", "wm", "theme", "icons", "font", "cursor", "terminal",
