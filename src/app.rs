@@ -781,6 +781,20 @@ fn logo_from_lines(text: &str, lc: &LogoConfig) -> ResolvedLogo {
     }
 }
 
+fn sgr_has_bg(slot: &str) -> bool {
+    let parts: Vec<&str> = slot.split(';').collect();
+    let mut i = 0;
+    while i < parts.len() {
+        match parts[i].parse::<i32>() {
+            Ok(48) => return true,
+            Ok(n) if (40..=47).contains(&n) || (100..=107).contains(&n) => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 fn color_payload(name: &str) -> Option<String> {
     let sgr = color::named_color_sgr(name)?;
     let t = sgr.strip_prefix("\x1b[").unwrap_or(&sgr);
@@ -812,8 +826,16 @@ fn builtin_logo_v(name: &str, lc: &crate::config::configfile::LogoConfig) -> Opt
     let mut lines: Vec<String> = Vec::new();
     let mut art_width = 0usize;
 
+    let keep_trailing = std::iter::once(logo.color)
+        .chain(logo.slots.iter().copied())
+        .any(sgr_has_bg);
     let mut carry = format!("\x1b[{}m", slots[0]);
     for rawin in logo.lines {
+        let rawin = if keep_trailing {
+            *rawin
+        } else {
+            rawin.trim_end()
+        };
         let mut out = String::new();
 
         out.push_str(bold);
@@ -1151,6 +1173,27 @@ mod tests {
         assert_eq!(esc_followup_action(b"[B"), KeyAction::Ignore);
         assert_eq!(esc_followup_action(b"O"), KeyAction::Ignore);
         assert_eq!(esc_followup_action(b"t"), KeyAction::Quit);
+    }
+
+    #[test]
+    fn sgr_bg_detect() {
+        assert!(sgr_has_bg("47"));
+        assert!(sgr_has_bg("1;44"));
+        assert!(sgr_has_bg("48;5;200"));
+        assert!(sgr_has_bg("38;2;1;2;3;48;2;4;5;6"));
+        assert!(!sgr_has_bg("34"));
+        assert!(!sgr_has_bg("38;5;225"));
+        assert!(!sgr_has_bg("1;31"));
+        assert!(!sgr_has_bg(""));
+    }
+
+    #[test]
+    fn builtin_trims_phantom_trailing_space() {
+        let lc = crate::config::configfile::LogoConfig::default();
+        let enso = builtin_logo_v("enso", &lc).expect("enso exists");
+        assert!(enso.width <= 41, "enso width {}", enso.width);
+        let kiba = builtin_logo_v("kibaos", &lc).expect("kibaos exists");
+        assert!(!kiba.lines.is_empty());
     }
 
     #[test]

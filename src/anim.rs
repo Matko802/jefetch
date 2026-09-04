@@ -559,6 +559,9 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, String)>>, bool, usize,
             row.push((ch.to_string(), cur.clone()));
             i += actual;
         }
+        while row.last().is_some_and(|(g, _)| g.trim().is_empty()) {
+            row.pop();
+        }
         if row.len() > max_cols {
             max_cols = row.len();
         }
@@ -1479,6 +1482,18 @@ mod tests {
             fast.auto_fps() > slow.auto_fps(),
             "higher speed raises refresh rate"
         );
+    }
+
+    #[test]
+    fn trailing_spaces_do_not_shift_center() {
+        let logo = ResolvedLogo {
+            lines: vec!["AB      ".to_string(), "CD".to_string()],
+            colors: Vec::new(),
+            width: 8,
+            padding_right: 2,
+        };
+        let (_, _, rows, cols) = parse_cells(&logo);
+        assert_eq!((rows, cols), (2, 2));
     }
 
     #[test]
