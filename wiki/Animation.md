@@ -44,4 +44,4 @@ Add `animation` to `~/.config/sharkfetch/config.jsonc`:
 "animation": "spin x speed=1.0"
 ```
 
-Next: [Logos](Logos) →
+Next: [Logos](Logos.md) →

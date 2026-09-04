@@ -54,4 +54,4 @@ ldd target/x86_64-unknown-linux-musl/release/sharkfetch
 
 > Use `./build.sh` / `make`, not `cargo build --release` directly — Nix's cargo lacks the musl target and produces a dynamic binary.
 
-Next: [Configuration](Configuration) →
+Next: [Configuration](Configuration.md) →

@@ -66,4 +66,4 @@ git add -A && git commit -m "feat: ..."
 git pull --rebase origin main && git push origin main
 ```
 
-Next: [FAQ](FAQ) →
+Next: [FAQ](FAQ.md) →

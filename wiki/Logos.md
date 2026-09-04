@@ -43,4 +43,4 @@ sharkfetch --logo arch
 
 `top` inserts blank lines, `left` prefixes spaces, `right` (default 4) is the gap to the text.
 
-Next: [Modules](Modules) →
+Next: [Modules](Modules.md) →

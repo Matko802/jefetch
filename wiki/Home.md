@@ -4,13 +4,13 @@ A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output
 
 | Page | What you'll find |
 |------|------------------|
-| [Installation](Installation) | Install & update |
-| [Configuration](Configuration) | `config.jsonc`, all sections |
-| [Animation](Animation) | Spin axes, speed, direction |
-| [Logos](Logos) | Builtin / custom, colors, padding |
-| [Modules](Modules) | The `modules` list & options |
-| [Development](Development) | Build, layout, contributing |
-| [FAQ](FAQ) | Quick answers |
+| [Installation](Installation.md) | Install & update |
+| [Configuration](Configuration.md) | `config.jsonc`, all sections |
+| [Animation](Animation.md) | Spin axes, speed, direction |
+| [Logos](Logos.md) | Builtin / custom, colors, padding |
+| [Modules](Modules.md) | The `modules` list & options |
+| [Development](Development.md) | Build, layout, contributing |
+| [FAQ](FAQ.md) | Quick answers |
 
 ## Quick Start
 
@@ -37,4 +37,4 @@ A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output
 
 First run auto-creates `~/.config/sharkfetch/config.jsonc`.
 
-Continue to [Installation](Installation) →
+Continue to [Installation](Installation.md) →

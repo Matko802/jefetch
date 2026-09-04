@@ -1,13 +1,13 @@
 # sharkfetch Wiki
 
 - **Home**
-  - [Home](Home)
+  - [Home](Home.md)
 - **Guides**
-  - [Installation](Installation)
-  - [Configuration](Configuration)
-  - [Animation](Animation)
-  - [Logos](Logos)
-  - [Modules](Modules)
+  - [Installation](Installation.md)
+  - [Configuration](Configuration.md)
+  - [Animation](Animation.md)
+  - [Logos](Logos.md)
+  - [Modules](Modules.md)
 - **Develop**
-  - [Development](Development)
-  - [FAQ](FAQ)
+  - [Development](Development.md)
+  - [FAQ](FAQ.md)

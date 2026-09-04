@@ -36,4 +36,4 @@ sharkfetch --structure "os:kernel:uptime:break:colors"
 
 `--structure` overrides `modules` at runtime.
 
-Next: [Development](Development) →
+Next: [Development](Development.md) →

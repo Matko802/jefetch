@@ -60,7 +60,7 @@ Ordered list of modules. Each is a bare name or an object with options:
 | `type` | `"builtin"` / `"none"` / `"file"` |
 | `color` | `"red"` or per-line `{ "1": "green", "2-4": "blue" }` |
 | `padding` | `4` or `{ top, left, right }` (`right` default `4`) |
-| `animation` | `off` = static; see [Animation](Animation) |
+| `animation` | `off` = static; see [Animation](Animation.md) |
 
 ## CLI Overrides
 
@@ -72,4 +72,4 @@ Ordered list of modules. Each is a bare name or an object with options:
 | `--static` | Force static (disable animation) |
 | `--structure "os:kernel:"` | Override `modules` order |
 
-Next: [Animation](Animation) →
+Next: [Animation](Animation.md) →
