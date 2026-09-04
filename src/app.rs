@@ -101,20 +101,8 @@ impl App {
         false
     }
 
-    pub fn run(&mut self) -> i32 {
-        self.load_config();
-
-        if self.config.loaded_from.is_none() && !self.options.no_config {
-            self.ensure_default_config();
-        }
-
-        if let Some(name) = &self.options.logo_name {
-            self.config.logo.source = Some(name.clone());
-            self.config.logo.logo_type = Some("builtin".to_string());
-        }
-        self.pick_logo();
-
-        let entries: Vec<ModuleEntry> = if let Some(s) = &self.options.structure {
+    fn build_entries(&self) -> Vec<ModuleEntry> {
+        if let Some(s) = &self.options.structure {
             s.split(':')
                 .map(|x| x.trim().to_string())
                 .filter(|x| !x.is_empty())
@@ -135,7 +123,35 @@ impl App {
                 .into_iter()
                 .map(ModuleEntry::Name)
                 .collect()
-        };
+        }
+    }
+
+    fn config_watch_path(&self) -> Option<String> {
+        if self.options.no_config {
+            return None;
+        }
+        if let Some(p) = &self.config.loaded_from {
+            return Some(p.clone());
+        }
+        config_search_dirs()
+            .first()
+            .map(|d| format!("{}/sharkfetch/config.jsonc", d))
+    }
+
+    pub fn run(&mut self) -> i32 {
+        self.load_config();
+
+        if self.config.loaded_from.is_none() && !self.options.no_config {
+            self.ensure_default_config();
+        }
+
+        if let Some(name) = &self.options.logo_name {
+            self.config.logo.source = Some(name.clone());
+            self.config.logo.logo_type = Some("builtin".to_string());
+        }
+        self.pick_logo();
+
+        let entries: Vec<ModuleEntry> = self.build_entries();
 
         if self.options.json {
             self.print_json(&entries);
@@ -143,7 +159,7 @@ impl App {
         }
 
         if !self.options.force_static && stdout_is_tty() {
-            return self.run_live(&entries, self.should_animate());
+            return self.run_live(entries, self.should_animate());
         }
 
         if self.should_animate() {
@@ -195,14 +211,16 @@ impl App {
         0
     }
 
-    fn run_live(&mut self, entries: &[ModuleEntry], start_animated: bool) -> i32 {
-        let base_logo = self.logo.clone();
+    fn run_live(&mut self, mut entries: Vec<ModuleEntry>, start_animated: bool) -> i32 {
+        let mut base_logo = self.logo.clone();
         let mut animated = start_animated && base_logo.is_some();
-        let mut base_lines = self.render_modules(entries);
+        let mut base_lines = self.render_modules(&entries);
 
         let mut anim_cfg =
             crate::anim::AnimConfig::from_animation_str(self.config.logo.animation.as_deref());
         anim_cfg.apply_logo_overrides(&self.config.logo);
+        let watch_path = self.config_watch_path();
+        let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
         print!("\x1b[?25l\x1b[?1049h");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
@@ -240,7 +258,29 @@ impl App {
         loop {
 
             if last_refresh.elapsed() >= std::time::Duration::from_secs(1) {
-                base_lines = self.render_modules(entries);
+                if let Some(path) = &watch_path {
+                    let stamp = config_stamp(path);
+                    if stamp != last_stamp {
+                        last_stamp = stamp;
+                        let logo_override = self.options.logo_name.clone();
+                        if let Some(cfg) = load_config_file(path) {
+                            self.config = cfg;
+                            if let Some(name) = logo_override {
+                                self.config.logo.source = Some(name);
+                                self.config.logo.logo_type = Some("builtin".to_string());
+                            }
+                            self.pick_logo();
+                            base_logo = self.logo.clone();
+                            entries = self.build_entries();
+                            anim_cfg = crate::anim::AnimConfig::from_animation_str(
+                                self.config.logo.animation.as_deref(),
+                            );
+                            anim_cfg.apply_logo_overrides(&self.config.logo);
+                            animated = self.should_animate() && base_logo.is_some();
+                        }
+                    }
+                }
+                base_lines = self.render_modules(&entries);
                 last_refresh = std::time::Instant::now();
                 needs_draw = true;
             }
@@ -341,7 +381,7 @@ impl App {
     }
 
     fn run_animated(&mut self, entries: &[ModuleEntry]) -> i32 {
-        self.run_live(entries, true)
+        self.run_live(entries.to_vec(), true)
     }
 
     #[allow(dead_code)]
@@ -857,6 +897,11 @@ pub fn stdout_is_tty() -> bool {
     unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 }
 }
 
+fn config_stamp(path: &str) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
 pub fn load_config_file(path: &str) -> Option<Config> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut cfg = Config::from_jsonc(&text).ok()?;
@@ -907,5 +952,21 @@ mod tests {
         assert_eq!(classify_key(b'T'), KeyAction::Toggle);
         assert_eq!(classify_key(b'a'), KeyAction::Ignore);
         assert_eq!(classify_key(b' '), KeyAction::Ignore);
+    }
+
+    #[test]
+    fn config_stamp_tracks_changes() {
+        let path = std::env::temp_dir().join(format!("sharkfetch-stamp-{}.json", std::process::id()));
+        let s = path.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(config_stamp(&s), None);
+        std::fs::write(&path, r#"{"a": 1}"#).unwrap();
+        let first = config_stamp(&s).expect("stamp after create");
+        assert_eq!(config_stamp(&s), Some(first));
+        std::fs::write(&path, r#"{"a": 1, "b": 2}"#).unwrap();
+        let second = config_stamp(&s).expect("stamp after modify");
+        assert_ne!(second, first);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(config_stamp(&s), None);
     }
 }
