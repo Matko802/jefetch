@@ -9,9 +9,10 @@ sharkfetch is **config-compatible with fastfetch's `config.jsonc`**, but its nat
 3. `~/.config/sharkfetch/config.toml` (auto-created on first run)
 4. *fallback*: compiled defaults (`default_structure()`)
 
-If **neither** `config.jsonc` nor `config.toml` exists, `ensure_default_config()` (`src/app.rs:69`) creates `~/.config/sharkfetch/config.toml` from `DEFAULT_TOML_CONFIG` (`src/config/toml_config.rs:15`).
+If **neither** `config.jsonc` nor `config.toml` exists, `ensure_default_config()` (`src/app.rs:74`) creates `~/.config/sharkfetch/config.toml` from `DEFAULT_TOML_CONFIG` (`src/config/toml_config.rs:15`).
+If you `rm config.toml` and `touch config.jsonc` (empty), the next `sharkfetch` run auto-populates `config.jsonc` with `DEFAULT_JSONC_CONFIG` (`src/config/toml_config.rs:51`) — so “create empty JSONC → generate configs there” works 1:1. Non-empty JSONC/TOML are never overwritten.
 
-> **To use JSONC:** just `touch ~/.config/sharkfetch/config.jsonc` (or copy `DEFAULT_JSONC_CONFIG` below) — it will be picked up on next run and TOML will be ignored. Delete `config.toml` if you want JSONC-only.
+> **To use JSONC:** `rm ~/.config/sharkfetch/config.toml; touch ~/.config/sharkfetch/config.jsonc; sharkfetch` — it will fill `config.jsonc` for you (or copy `DEFAULT_JSONC_CONFIG` below manually). JSONC always takes precedence over TOML.
 
 ---
 
