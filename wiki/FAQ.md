@@ -2,94 +2,55 @@
 
 ## General
 
-**Q: `sharkfetch` vs `fastfetch`?**
-A: Drop-in 1:1. Same `modules` order, same logo `$N` carryColor, same `display`/`general`. Run `diff <(fastfetch --json)` if you doubt.
+**sharkfetch vs fastfetch?**
+Drop-in 1:1. Same modules order, same logo colors, same display/general.
 
-**Q: Why static musl?**
-A: `ldd` → `not a dynamic executable`. Ships via `fish-flake`, no glibc mismatch, instant start (`~4ms`).
+**Why static musl?**
+Instant start, no glibc mismatch. `ldd` → `not a dynamic executable`.
 
-**Q: Config file not found?**
-A: Search order (`src/app.rs:43`):
-1. `-c /path` (`.toml` → TOML, else JSONC)
-2. `~/.config/sharkfetch/config.jsonc` (preferred if exists)
-3. `~/.config/sharkfetch/config.toml` (auto-created)
-4. Compiled defaults
-
-If you `touch` an empty `config.jsonc`, it will be used (empty → defaults).
+**Config file not found?**
+Search order: `-c <path>` → `~/.config/sharkfetch/config.jsonc` → `config.toml` (auto-created) → compiled defaults. An empty `config.jsonc` is auto-populated.
 
 ## Configuration
 
-**Q: TOML or JSONC?**
-A: Both. JSONC if you want fastfetch compat (`"logo": {"source": "nixos"}`), TOML if you want `name = "nixos"`. JSONC wins if both exist.
+**TOML or JSONC?**
+Both. JSONC for fastfetch compat, TOML for `name = "nixos"`. JSONC wins if both exist.
 
-**Q: How to switch?**
-=== "TOML → JSONC"
+**How to switch to JSONC?**
+```sh
+rm ~/.config/sharkfetch/config.toml
+touch ~/.config/sharkfetch/config.jsonc
+sharkfetch   # fills config.jsonc automatically
+```
 
-    ```sh
-    rm ~/.config/sharkfetch/config.toml
-    cat > ~/.config/sharkfetch/config.jsonc <<'JSONC'
-    {
-        "logo": { "source": "nixos", "animation": "spin y speed=2.0" },
-        "modules": ["title","separator","os","kernel","uptime","break","colors"]
-    }
-    JSONC
-    ```
-
-=== "JSONC → TOML"
-
-    ```sh
-    rm ~/.config/sharkfetch/config.jsonc
-    sharkfetch  # recreates config.toml
-    ```
-
-**Q: `animation = "spin"` does nothing?**
-A: Check it's uncommented, not `off`/`static`/`false`/`0`. And not running with `--static` or `--no-config`. Quit key is `q`/`Esc`/`Ctrl-C`.
+**`animation = "spin"` does nothing?**
+Check it's uncommented, not `off`/`static`/`false`, and you're not running `--static`/`--no-config`. Quit with `q`/`Esc`/`Ctrl-C`.
 
 ## Animation
 
-**Q: How to change spin?**
-A: `animation` string (`src/anim.rs:50`):
+**How to change the spin?**
 ```toml
-animation = "spin y speed=2.0"          # Y only (default)
-animation = "spin x"                    # X
-animation = "spin z speed=1.5"          # Z (in-plane)
-animation = "spin xyz speed=1.0 speed_y=-1"  # all, Y reversed
+animation = "spin y speed=2.0"               # default (Y only)
+animation = "spin x"
+animation = "spin z speed=1.5"
+animation = "spin xyz speed=1.0 speed_y=-1"  # all axes, Y reversed
 ```
-`speed` scales all, `speed_x`/`speed_y`/`speed_z` per-axis, negative = reverse.
 
-**Q: Animation is weird / different stats when spinning?**
-A: Fixed in `a8e65d2`/`cfc7e4b`: spinning and static share the same `base_lines` — only logo moves. If you still see different `Packages`/`Display`, you are running the old `fetch` delegate. Update: `git pull` + `./build.sh`.
-
-**Q: No `[press q …]` hint?**
-A: Intentionally removed in `4da55de` — animation is clean; `q`/`Ctrl-C` still quits.
-
-**Q: Terminal garbage `^[P1+r` after run?**
-A: Fixed: `terminalfont` excluded from `--structure`, `run_capture_timeout` saves/restores termios, `main.rs` drains DCS kitty query.
+**Different stats when spinning?**
+Nope — spinning and static share the same text output; only the logo moves.
 
 ## Logos
 
-**Q: Logo not found?**
-A: `sharkfetch --list-logos | grep -i nixos` — names are case-insensitive, aliases included. `name = ""` auto-detects.
+**Logo not found?**
+`sharkfetch --list-logos | grep -i nixos`. Use `name = ""` to auto-detect.
 
-**Q: Custom logo?**
-A: Use `type = "file"` + `source = "~/logo.txt"` (TOML) or `"type": "file"` (JSONC). Supports `$N` slot colors and `color: {"1": "red"}`.
+**Custom logo?**
+`type = "file"` + `source = "~/logo.txt"`. Supports `$N` colors and `color: {"1": "red"}`.
 
 ## Building
 
-**Q: `cargo build` fails with musl?**
-A: Use `./build.sh`, not `cargo build --release`. Nix's `cargo` lacks musl.
+**`cargo build` fails with musl?**
+Use `./build.sh`, not `cargo build --release` directly.
 
-**Q: Warnings?**
-A: Should be zero. `PADDING_RIGHT` is `#[allow(dead_code)]`, `fastfetch_*` helpers are `#[allow(dead_code)]`.
-
-## Nix
-
-**Q: Update flake input?**
-A: In your flake: `nix flake lock --update-input sharkfetch` then `nh os switch`.
-
-**Q: `fish-flake` already uses `github:Matko802/sharkfetch`?**
-A: Yes (`fish-flake/flake.nix:22`). The local `path:` was replaced with the GitHub input.
-
-## Contributing
-
-PRs welcome. Keep deps to `libc` only, preserve fastfetch parity, run `./build.sh test` before pushing.
+**Warnings?**
+Should be zero.
