@@ -141,52 +141,26 @@ pub fn run_capture_lines(cmd: &str, args: &[&str]) -> Vec<String> {
 }
 
 pub fn run_capture_timeout(cmd: &str, args: &[&str], timeout_ms: u64) -> Option<String> {
-    let saved_stdin = termios_save(libc::STDIN_FILENO);
-    let saved_stdout = termios_save(libc::STDOUT_FILENO);
+    let child = std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
     let (tx, rx) = std::sync::mpsc::channel();
-    let cmd_s = cmd.to_string();
-    let args_s: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
-        let out = std::process::Command::new(&cmd_s).args(&args_s).output();
+        let out = child.wait_with_output();
         let _ = tx.send(out);
     });
-    let res = rx.recv_timeout(std::time::Duration::from_millis(timeout_ms));
-    termios_restore(libc::STDIN_FILENO, &saved_stdin);
-    termios_restore(libc::STDOUT_FILENO, &saved_stdout);
-    if res.is_err() {
-        let _ = std::process::Command::new("stty").arg("sane").output();
-        let _ = std::process::Command::new("pkill").args(["-f", cmd]).output();
+    let out = rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)).ok()?.ok()?;
+    if !out.status.success() {
+        return None;
     }
-    match res {
-        Ok(Ok(out)) if out.status.success() => String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
-        _ => None,
-    }
-}
-
-fn termios_save(fd: i32) -> Option<libc::termios> {
-    let mut term = unsafe { std::mem::zeroed::<libc::termios>() };
-    if unsafe { libc::tcgetattr(fd, &mut term) } == 0 {
-        Some(term)
-    } else {
-        None
-    }
-}
-fn termios_restore(fd: i32, saved: &Option<libc::termios>) {
-
-    if let Some(mut term) = saved.clone() {
-        term.c_lflag |= libc::ECHO | libc::ICANON;
-        unsafe { libc::tcsetattr(fd, libc::TCSANOW, &term as *const libc::termios); }
-    } else {
-        unsafe {
-            let mut t: libc::termios = std::mem::zeroed();
-            if libc::tcgetattr(fd, &mut t) == 0 {
-                t.c_lflag |= libc::ECHO | libc::ICANON;
-                libc::tcsetattr(fd, libc::TCSANOW, &t);
-            }
-        }
-    }
-
-    let _ = std::process::Command::new("stty").arg("sane").output();
+    String::from_utf8(out.stdout)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 pub fn scan_proc_comm(names: &[&str]) -> Option<String> {
@@ -263,4 +237,20 @@ pub fn proc_by_comm(names: &[&str]) -> Option<ProcInfo> {
         return Some(info);
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_timeout_respects_deadline() {
+        let t = std::time::Instant::now();
+        assert!(run_capture_timeout("sleep", &["10"], 100).is_none());
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(
+            run_capture_timeout("echo", &["hi"], 2000).as_deref(),
+            Some("hi")
+        );
+    }
 }

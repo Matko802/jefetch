@@ -1,11 +1,38 @@
 use crate::detection::run_capture_timeout;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Default)]
 pub struct PackagesInfo {
     pub amounts: Vec<(String, usize)>,
 }
 
+static PKG_CACHE: OnceLock<Mutex<(Option<PackagesInfo>, std::time::Instant)>> = OnceLock::new();
+
+fn cache_slot() -> &'static Mutex<(Option<PackagesInfo>, std::time::Instant)> {
+    PKG_CACHE.get_or_init(|| {
+        Mutex::new((
+            None,
+            std::time::Instant::now() - std::time::Duration::from_secs(3600),
+        ))
+    })
+}
+
 pub fn detect() -> PackagesInfo {
+    {
+        let guard = cache_slot().lock().unwrap_or_else(|e| e.into_inner());
+        if let (Some(info), at) = (&guard.0, guard.1) {
+            if at.elapsed() < std::time::Duration::from_secs(60) {
+                return info.clone();
+            }
+        }
+    }
+    let info = detect_uncached();
+    *cache_slot().lock().unwrap_or_else(|e| e.into_inner()) =
+        (Some(info.clone()), std::time::Instant::now());
+    info
+}
+
+pub fn detect_uncached() -> PackagesInfo {
     let mut info = PackagesInfo::default();
 
     let mut nix_system = 0;
