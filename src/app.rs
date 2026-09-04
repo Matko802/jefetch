@@ -304,6 +304,7 @@ impl App {
 
             let info_count = base_lines.len();
             let render_height = (info_count + 2).max(36);
+            let cols = crate::common::terminal_width();
             if animated {
 
                 let anim_logo = match cloud.as_mut() {
@@ -330,7 +331,10 @@ impl App {
                         line.push_str(&" ".repeat(GAP));
                         line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                     }
-                    out.push_str(line.trim_end());
+                    out.push_str(&crate::print::format::truncate_visible(
+                        line.trim_end(),
+                        cols,
+                    ));
                     out.push_str("\x1b[K\n");
                 }
                 out.push_str("\x1b[J");
@@ -368,7 +372,10 @@ impl App {
                         }
                         line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                     }
-                    out.push_str(line.trim_end());
+                    out.push_str(&crate::print::format::truncate_visible(
+                        line.trim_end(),
+                        cols,
+                    ));
                     out.push_str("\x1b[K\n");
                 }
                 out.push_str("\x1b[J");

@@ -367,6 +367,38 @@ pub fn visible_len(s: &str) -> usize {
     count
 }
 
+pub fn truncate_visible(s: &str, max: usize) -> String {
+    let mut out = String::new();
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut w = 0;
+    let mut cut = false;
+    while i < b.len() {
+        if b[i] == 0x1b && i + 1 < b.len() && b[i + 1] == b'[' {
+            let mut j = i + 2;
+            while j < b.len() && !b[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            let end = (j + 1).min(b.len());
+            out.push_str(&s[i..end]);
+            i = end;
+            continue;
+        }
+        if w + 1 > max {
+            cut = true;
+            break;
+        }
+        let len = utf8_len(b[i]);
+        out.push_str(&s[i..i + len]);
+        w += 1;
+        i += len;
+    }
+    if cut {
+        out.push_str("\x1b[0m");
+    }
+    out
+}
+
 #[inline]
 fn utf8_len(first: u8) -> usize {
     match first {
@@ -400,3 +432,24 @@ pub fn format_map<'a>(fmt: &str, key: &'a str, values: &'a [(&'a str, String)]) 
 }
 
 pub use super::color::RESET as ANSI_RESET;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_visible_cuts_cells_not_bytes() {
+        assert_eq!(truncate_visible("hello world", 5), "hello\x1b[0m");
+        assert_eq!(truncate_visible("hi", 10), "hi");
+        assert_eq!(truncate_visible("hi", 2), "hi");
+        assert_eq!(
+            truncate_visible("\x1b[1;31mhello\x1b[0m world", 5),
+            "\x1b[1;31mhello\x1b[0m\x1b[0m"
+        );
+        assert_eq!(
+            truncate_visible("ab\x1b[0mcd", 3),
+            "ab\x1b[0mc\x1b[0m"
+        );
+        assert_eq!(visible_len(&truncate_visible("\x1b[36mOS: NixOS x86_64", 8)), 8);
+    }
+}
