@@ -354,20 +354,18 @@ impl App {
             let slices = (anim_cfg.frame_interval().as_millis() / 10).clamp(1, 200) as usize;
             for _ in 0..slices {
                 std::thread::sleep(std::time::Duration::from_millis(10));
-                if let Some(b) = poll_key_byte(tty_fd, is_tty) {
-                    match classify_key(b) {
-                        KeyAction::Quit => {
-                            quit = true;
-                            break;
-                        }
-                        KeyAction::Toggle => {
-                            if base_logo.is_some() {
-                                animated = !animated;
-                                needs_draw = true;
-                            }
-                        }
-                        KeyAction::Ignore => {}
+                match poll_key_action(tty_fd, is_tty) {
+                    KeyAction::Quit => {
+                        quit = true;
+                        break;
                     }
+                    KeyAction::Toggle => {
+                        if base_logo.is_some() {
+                            animated = !animated;
+                            needs_draw = true;
+                        }
+                    }
+                    KeyAction::Ignore => {}
                 }
                 if quit {
                     break;
@@ -863,6 +861,36 @@ pub fn classify_key(b: u8) -> KeyAction {
     }
 }
 
+fn esc_followup_action(tail: &[u8]) -> KeyAction {
+    match tail.first() {
+        Some(b'[') | Some(b'O') => KeyAction::Ignore,
+        _ => KeyAction::Quit,
+    }
+}
+
+fn poll_key_action(tty_fd: i32, is_tty: bool) -> KeyAction {
+    match poll_key_byte(tty_fd, is_tty) {
+        Some(0x1b) => {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            let mut tail: Vec<u8> = Vec::new();
+            loop {
+                match poll_key_byte(tty_fd, is_tty) {
+                    Some(b) => {
+                        tail.push(b);
+                        if tail.len() >= 16 {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            esc_followup_action(&tail)
+        }
+        Some(b) => classify_key(b),
+        None => KeyAction::Ignore,
+    }
+}
+
 fn poll_key_byte(tty_fd: i32, is_tty: bool) -> Option<u8> {
     if is_tty && tty_fd != -1 {
         let mut buf = [0u8; 16];
@@ -952,6 +980,15 @@ mod tests {
         assert_eq!(classify_key(b'T'), KeyAction::Toggle);
         assert_eq!(classify_key(b'a'), KeyAction::Ignore);
         assert_eq!(classify_key(b' '), KeyAction::Ignore);
+    }
+
+    #[test]
+    fn esc_sequences_are_swallowed() {
+        assert_eq!(esc_followup_action(&[]), KeyAction::Quit);
+        assert_eq!(esc_followup_action(b"[A"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"[B"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"O"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"t"), KeyAction::Quit);
     }
 
     #[test]
