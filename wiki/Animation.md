@@ -100,6 +100,7 @@ Or as a separate logo key:
 "animation": "spin yz speed_y=0.6 speed_z=-1"
 "animation": "spin x speed=1.0"
 "animation": "spin z speed=1.5 flat chars=ascii"    // flat, original chars
+"animation": "spin xyz speed=2.0 fps=30 flat chars=ascii color=red"  // everything in one line
 ```
 
 Next: [Logos](Logos.md) →

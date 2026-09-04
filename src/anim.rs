@@ -60,7 +60,7 @@ impl Default for AnimConfig {
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
-    "symbols", "symbol", "ramp", "fps", "refresh", "rate",
+    "symbols", "symbol", "ramp", "fps", "refresh", "rate", "color",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -169,6 +169,18 @@ impl AnimConfig {
 
     pub fn frame_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs_f32(1.0 / self.fps.clamp(1.0, 120.0))
+    }
+
+    pub fn animation_color(s: Option<&str>) -> Option<String> {
+        let raw = s?;
+        let low = raw.to_ascii_lowercase();
+        let v = extract_word(&low, raw, "color", true)?;
+        let v = v.trim();
+        if v.is_empty() {
+            None
+        } else {
+            Some(v.to_string())
+        }
     }
 
     fn parse_style_value(v: &str) -> Option<bool> {
@@ -1196,13 +1208,30 @@ mod tests {
 
     #[test]
     fn all_options_combine_in_one_line() {
-        let cfg =
-            AnimConfig::from_animation_str(Some("spin xyz speed=2.0 fps=30 flat chars=ascii"));
+        let cfg = AnimConfig::from_animation_str(Some(
+            "spin xyz speed=2.0 fps=30 flat chars=ascii color=red",
+        ));
         assert!(cfg.spin_x && cfg.spin_y && cfg.spin_z);
         assert!((cfg.speed - 2.0).abs() < 1e-4);
         assert!((cfg.fps - 30.0).abs() < 1e-4);
         assert!(cfg.flat);
         assert!(cfg.original_glyphs);
+        assert_eq!(
+            AnimConfig::animation_color(Some("spin xyz color=red")).as_deref(),
+            Some("red")
+        );
+        assert_eq!(AnimConfig::animation_color(Some("spin y")), None);
+        assert_eq!(AnimConfig::animation_color(None), None);
+    }
+
+    #[test]
+    fn color_value_does_not_fake_axes() {
+        let cfg = AnimConfig::from_animation_str(Some("spin x color=gray"));
+        assert!(cfg.spin_x && !cfg.spin_y && !cfg.spin_z);
+        assert_eq!(
+            AnimConfig::animation_color(Some("spin x color=gray")).as_deref(),
+            Some("gray")
+        );
     }
 
     #[test]

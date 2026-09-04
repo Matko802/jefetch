@@ -126,6 +126,20 @@ impl App {
         }
     }
 
+    fn apply_logo_overrides(&mut self) {
+        if let Some(name) = self.options.logo_name.clone() {
+            self.config.logo.source = Some(name);
+            self.config.logo.logo_type = Some("builtin".to_string());
+        }
+        if self.config.logo.color.is_none() {
+            if let Some(c) =
+                crate::anim::AnimConfig::animation_color(self.config.logo.animation.as_deref())
+            {
+                self.config.logo.color = Some(c);
+            }
+        }
+    }
+
     fn config_watch_path(&self) -> Option<String> {
         if self.options.no_config {
             return None;
@@ -145,10 +159,7 @@ impl App {
             self.ensure_default_config();
         }
 
-        if let Some(name) = &self.options.logo_name {
-            self.config.logo.source = Some(name.clone());
-            self.config.logo.logo_type = Some("builtin".to_string());
-        }
+        self.apply_logo_overrides();
         self.pick_logo();
 
         let entries: Vec<ModuleEntry> = self.build_entries();
@@ -266,13 +277,9 @@ impl App {
                     let stamp = config_stamp(path);
                     if stamp != last_stamp {
                         last_stamp = stamp;
-                        let logo_override = self.options.logo_name.clone();
                         if let Some(cfg) = load_config_file(path) {
                             self.config = cfg;
-                            if let Some(name) = logo_override {
-                                self.config.logo.source = Some(name);
-                                self.config.logo.logo_type = Some("builtin".to_string());
-                            }
+                            self.apply_logo_overrides();
                             self.pick_logo();
                             base_logo = self.logo.clone();
                             entries = self.build_entries();
