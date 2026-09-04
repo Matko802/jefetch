@@ -107,6 +107,8 @@ impl AnimConfig {
 fn extract_number(s: &str, key: &str) -> Option<f32> {
     let start = s.find(key)? + key.len();
     let rest = &s[start..];
+    // Skip the separator(s) between the key and the value (e.g. "=", ":", spaces).
+    let rest = rest.trim_start_matches(|c: char| !c.is_ascii_digit() && c != '-' && c != '.');
     let mut end = 0;
     for (i, c) in rest.char_indices() {
         if c.is_ascii_digit() || c == '.' || c == '-' {
@@ -724,5 +726,28 @@ pub fn render_frame(
         colors: Vec::new(),
         width,
         padding_right: GAP,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speeds_parse_from_spin_string() {
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
+        assert!(cfg.spin_z);
+        assert!((cfg.speed - 1.5).abs() < 1e-4, "speed={}", cfg.speed);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin xyz speed=1.0 speed_y=-1"));
+        assert!(cfg.spin_x && cfg.spin_y && cfg.spin_z);
+        assert!((cfg.speed - 1.0).abs() < 1e-4);
+        assert!((cfg.speed_y - (-1.0)).abs() < 1e-4);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed:2.0"));
+        assert!((cfg.speed - 2.0).abs() < 1e-4);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
+        assert!((cfg.speed_z - 1.0).abs() < 1e-4, "per-axis default stays 1.0");
     }
 }
