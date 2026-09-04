@@ -32,6 +32,12 @@ pub struct AnimConfig {
     pub light_y: f32,
     pub light_z: f32,
     pub shading: Vec<String>,
+    /// false = 3D extruded logo (default), true = flat single-sided plane
+    /// that still rotates in 3D (no thickness).
+    pub flat: bool,
+    /// false = shade with the `shading` ramp (default blocks), true = keep
+    /// the logo's original ASCII characters as glyphs.
+    pub original_glyphs: bool,
 }
 
 impl Default for AnimConfig {
@@ -52,19 +58,71 @@ impl Default for AnimConfig {
             light_y: 0.8165,
             light_z: -0.4082,
             shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
+            flat: false,
+            original_glyphs: false,
         }
     }
 }
+
+/// Option keys consumed as `key=value` (or `key:value`, `key value`) so their
+/// letters must not leak into axis detection (e.g. "size" contains 'z',
+/// "style" contains 'y', "speed_x" contains 'x').
+const OPTION_KEYS: &[&str] = &[
+    "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
+    "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
+    "symbols", "symbol", "ramp",
+];
 
 impl AnimConfig {
     pub fn from_animation_str(s: Option<&str>) -> Self {
         let mut cfg = Self::default();
         if let Some(raw) = s {
             let low = raw.to_ascii_lowercase();
-            // detect axes: tolerate "spin x", "spin=x", "spin: x y z", "xyz", etc.
-            let has_x = low.contains('x');
-            let has_y = low.contains('y');
-            let has_z = low.contains('z');
+            // --- style: flat plane vs 3D extruded (explicit key wins over bare word)
+            let mut flat_opt: Option<bool> = None;
+            for key in ["style", "mode"] {
+                if let Some(v) = extract_word(&low, raw, key, true) {
+                    if let Some(f) = Self::parse_style_value(&v) {
+                        flat_opt = Some(f);
+                    }
+                }
+            }
+            if flat_opt.is_none() {
+                if has_word(&low, "flat") {
+                    flat_opt = Some(true);
+                } else if has_word(&low, "3d") {
+                    flat_opt = Some(false);
+                }
+            }
+            if let Some(f) = flat_opt {
+                cfg.flat = f;
+            }
+            // --- glyphs: original logo chars vs shading ramp (explicit key wins)
+            let mut chars_opt: Option<String> = None;
+            for key in [
+                "characters", "chars", "glyphs", "glyph", "shading", "symbols", "symbol",
+                "ramp",
+            ] {
+                // Ramps like ".,-~:;=!*#$@" contain commas — don't stop there.
+                if let Some(v) = extract_word(&low, raw, key, false) {
+                    chars_opt = Some(v);
+                }
+            }
+            if let Some(v) = chars_opt {
+                cfg.apply_chars_value(&v);
+            } else if has_word(&low, "ascii") || has_word(&low, "original") {
+                cfg.original_glyphs = true;
+            } else if has_word(&low, "blocks") || has_word(&low, "block") {
+                cfg.original_glyphs = false;
+                cfg.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
+            }
+            // --- axes: detect x/y/z only outside option key=value spans, so
+            // words like "size" (z), "style" (y) or "speed_x" (x) don't fake axes.
+            // Tolerates "spin x", "spin=x", "spin: x y z", "xyz", etc.
+            let axis_src = blank_option_spans(&low, OPTION_KEYS);
+            let has_x = axis_src.contains('x');
+            let has_y = axis_src.contains('y');
+            let has_z = axis_src.contains('z');
             // Only override spin if animation string mentions axes/spin
             if low.contains("spin") || has_x || has_y || has_z || low.contains("rotate") {
                 if has_x || has_y || has_z {
@@ -85,7 +143,7 @@ impl AnimConfig {
                 cfg.speed_z = v;
             }
             if let Some(v) = extract_number(&low, "speed") {
-                // generic speed scales all axes unless per-axis already set
+                // generic speed scales all axes
                 // (and keeps sign for direction: negative = reverse)
                 cfg.speed = v;
             }
@@ -102,10 +160,146 @@ impl AnimConfig {
         }
         cfg
     }
+
+    /// "flat"/"2d" -> flat plane, "3d"/"three"/"depth" -> extruded 3D.
+    fn parse_style_value(v: &str) -> Option<bool> {
+        let t = v.to_ascii_lowercase();
+        let t = t.trim();
+        if t.contains("flat") || t == "2d" || t.contains("plain") {
+            return Some(true);
+        }
+        if t.contains("3d") || t.contains("three") || t.contains("depth") {
+            return Some(false);
+        }
+        None
+    }
+
+    /// "ascii"/"original" -> keep logo chars; "blocks"/"default" -> stock ramp;
+    /// anything else is a custom ramp (dark -> bright), e.g. ".,-~:;=!*#$@".
+    fn apply_chars_value(&mut self, v: &str) {
+        let t = v.trim();
+        if t.is_empty() {
+            return;
+        }
+        let l = t.to_ascii_lowercase();
+        if l == "ascii"
+            || l == "original"
+            || l == "keep"
+            || l == "logo"
+            || l == "same"
+            || l.contains("original")
+            || l.contains("ascii")
+        {
+            self.original_glyphs = true;
+            return;
+        }
+        if l == "blocks"
+            || l == "block"
+            || l == "solid"
+            || l == "default"
+            || l == "shaded"
+        {
+            self.original_glyphs = false;
+            self.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
+            return;
+        }
+        // Custom ramp: one glyph per char, dark -> bright. Case matters for
+        // the drawn glyphs, so use the original-case value.
+        let ramp: Vec<String> = t.chars().map(|c| c.to_string()).collect();
+        if !ramp.is_empty() {
+            self.original_glyphs = false;
+            self.shading = ramp;
+        }
+    }
+
+    /// Explicit `"style"` / `"chars"` logo keys override the animation string.
+    pub fn apply_logo_overrides(&mut self, logo: &crate::config::configfile::LogoConfig) {
+        if let Some(s) = &logo.style {
+            if let Some(f) = Self::parse_style_value(s) {
+                self.flat = f;
+            }
+        }
+        if let Some(c) = &logo.chars {
+            self.apply_chars_value(c);
+        }
+    }
+}
+
+/// Byte-exactness note: `low` must be `raw.to_ascii_lowercase()` so byte
+/// indices found in `low` are valid in `raw` (ASCII case mapping is 1:1).
+
+fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Find `key` as a standalone word (not inside another identifier), so
+/// "speed" doesn't match inside "speed_x" and "glyph" not inside "glyphs".
+fn find_key(s: &str, key: &str) -> Option<usize> {
+    let mut from = 0;
+    while from + key.len() <= s.len() {
+        let rel = s[from..].find(key)?;
+        let pos = from + rel;
+        let prev_ok = pos == 0 || !s[..pos].chars().rev().next().is_some_and(is_word_char);
+        let after = pos + key.len();
+        let next_ok =
+            after >= s.len() || !s[after..].chars().next().is_some_and(is_word_char);
+        if prev_ok && next_ok {
+            return Some(pos);
+        }
+        from = pos + 1;
+    }
+    None
+}
+
+/// Standalone word check, e.g. bare "flat" shouldn't match inside "platform".
+fn has_word(s: &str, word: &str) -> bool {
+    find_key(s, word).is_some()
+}
+
+/// Extract `key=value` / `key:value` / `key value`. Quoted values keep
+/// everything to the closing quote (so ramps may contain spaces); otherwise
+/// the value runs to whitespace (and to comma when `stop_comma` is set).
+/// Case is taken from `raw`.
+fn extract_word(low: &str, raw: &str, key: &str, stop_comma: bool) -> Option<String> {
+    let pos = find_key(low, key)? + key.len();
+    let low_rest = &low[pos..];
+    // Skip separators between key and value.
+    let mut off = 0;
+    for (i, c) in low_rest.char_indices() {
+        if c == '=' || c == ':' || c == ' ' || c == '\t' || c == ',' {
+            off = i + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    let raw_rest = raw.get(pos + off..)?;
+    let low_rest = &low_rest[off..];
+    if raw_rest.is_empty() {
+        return None;
+    }
+    let first = raw_rest.chars().next().unwrap();
+    if first == '"' || first == '\'' {
+        let q = first;
+        let body = &raw_rest[q.len_utf8()..];
+        let end = body.find(q)?;
+        return Some(body[..end].to_string());
+    }
+    let mut end = 0;
+    for (i, c) in low_rest.char_indices() {
+        if c == ' ' || c == '\t' || c == '\n' || c == '\r' || (stop_comma && c == ',') {
+            break;
+        }
+        end = i + c.len_utf8();
+    }
+    if end == 0 {
+        return None;
+    }
+    // Map the low-based byte span back onto raw (identical layout).
+    Some(raw_rest[..end].to_string())
 }
 
 fn extract_number(s: &str, key: &str) -> Option<f32> {
-    let start = s.find(key)? + key.len();
+    let start = find_key(s, key)? + key.len();
     let rest = &s[start..];
     // Skip the separator(s) between the key and the value (e.g. "=", ":", spaces).
     let rest = rest.trim_start_matches(|c: char| !c.is_ascii_digit() && c != '-' && c != '.');
@@ -121,6 +315,70 @@ fn extract_number(s: &str, key: &str) -> Option<f32> {
         return None;
     }
     rest[..end].parse::<f32>().ok()
+}
+
+/// Replace every `key<sep>value` span with spaces so option words/values
+/// can't fake axis letters ('z' in "size", 'y' in "style", 'x' in "speed_x",
+/// or letters inside a custom chars ramp).
+fn blank_option_spans(s: &str, keys: &[&str]) -> String {
+    let mut buf: Vec<char> = s.chars().collect();
+    for key in keys {
+        let k: Vec<char> = key.chars().collect();
+        if k.is_empty() {
+            continue;
+        }
+        let mut i = 0;
+        while i + k.len() <= buf.len() {
+            if buf[i..i + k.len()] != k[..] {
+                i += 1;
+                continue;
+            }
+            let prev_ok = i == 0 || !is_word_char(buf[i - 1]);
+            let after = i + k.len();
+            let next_ok = after >= buf.len() || !is_word_char(buf[after]);
+            if !(prev_ok && next_ok) {
+                i += 1;
+                continue;
+            }
+            for j in i..after {
+                buf[j] = ' ';
+            }
+            let mut j = after;
+            while j < buf.len()
+                && (buf[j] == '=' || buf[j] == ':' || buf[j] == ' ' || buf[j] == '\t' || buf[j] == ',')
+            {
+                buf[j] = ' ';
+                j += 1;
+            }
+            if j < buf.len() && (buf[j] == '"' || buf[j] == '\'') {
+                let q = buf[j];
+                buf[j] = ' ';
+                j += 1;
+                while j < buf.len() && buf[j] != q {
+                    buf[j] = ' ';
+                    j += 1;
+                }
+                if j < buf.len() {
+                    buf[j] = ' ';
+                    j += 1;
+                }
+            } else {
+                // Values run to whitespace (commas belong to values, e.g. a
+                // ".,-~:;=!*#$@" ramp, and must not leak axis letters).
+                while j < buf.len()
+                    && buf[j] != ' '
+                    && buf[j] != '\t'
+                    && buf[j] != '\n'
+                    && buf[j] != '\r'
+                {
+                    buf[j] = ' ';
+                    j += 1;
+                }
+            }
+            i = j;
+        }
+    }
+    buf.into_iter().collect()
 }
 
 #[inline]
@@ -200,6 +458,8 @@ struct Point {
     ny: f32,
     nz: f32,
     color: i32,
+    /// Source logo glyph for this point (used when `original_glyphs` is set).
+    glyph: char,
 }
 
 // Parse ResolvedLogo.lines (may contain ANSI) into per-cell (glyph, color) grid.
@@ -425,6 +685,7 @@ fn build_points(
             if h <= 0.0 {
                 continue;
             }
+            let glyph_ch = cells[row][col].0.chars().next().unwrap_or(' ');
             for sr in 0..subdiv {
                 for sc in 0..subdiv {
                     let frow = row as f32 + sr as f32 / subdiv as f32;
@@ -461,6 +722,26 @@ fn build_points(
                     let ox = (fcol - cx) * SX;
                     let oy = (cy - frow) * SY;
                     let zr = ih * zmax;
+
+                    // Flat style: single-sided plane, no thickness — still
+                    // rotates in 3D, with plane normal (0,0,1) for lighting.
+                    if config.flat {
+                        if points.len() >= MAX_POINTS {
+                            break;
+                        }
+                        let col_val = if has_ansi { cells[row][col].1 } else { 1 };
+                        points.push(Point {
+                            x: ox,
+                            y: oy,
+                            z: 0.0,
+                            nx: 0.0,
+                            ny: 0.0,
+                            nz: 1.0,
+                            color: col_val,
+                            glyph: glyph_ch,
+                        });
+                        continue;
+                    }
 
                     let mut is_edge = false;
                     'outer: for dr in -1i32..=1 {
@@ -547,6 +828,7 @@ fn build_points(
                             ny,
                             nz,
                             color: col_val,
+                            glyph: glyph_ch,
                         });
                     }
                 }
@@ -591,6 +873,7 @@ pub fn render_frame(
     let mut zbuf = vec![0.0f32; h * w];
     let mut lumbuf = vec![0.0f32; h * w];
     let mut colorbuf = vec![0i32; h * w];
+    let mut glyphbuf = vec![' '; h * w];
 
     let mul = frame as f32;
     let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
@@ -672,6 +955,7 @@ pub fn render_frame(
             zbuf[idx] = ooz;
             lumbuf[idx] = lum;
             colorbuf[idx] = p.color;
+            glyphbuf[idx] = p.glyph;
         }
     }
 
@@ -712,7 +996,11 @@ pub fn render_frame(
                 }
                 prev_color = c;
             }
-            line.push_str(&config.shading[ci]);
+            if config.original_glyphs {
+                line.push(glyphbuf[idx]);
+            } else {
+                line.push_str(&config.shading[ci]);
+            }
         }
         if prev_color != -2 && prev_color != -1 {
             line.push_str("\x1b[0m");
@@ -732,6 +1020,7 @@ pub fn render_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::ResolvedLogo;
 
     #[test]
     fn speeds_parse_from_spin_string() {
@@ -749,5 +1038,114 @@ mod tests {
 
         let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
         assert!((cfg.speed_z - 1.0).abs() < 1e-4, "per-axis default stays 1.0");
+    }
+
+    #[test]
+    fn option_words_do_not_fake_axes() {
+        // "size" contains 'z', "style" contains 'y', "speed_x" contains 'x' —
+        // none of those may enable an axis on their own.
+        let cfg = AnimConfig::from_animation_str(Some("spin y size=2"));
+        assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z, "{:?}", cfg);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y style=flat"));
+        assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z, "{:?}", cfg);
+        assert!(cfg.flat);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed_x=0.5"));
+        assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y, "{:?}", cfg);
+        assert!((cfg.speed_x - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn generic_speed_not_clobbered_by_per_axis() {
+        // "speed" must not match inside "speed_y".
+        let cfg = AnimConfig::from_animation_str(Some("spin xyz speed_y=-1"));
+        assert!((cfg.speed - 2.0).abs() < 1e-4, "speed={}", cfg.speed);
+        assert!((cfg.speed_y - (-1.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn style_and_chars_parse() {
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5 flat"));
+        assert!(cfg.flat);
+        assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin z style=3d"));
+        assert!(!cfg.flat);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5 chars=ascii"));
+        assert!(cfg.original_glyphs);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin z chars=.,-~:;=!*#$@"));
+        assert!(!cfg.original_glyphs);
+        assert_eq!(cfg.shading.len(), 12);
+        assert_eq!(cfg.shading[0], ".");
+        assert_eq!(cfg.shading[11], "@");
+
+        // bare keywords
+        let cfg = AnimConfig::from_animation_str(Some("spin z ascii"));
+        assert!(cfg.original_glyphs);
+
+        // defaults stay 3d + blocks
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
+        assert!(!cfg.flat && !cfg.original_glyphs);
+        assert_eq!(cfg.shading.len(), 4);
+    }
+
+    fn test_logo() -> ResolvedLogo {
+        ResolvedLogo {
+            lines: vec!["AB".to_string(), "CD".to_string()],
+            colors: Vec::new(),
+            width: 2,
+            padding_right: 2,
+        }
+    }
+
+    fn joined_text(logo: &ResolvedLogo) -> String {
+        crate::app::strip_ansi(&logo.lines.join("\n"))
+    }
+
+    #[test]
+    fn original_glyphs_keep_logo_chars() {
+        let mut cfg = AnimConfig::from_animation_str(Some("spin"));
+        cfg.spin_x = false;
+        cfg.spin_y = false;
+        cfg.spin_z = false;
+        cfg.original_glyphs = true;
+        let out = render_frame(&test_logo(), 0, &cfg, 36, 4);
+        let text = joined_text(&out);
+        assert!(text.contains('A'), "keeps logo chars, got:\n{}", text);
+    }
+
+    #[test]
+    fn shading_ramp_draws_blocks_by_default() {
+        let mut cfg = AnimConfig::from_animation_str(Some("spin"));
+        cfg.spin_x = false;
+        cfg.spin_y = false;
+        cfg.spin_z = false;
+        let out = render_frame(&test_logo(), 0, &cfg, 36, 4);
+        let text = joined_text(&out);
+        assert!(
+            text.contains('█') || text.contains('▓') || text.contains('▒') || text.contains('░'),
+            "draws shading blocks, got:\n{}",
+            text
+        );
+        assert!(!text.contains('A'), "no logo chars in block mode");
+    }
+
+    #[test]
+    fn flat_style_renders() {
+        let mut cfg = AnimConfig::from_animation_str(Some("spin z flat"));
+        cfg.spin_x = false;
+        cfg.spin_y = false;
+        cfg.spin_z = false;
+        let out = render_frame(&test_logo(), 0, &cfg, 36, 4);
+        assert_eq!(out.lines.len(), 36);
+        let text = joined_text(&out);
+        assert!(
+            text.trim().len() > 4,
+            "flat plane renders something, got:\n{}",
+            text
+        );
     }
 }

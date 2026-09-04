@@ -61,6 +61,8 @@ Ordered list of modules. Each is a bare name or an object with options:
 | `color` | `"red"` or per-line `{ "1": "green", "2-4": "blue" }` |
 | `padding` | `4` or `{ top, left, right }` (`right` default `4`) |
 | `animation` | `off` = static; see [Animation](Animation.md) |
+| `style` | `"flat"` or `"3d"` (animation logo style) |
+| `chars` | `"ascii"` keeps logo chars, `"blocks"` default, or custom ramp |
 
 ## CLI Overrides
 

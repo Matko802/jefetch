@@ -35,13 +35,58 @@ Add `animation` to `~/.config/sharkfetch/config.jsonc`:
 | `speed=N` | Overall multiplier |
 | `speed_x` / `speed_y` / `speed_z` | Per-axis (negative reverses) |
 
+## Style: flat or 3d
+
+`3d` (default) extrudes the logo with thickness; `flat` spins a
+single-sided plane with no depth. Use a bare word or a `style` key:
+
+```jsonc
+"animation": "spin z speed=1.5 flat"    // flat plane
+"animation": "spin z style=3d"          // extruded 3d (default)
+```
+
+Or as separate logo keys (they win over the animation string):
+
+```jsonc
+{ "logo": { "source": "nixos", "animation": "spin z speed=1.5", "style": "flat" } }
+```
+
+| Value | Effect |
+|-------|--------|
+| `flat` / `2d` | Flat plane, no thickness |
+| `3d` | Extruded 3d (default) |
+
+## Characters: ascii or custom symbols
+
+By default the 3d logo is shaded with `░▒▓█`. Use the logo's own
+characters instead, or any custom ramp (dark → bright):
+
+```jsonc
+"animation": "spin z chars=ascii"           // keep original logo chars
+"animation": "spin z chars=.,-~:;=!*#$@"    // areofyl ascii ramp
+"animation": "spin z chars=blocks"          // back to ░▒▓█
+```
+
+Or as a separate logo key:
+
+```jsonc
+{ "logo": { "source": "nixos", "animation": "spin z speed=1.5", "chars": "ascii" } }
+```
+
+| Value | Effect |
+|-------|--------|
+| `ascii` / `original` | Keep the logo's own characters |
+| `blocks` | `░▒▓█` shading (default) |
+| any other text | Custom ramp, first char = darkest |
+
 ## Presets
 
 ```jsonc
-"animation": "spin y speed=2.0"          // gentle, areofyl-like
-"animation": "spin xyz speed=2.5"        // fast tumble
+"animation": "spin y speed=2.0"                    // gentle, areofyl-like
+"animation": "spin xyz speed=2.5"                  // fast tumble
 "animation": "spin yz speed_y=0.6 speed_z=-1"
 "animation": "spin x speed=1.0"
+"animation": "spin z speed=1.5 flat chars=ascii"    // flat, original chars
 ```
 
 Next: [Logos](Logos.md) →

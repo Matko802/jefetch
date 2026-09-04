@@ -225,7 +225,10 @@ impl App {
         };
         let base_lines = self.render_modules(&entries);
         // Build anim config from logo.animation ("spin", "spin x", "spin y", etc.)
-        let anim_cfg = crate::anim::AnimConfig::from_animation_str(self.config.logo.animation.as_deref());
+        // plus explicit logo "style" / "chars" keys (they win over the string).
+        let mut anim_cfg =
+            crate::anim::AnimConfig::from_animation_str(self.config.logo.animation.as_deref());
+        anim_cfg.apply_logo_overrides(&self.config.logo);
         print!("\x1b[?25l\x1b[?1049h");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };

@@ -21,6 +21,12 @@ pub struct LogoConfig {
     pub height: Option<u32>,
     /// Animation string: "off"/"static" = static, "spin xyz speed=1" etc = animated.
     pub animation: Option<String>,
+    /// Logo style override for animation: "flat" or "3d".
+    pub style: Option<String>,
+    /// Logo glyph override for animation: "ascii" keeps logo chars,
+    /// "blocks" uses the shading ramp, anything else is a custom ramp
+    /// (dark -> bright), e.g. ".,-~:;=!*#$@".
+    pub chars: Option<String>,
 }
 
 impl LogoConfig {
@@ -80,6 +86,16 @@ impl LogoConfig {
                     "animation" => {
                         if let Some(s) = v.as_str() {
                             l.animation = Some(s.to_string());
+                        }
+                    }
+                    "style" | "mode" => {
+                        if let Some(s) = v.as_str() {
+                            l.style = Some(s.to_string());
+                        }
+                    }
+                    "chars" | "characters" => {
+                        if let Some(s) = v.as_str() {
+                            l.chars = Some(s.to_string());
                         }
                     }
                     _ => {}
