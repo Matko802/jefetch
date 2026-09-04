@@ -246,6 +246,7 @@ impl App {
         const GAP: usize = 2;
         let mut last_refresh = std::time::Instant::now();
         let mut needs_draw = true;
+        let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
             print!("\x1b[?1049l\x1b[?25h");
@@ -354,7 +355,7 @@ impl App {
             let slices = (anim_cfg.frame_interval().as_millis() / 10).clamp(1, 200) as usize;
             for _ in 0..slices {
                 std::thread::sleep(std::time::Duration::from_millis(10));
-                match poll_key_action(tty_fd, is_tty) {
+                match poll_key_action(tty_fd, is_tty, &mut pending) {
                     KeyAction::Quit => {
                         quit = true;
                         break;
@@ -868,13 +869,17 @@ fn esc_followup_action(tail: &[u8]) -> KeyAction {
     }
 }
 
-fn poll_key_action(tty_fd: i32, is_tty: bool) -> KeyAction {
-    match poll_key_byte(tty_fd, is_tty) {
+fn poll_key_action(
+    tty_fd: i32,
+    is_tty: bool,
+    pending: &mut std::collections::VecDeque<u8>,
+) -> KeyAction {
+    match poll_key_byte(tty_fd, is_tty, pending) {
         Some(0x1b) => {
             std::thread::sleep(std::time::Duration::from_millis(25));
             let mut tail: Vec<u8> = Vec::new();
             loop {
-                match poll_key_byte(tty_fd, is_tty) {
+                match poll_key_byte(tty_fd, is_tty, pending) {
                     Some(b) => {
                         tail.push(b);
                         if tail.len() >= 16 {
@@ -891,12 +896,32 @@ fn poll_key_action(tty_fd: i32, is_tty: bool) -> KeyAction {
     }
 }
 
-fn poll_key_byte(tty_fd: i32, is_tty: bool) -> Option<u8> {
+fn debug_log_keys(src: &str, buf: &[u8]) {
+    if let Ok(p) = std::env::var("SHARKFETCH_DEBUG_KEYS") {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+            use std::io::Write;
+            let hex: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
+            let _ = writeln!(f, "{}: {}", src, hex.join(" "));
+        }
+    }
+}
+
+fn poll_key_byte(
+    tty_fd: i32,
+    is_tty: bool,
+    pending: &mut std::collections::VecDeque<u8>,
+) -> Option<u8> {
+    if let Some(b) = pending.pop_front() {
+        return Some(b);
+    }
     if is_tty && tty_fd != -1 {
         let mut buf = [0u8; 16];
         let n =
             unsafe { libc::read(tty_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
         if n > 0 {
+            let n = n as usize;
+            debug_log_keys("tty", &buf[..n]);
+            pending.extend(&buf[1..n]);
             return Some(buf[0]);
         }
     }
@@ -915,6 +940,9 @@ fn poll_key_byte(tty_fd: i32, is_tty: bool) -> Option<u8> {
     };
     unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags); }
     if n > 0 {
+        let n = n as usize;
+        debug_log_keys("stdin", &buf[..n]);
+        pending.extend(&buf[1..n]);
         Some(buf[0])
     } else {
         None
