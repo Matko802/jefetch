@@ -244,7 +244,6 @@ impl App {
         let mut frame: usize = 0;
         let mut out = String::new();
         const GAP: usize = 2;
-        const ANIM_W: usize = 60;
         let mut last_refresh = std::time::Instant::now();
         let mut needs_draw = true;
 
@@ -317,6 +316,8 @@ impl App {
                 out.clear();
                 out.push_str("\x1b[2J\x1b[H");
                 let logo_h = base_logo.as_ref().map(|l| l.lines.len()).unwrap_or(0);
+                let logo_w = base_logo.as_ref().map(|l| l.width).unwrap_or(0);
+                let logo_gap = base_logo.as_ref().map(|l| l.padding_right).unwrap_or(0);
                 let logo_start = 1;
                 for row in 0..render_height {
                     let mut line = String::new();
@@ -329,17 +330,16 @@ impl App {
                             let lcol = colorize_logo(&logo_line, color_name);
                             let vis = crate::print::format::visible_len(&lcol);
                             line.push_str(&lcol);
-
-                            if vis < ANIM_W {
-                                line.push_str(&" ".repeat(ANIM_W - vis));
-                            }
-                        } else {
-                            line.push_str(&" ".repeat(ANIM_W));
+                            line.push_str(&" ".repeat(logo_w.saturating_sub(vis)));
+                        } else if logo_w > 0 {
+                            line.push_str(&" ".repeat(logo_w));
                         }
                     }
                     let info_row = row as isize - 1;
                     if info_row >= 0 && (info_row as usize) < info_count {
-                        line.push_str(&" ".repeat(GAP));
+                        if base_logo.is_some() {
+                            line.push_str(&" ".repeat(logo_gap));
+                        }
                         line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                     }
                     out.push_str(line.trim_end());
