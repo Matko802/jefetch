@@ -16,7 +16,10 @@ Add `animation` to `~/.config/sharkfetch/config.jsonc`:
 | `off` / `static` / `none` | Static |
 | unset | Static |
 
-`--static` forces static even if config says `spin`. Quit: `q`, `Esc`, or `Ctrl-C`.
+`--static` prints one static frame and exits (also used for piped output).
+In a terminal you always get the live view instead: `t` pauses/resumes
+the spin in place (pose is kept), `q` / `Esc` / `Ctrl-C` quits, and the
+system info refreshes every second (uptime, memory, swap, disk, ...).
 
 ## Axis & Speed
 

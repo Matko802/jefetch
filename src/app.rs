@@ -152,7 +152,14 @@ impl App {
             return 0;
         }
 
-        // Areofetch-like animated mode
+        // Live view on a TTY: animated per config (or static live), `t`
+        // toggles the spin in place, info refreshes every second.
+        // Piped output and --static stay one-shot for scripts.
+        if !self.options.force_static && stdout_is_tty() {
+            return self.run_live(&entries, self.should_animate());
+        }
+
+        // Areofetch-like animated mode (non-TTY legacy path)
         if self.should_animate() {
             return self.run_animated(&entries);
         }
@@ -205,25 +212,14 @@ impl App {
         0
     }
 
-    fn run_animated(&mut self, _entries: &[ModuleEntry]) -> i32 {
-        self.run_animated_fallback()
-    }
-
-    fn run_animated_fallback(&mut self) -> i32 {
-        let base_logo = match &self.logo {
-            Some(l) => l.clone(),
-            None => return 0,
-        };
-        let entries: Vec<ModuleEntry> = if let Some(s) = &self.options.structure {
-            s.split(':').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).map(|name| {
-                self.config.modules.iter().find(|m| m.module().eq_ignore_ascii_case(&name)).cloned().unwrap_or_else(|| ModuleEntry::Name(name))
-            }).collect()
-        } else if !self.config.modules.is_empty() {
-            self.config.modules.clone()
-        } else {
-            default_structure().into_iter().map(ModuleEntry::Name).collect()
-        };
-        let base_lines = self.render_modules(&entries);
+    /// Live view (TTY only): animated and static share one loop. `t`
+    /// pauses/resumes the spin without losing the pose, info re-renders
+    /// every second so uptime/memory/swap/disk stay fresh. `q`/Esc/Ctrl-C
+    /// quits. Static view uses the classic logo, centred like the 3D one.
+    fn run_live(&mut self, entries: &[ModuleEntry], start_animated: bool) -> i32 {
+        let base_logo = self.logo.clone();
+        let mut animated = start_animated && base_logo.is_some();
+        let mut base_lines = self.render_modules(entries);
         // Build anim config from logo.animation ("spin", "spin x", "spin y", etc.)
         // plus explicit logo "style" / "chars" keys (they win over the string).
         let mut anim_cfg =
@@ -251,76 +247,126 @@ impl App {
         let _tty_guard = tty_file;
         let mut frame: usize = 0;
         let mut out = String::new();
-        // areofyl 1:1 layout: logo canvas (ANIM_WIDTH=60) on the left,
-        // info on the right, logo vertically centred on the info block.
-        let info_count = base_lines.len();
-        let render_height = (info_count + 2).max(36);
         const GAP: usize = 2;
-        loop {
-            // True 3D port: per-frame 3D projection + Blinn-Phong — 1:1 fetch.c
-            let anim_logo = crate::anim::render_frame(&base_logo, frame, &anim_cfg, render_height, info_count);
-            out.clear();
-            out.push_str("\x1b[2J\x1b[H");
-            let n = anim_logo.lines.len();
-            for row in 0..n {
-                // Logo canvas row (blank-filled to ANIM_WIDTH=60); already coloured.
-                let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
-                let mut line = String::new();
-                line.push_str(logo_canvas);
-                // Info line: row 1..=info_count holds the k-th info line (fetch_start=1).
-                let info_row = row as isize - 1;
-                if info_row >= 0 && (info_row as usize) < info_count {
-                    line.push_str(&" ".repeat(GAP));
-                    line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
-                }
-                out.push_str(line.trim_end());
-                out.push('\n');
-            }
-            print!("{}", out);
+        const ANIM_W: usize = 60;
+        let mut last_refresh = std::time::Instant::now();
+        let mut needs_draw = true;
+        // Quit/restore helper: leaves the terminal exactly as found.
+        let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
+            print!("\x1b[?1049l\x1b[?25h");
             let _ = std::io::Write::flush(&mut std::io::stdout());
+            if is_tty && tty_fd != -1 {
+                unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, orig_term); }
+            }
+        };
+        loop {
+            // Refresh system info ~1/s (heavy detections are cached; only
+            // /proc reads like memory/uptime/swap actually re-run).
+            if last_refresh.elapsed() >= std::time::Duration::from_secs(1) {
+                base_lines = self.render_modules(entries);
+                last_refresh = std::time::Instant::now();
+                needs_draw = true;
+            }
+            // areofyl 1:1 layout: logo canvas on the left, info on the
+            // right starting at row 1, logo vertically centred.
+            let info_count = base_lines.len();
+            let render_height = (info_count + 2).max(36);
+            if animated {
+                // True 3D port: per-frame 3D projection + Blinn-Phong — 1:1 fetch.c
+                let logo = base_logo.as_ref().expect("animated needs a logo");
+                let anim_logo =
+                    crate::anim::render_frame(logo, frame, &anim_cfg, render_height, info_count);
+                out.clear();
+                out.push_str("\x1b[2J\x1b[H");
+                let n = anim_logo.lines.len();
+                for row in 0..n {
+                    // Logo canvas row (blank-filled to ANIM_W=60); already coloured.
+                    let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
+                    let mut line = String::new();
+                    line.push_str(logo_canvas);
+                    // Info line: row 1..=info_count holds the k-th info line (fetch_start=1).
+                    let info_row = row as isize - 1;
+                    if info_row >= 0 && (info_row as usize) < info_count {
+                        line.push_str(&" ".repeat(GAP));
+                        line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
+                    }
+                    out.push_str(line.trim_end());
+                    out.push('\n');
+                }
+                print!("{}", out);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                frame = frame.wrapping_add(1);
+            } else if needs_draw {
+                // Static view: classic logo, centred like the 3D one, same
+                // info rows so toggling never moves the text.
+                out.clear();
+                out.push_str("\x1b[2J\x1b[H");
+                let logo_h = base_logo.as_ref().map(|l| l.lines.len()).unwrap_or(0);
+                let logo_start = render_height.saturating_sub(logo_h) / 2;
+                for row in 0..render_height {
+                    let mut line = String::new();
+                    if let Some(l) = &base_logo {
+                        if row >= logo_start && row < logo_start + logo_h {
+                            let i = row - logo_start;
+                            let logo_line = l.lines.get(i).cloned().unwrap_or_default();
+                            let color_name =
+                                l.colors.get(i).map(|s| s.as_str()).unwrap_or("");
+                            let lcol = colorize_logo(&logo_line, color_name);
+                            let vis = crate::print::format::visible_len(&lcol);
+                            line.push_str(&lcol);
+                            // Pad short lines to the canvas width; longer
+                            // lines just push the info right (rare, wide logos).
+                            if vis < ANIM_W {
+                                line.push_str(&" ".repeat(ANIM_W - vis));
+                            }
+                        } else {
+                            line.push_str(&" ".repeat(ANIM_W));
+                        }
+                    }
+                    let info_row = row as isize - 1;
+                    if info_row >= 0 && (info_row as usize) < info_count {
+                        line.push_str(&" ".repeat(GAP));
+                        line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
+                    }
+                    out.push_str(line.trim_end());
+                    out.push('\n');
+                }
+                print!("{}", out);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                needs_draw = false;
+            }
+            // Poll keys (~80ms total per tick so quit/toggle stay snappy).
+            let mut quit = false;
             for _ in 0..8 {
                 std::thread::sleep(std::time::Duration::from_millis(10));
-                let mut should_quit = false;
-                if is_tty && tty_fd != -1 {
-                    let mut buf = [0u8; 16];
-                    let n = unsafe { libc::read(tty_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-                    if n > 0 {
-                        for &b in &buf[..n as usize] {
-                            if b == b'q' || b == b'Q' || b == 0x03 || b == 0x1b {
-                                should_quit = true;
-                                break;
+                if let Some(b) = poll_key_byte(tty_fd, is_tty) {
+                    match classify_key(b) {
+                        KeyAction::Quit => {
+                            quit = true;
+                            break;
+                        }
+                        KeyAction::Toggle => {
+                            if base_logo.is_some() {
+                                animated = !animated;
+                                needs_draw = true;
                             }
                         }
+                        KeyAction::Ignore => {}
                     }
                 }
-                if !should_quit {
-                    let mut buf = [0u8; 16];
-                    let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
-                    if flags != -1 {
-                        unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK); }
-                        let n = unsafe { libc::read(libc::STDIN_FILENO, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-                        if n > 0 {
-                            for &b in &buf[..n as usize] {
-                                if b == b'q' || b == b'Q' || b == 0x03 {
-                                    should_quit = true;
-                                    break;
-                                }
-                            }
-                        }
-                        unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags); }
-                    }
-                }
-                if should_quit {
-                    print!("\x1b[?1049l\x1b[?25h");
-                    let _ = std::io::Write::flush(&mut std::io::stdout());
-                    if is_tty && tty_fd != -1 {
-                        unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, &orig_term); }
-                    }
-                    return 0;
+                if quit {
+                    break;
                 }
             }
-            frame = frame.wrapping_add(1);
+            if quit {
+                restore(tty_fd, is_tty, &orig_term);
+                return 0;
+            }
         }
+    }
+
+    fn run_animated(&mut self, entries: &[ModuleEntry]) -> i32 {
+        self.run_live(entries, true)
     }
 
     // Kept for compatibility but now unused; 3D lives in `crate::anim`.
@@ -816,6 +862,58 @@ fn config_search_dirs() -> Vec<String> {
     dirs
 }
 
+/// Live-view key actions: quit, or pause/resume the spin in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAction {
+    Quit,
+    Toggle,
+    Ignore,
+}
+
+pub fn classify_key(b: u8) -> KeyAction {
+    match b {
+        b'q' | b'Q' | 0x03 | 0x1b => KeyAction::Quit,
+        b't' | b'T' => KeyAction::Toggle,
+        _ => KeyAction::Ignore,
+    }
+}
+
+/// Non-blocking single-byte poll: /dev/tty first (raw mode), then stdin.
+/// Returns None when no key is waiting.
+fn poll_key_byte(tty_fd: i32, is_tty: bool) -> Option<u8> {
+    if is_tty && tty_fd != -1 {
+        let mut buf = [0u8; 16];
+        let n =
+            unsafe { libc::read(tty_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        if n > 0 {
+            return Some(buf[0]);
+        }
+    }
+    let mut buf = [0u8; 16];
+    let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
+    if flags == -1 {
+        return None;
+    }
+    unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags | libc::O_NONBLOCK); }
+    let n = unsafe {
+        libc::read(
+            libc::STDIN_FILENO,
+            buf.as_mut_ptr() as *mut libc::c_void,
+            buf.len(),
+        )
+    };
+    unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_SETFL, flags); }
+    if n > 0 {
+        Some(buf[0])
+    } else {
+        None
+    }
+}
+
+pub fn stdout_is_tty() -> bool {
+    unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 }
+}
+
 pub fn load_config_file(path: &str) -> Option<Config> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut cfg = Config::from_jsonc(&text).ok()?;
@@ -851,5 +949,21 @@ fn utf8_len(first: u8) -> usize {
         0xC0..=0xDF => 2,
         0xE0..=0xEF => 3,
         _ => 4,
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_keys_classify() {
+        assert_eq!(classify_key(b'q'), KeyAction::Quit);
+        assert_eq!(classify_key(b'Q'), KeyAction::Quit);
+        assert_eq!(classify_key(0x03), KeyAction::Quit);
+        assert_eq!(classify_key(0x1b), KeyAction::Quit);
+        assert_eq!(classify_key(b't'), KeyAction::Toggle);
+        assert_eq!(classify_key(b'T'), KeyAction::Toggle);
+        assert_eq!(classify_key(b'a'), KeyAction::Ignore);
+        assert_eq!(classify_key(b' '), KeyAction::Ignore);
     }
 }

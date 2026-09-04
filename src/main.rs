@@ -18,7 +18,10 @@ Options:
       --list-data-paths       List search paths for presets and logos
       --list-logos            List available logos
   -j, --json                  Enable JSON output (NYI in phase 1)
-      --static                Force static display (no animation) even if config has animation=spin
+      --static                One-shot static output (no live view) even if config has animation=spin
+
+Live view (terminal): t toggles the spin in place, q/Esc/Ctrl-C quits,
+info (uptime/memory/swap/...) refreshes every second. Piped output stays one-shot.
 "#;
 
 fn main() {
