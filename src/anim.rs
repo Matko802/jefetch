@@ -881,6 +881,52 @@ fn build_points(
     (points, palette)
 }
 
+pub struct LogoCloud {
+    points: Vec<Point>,
+    palette_ansi: Vec<String>,
+    has_ansi: bool,
+    sub_rows: usize,
+    sub_cols: usize,
+    buf_z: Vec<f32>,
+    buf_lum: Vec<f32>,
+    buf_col: Vec<i32>,
+    buf_glyph: Vec<char>,
+    buf_w: usize,
+    buf_h: usize,
+}
+
+pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud> {
+    if logo.lines.is_empty() {
+        return None;
+    }
+    let (cells, has_ansi, rows, cols) = parse_cells(logo);
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    let (points, palette) = build_points(&cells, has_ansi, config, rows, cols);
+    if points.is_empty() {
+        return None;
+    }
+    let (sub_rows, sub_cols) = config.sub_divs();
+    let palette_ansi = palette
+        .iter()
+        .map(|p| format!("\x1b[1;{}m", p))
+        .collect();
+    Some(LogoCloud {
+        points,
+        palette_ansi,
+        has_ansi,
+        sub_rows,
+        sub_cols,
+        buf_z: Vec::new(),
+        buf_lum: Vec::new(),
+        buf_col: Vec::new(),
+        buf_glyph: Vec::new(),
+        buf_w: 0,
+        buf_h: 0,
+    })
+}
+
 pub fn render_frame(
     logo: &ResolvedLogo,
     frame: usize,
@@ -888,18 +934,34 @@ pub fn render_frame(
     render_height: usize,
     info_line_count: usize,
 ) -> ResolvedLogo {
-    if logo.lines.is_empty() {
-        return logo.clone();
+    match build_cloud(logo, config) {
+        Some(mut cloud) => render_cloud(&mut cloud, frame, config, render_height, info_line_count),
+        None => logo.clone(),
     }
-    let (cells, has_ansi, rows, cols) = parse_cells(logo);
-    if rows == 0 || cols == 0 {
-        return logo.clone();
-    }
+}
 
-    let (points, palette) = build_points(&cells, has_ansi, config, rows, cols);
-    if points.is_empty() {
-        return logo.clone();
-    }
+pub fn render_cloud(
+    cloud: &mut LogoCloud,
+    frame: usize,
+    config: &AnimConfig,
+    render_height: usize,
+    info_line_count: usize,
+) -> ResolvedLogo {
+    let LogoCloud {
+        points,
+        palette_ansi,
+        has_ansi,
+        sub_rows,
+        sub_cols,
+        buf_z,
+        buf_lum,
+        buf_col,
+        buf_glyph,
+        buf_w,
+        buf_h,
+    } = cloud;
+    let (sub_rows, sub_cols) = (*sub_rows, *sub_cols);
+    let has_ansi = *has_ansi;
 
     let render_height = render_height.max(1);
     let logo_height = render_height.min((ANIM_WIDTH * 3 / 5) as usize).max(1);
@@ -908,13 +970,22 @@ pub fn render_frame(
     let w = ANIM_WIDTH as usize;
     let h = render_height;
 
-    let (sub_rows, sub_cols) = config.sub_divs();
     let sw = w * sub_cols;
     let sh = h * sub_rows;
-    let mut zbuf = vec![0.0f32; sh * sw];
-    let mut lumbuf = vec![0.0f32; sh * sw];
-    let mut colorbuf = vec![0i32; sh * sw];
-    let mut glyphbuf = vec![' '; sh * sw];
+    if *buf_w != sw || *buf_h != sh {
+        *buf_z = vec![0.0f32; sh * sw];
+        *buf_lum = vec![0.0f32; sh * sw];
+        *buf_col = vec![0i32; sh * sw];
+        *buf_glyph = vec![' '; sh * sw];
+        *buf_w = sw;
+        *buf_h = sh;
+    } else {
+        buf_z.fill(0.0);
+        buf_lum.fill(0.0);
+        buf_col.fill(0);
+        buf_glyph.fill(' ');
+    }
+    let (zbuf, lumbuf, colorbuf, glyphbuf) = (&mut **buf_z, &mut **buf_lum, &mut **buf_col, &mut **buf_glyph);
 
     let mul = frame as f32 * BASE_FPS / config.fps.clamp(1.0, 120.0);
     let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
@@ -944,7 +1015,7 @@ pub fn render_frame(
     };
     let k1x2 = k1 * 2.0;
 
-    for p in &points {
+    for p in points.iter() {
         let (px, py, pz) = (p.x, p.y, p.z);
         let (nx, ny, nz) = (p.nx, p.ny, p.nz);
         let y1 = py * ca - pz * sa;
@@ -1006,7 +1077,7 @@ pub fn render_frame(
 
     fn push_color(
         line: &mut String,
-        palette: &[String],
+        palette_ansi: &[String],
         has_ansi: bool,
         c: i32,
         prev_color: &mut i32,
@@ -1016,8 +1087,8 @@ pub fn render_frame(
                 line.push_str("\x1b[0m");
             }
             if c >= 0 {
-                if let Some(p) = palette.get(c as usize) {
-                    line.push_str(&format!("\x1b[1;{}m", p));
+                if let Some(a) = palette_ansi.get(c as usize) {
+                    line.push_str(a);
                 }
             } else if has_ansi {
                 line.push_str("\x1b[0m");
@@ -1043,7 +1114,7 @@ pub fn render_frame(
                     line.push(' ');
                     continue;
                 }
-                push_color(&mut line, &palette, has_ansi, colorbuf[idx], &mut prev_color);
+                push_color(&mut line, palette_ansi, has_ansi, colorbuf[idx], &mut prev_color);
                 line.push(glyphbuf[idx]);
                 continue;
             }
@@ -1092,7 +1163,7 @@ pub fn render_frame(
             } else {
                 &config.shading[ci]
             };
-            push_color(&mut line, &palette, has_ansi, best_c, &mut prev_color);
+            push_color(&mut line, palette_ansi, has_ansi, best_c, &mut prev_color);
             line.push_str(glyph);
         }
         if prev_color != -2 && prev_color != -1 {
@@ -1409,6 +1480,17 @@ mod tests {
         let a = render_frame(&solid_test_logo(), 12, &slow, 36, 4);
         let b = render_frame(&solid_test_logo(), 30, &fast, 36, 4);
         assert_eq!(a.lines, b.lines, "1s of spin looks identical at 12 and 30 fps");
+    }
+
+    #[test]
+    fn cloud_renders_identical_to_frame() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
+        for frame in [0usize, 7, 25] {
+            let a = render_cloud(&mut cloud, frame, &cfg, 36, 4);
+            let b = render_frame(&solid_test_logo(), frame, &cfg, 36, 4);
+            assert_eq!(a.lines, b.lines, "cloud == frame at {}", frame);
+        }
     }
 
     #[test]

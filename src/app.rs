@@ -230,6 +230,9 @@ impl App {
         let mut anim_cfg =
             crate::anim::AnimConfig::from_animation_str(self.config.logo.animation.as_deref());
         anim_cfg.apply_logo_overrides(&self.config.logo);
+        let mut cloud = base_logo
+            .as_ref()
+            .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
         print!("\x1b[0m\x1b[2J\x1b[H\x1b[?25l");
@@ -287,6 +290,9 @@ impl App {
                                 self.config.logo.animation.as_deref(),
                             );
                             anim_cfg.apply_logo_overrides(&self.config.logo);
+                            cloud = base_logo
+                                .as_ref()
+                                .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
                             animated = self.should_animate() && base_logo.is_some();
                         }
                     }
@@ -300,11 +306,18 @@ impl App {
             let render_height = (info_count + 2).max(36);
             if animated {
 
-                let logo = base_logo.as_ref().expect("animated needs a logo");
-                let anim_logo =
-                    crate::anim::render_frame(logo, frame, &anim_cfg, render_height, info_count);
+                let anim_logo = match cloud.as_mut() {
+                    Some(c) => crate::anim::render_cloud(
+                        c,
+                        frame,
+                        &anim_cfg,
+                        render_height,
+                        info_count,
+                    ),
+                    None => base_logo.clone().expect("animated needs a logo"),
+                };
                 out.clear();
-                out.push_str("\x1b[2J\x1b[H");
+                out.push_str("\x1b[H");
                 let n = anim_logo.lines.len();
                 for row in 0..n {
 
@@ -318,15 +331,16 @@ impl App {
                         line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                     }
                     out.push_str(line.trim_end());
-                    out.push('\n');
+                    out.push_str("\x1b[K\n");
                 }
+                out.push_str("\x1b[J");
                 print!("{}", out);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 frame = frame.wrapping_add(1);
             } else if needs_draw {
 
                 out.clear();
-                out.push_str("\x1b[2J\x1b[H");
+                out.push_str("\x1b[H");
                 let logo_h = base_logo.as_ref().map(|l| l.lines.len()).unwrap_or(0);
                 let logo_w = base_logo.as_ref().map(|l| l.width).unwrap_or(0);
                 let logo_gap = base_logo.as_ref().map(|l| l.padding_right).unwrap_or(0);
@@ -355,8 +369,9 @@ impl App {
                         line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                     }
                     out.push_str(line.trim_end());
-                    out.push('\n');
+                    out.push_str("\x1b[K\n");
                 }
+                out.push_str("\x1b[J");
                 print!("{}", out);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 needs_draw = false;
