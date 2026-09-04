@@ -15,7 +15,7 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     },
     "logo": {
         "source": "",
-        //  "animation": "spin xyz speed=2.0 fps=30 flat chars=ascii",
+        //  "animation": "spin xyz speed=2.0 flat chars=ascii",
         "padding": {
             "top": 0,
             "left": 0,

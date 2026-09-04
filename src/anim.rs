@@ -30,7 +30,6 @@ pub struct AnimConfig {
     pub flat: bool,
 
     pub original_glyphs: bool,
-    pub fps: f32,
 }
 
 impl Default for AnimConfig {
@@ -53,7 +52,6 @@ impl Default for AnimConfig {
             shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
             flat: false,
             original_glyphs: false,
-            fps: BASE_FPS,
         }
     }
 }
@@ -61,7 +59,7 @@ impl Default for AnimConfig {
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
-    "symbols", "symbol", "ramp", "fps", "refresh", "rate", "color",
+    "symbols", "symbol", "ramp", "color",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -158,18 +156,20 @@ impl AnimConfig {
             if let Some(v) = extract_number(&low, "height") {
                 cfg.height = v as i32;
             }
-            if let Some(v) = extract_number(&low, "fps")
-                .or_else(|| extract_number(&low, "refresh"))
-                .or_else(|| extract_number(&low, "rate"))
-            {
-                cfg.fps = v.clamp(1.0, 120.0);
-            }
         }
         cfg
     }
 
+    pub fn auto_fps(&self) -> f32 {
+        let eff = (self.speed * self.speed_x)
+            .abs()
+            .max((self.speed * self.speed_y).abs())
+            .max((self.speed * self.speed_z).abs());
+        (BASE_FPS * (eff / 2.0).max(1.0)).clamp(BASE_FPS, 120.0)
+    }
+
     pub fn frame_interval(&self) -> std::time::Duration {
-        std::time::Duration::from_secs_f32(1.0 / self.fps.clamp(1.0, 120.0))
+        std::time::Duration::from_secs_f32(1.0 / self.auto_fps())
     }
 
     pub fn animation_color(s: Option<&str>) -> Option<String> {
@@ -987,7 +987,7 @@ pub fn render_cloud(
     }
     let (zbuf, lumbuf, colorbuf, glyphbuf) = (&mut **buf_z, &mut **buf_lum, &mut **buf_col, &mut **buf_glyph);
 
-    let mul = frame as f32 * BASE_FPS / config.fps.clamp(1.0, 120.0);
+    let mul = frame as f32 * BASE_FPS / config.auto_fps();
     let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
     let b = if config.spin_y { mul * 0.06 * config.speed * config.speed_y } else { 0.0 };
     let c_ang = if config.spin_z { mul * 0.05 * config.speed * config.speed_z } else { 0.0 };
@@ -1254,38 +1254,33 @@ mod tests {
     }
 
     #[test]
-    fn fps_parses_and_clamps() {
-        let cfg = AnimConfig::from_animation_str(Some("spin z fps=30"));
-        assert!((cfg.fps - 30.0).abs() < 1e-4);
-        assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y);
+    fn fps_follows_speed() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        assert!((cfg.auto_fps() - 12.0).abs() < 1e-4);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin y refresh=60"));
-        assert!((cfg.fps - 60.0).abs() < 1e-4);
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=1.0"));
+        assert!((cfg.auto_fps() - 12.0).abs() < 1e-4);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin y rate:24"));
-        assert!((cfg.fps - 24.0).abs() < 1e-4);
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=4.0"));
+        assert!((cfg.auto_fps() - 24.0).abs() < 1e-4);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin"));
-        assert!((cfg.fps - 12.0).abs() < 1e-4);
+        let cfg = AnimConfig::from_animation_str(Some("spin xyz speed=2.0 speed_z=3.0"));
+        assert!((cfg.auto_fps() - 36.0).abs() < 1e-4);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin fps=500"));
-        assert!((cfg.fps - 120.0).abs() < 1e-4);
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=40.0"));
+        assert!((cfg.auto_fps() - 120.0).abs() < 1e-4);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin fps=0"));
-        assert!((cfg.fps - 1.0).abs() < 1e-4);
-
-        let d = AnimConfig::from_animation_str(Some("spin fps=20")).frame_interval();
-        assert!((d.as_secs_f32() - 0.05).abs() < 1e-3);
+        let d = AnimConfig::from_animation_str(Some("spin y speed=4.0")).frame_interval();
+        assert!((d.as_secs_f32() - 1.0 / 24.0).abs() < 1e-3);
     }
 
     #[test]
     fn all_options_combine_in_one_line() {
         let cfg = AnimConfig::from_animation_str(Some(
-            "spin xyz speed=2.0 fps=30 flat chars=ascii color=red",
+            "spin xyz speed=2.0 flat chars=ascii color=red",
         ));
         assert!(cfg.spin_x && cfg.spin_y && cfg.spin_z);
         assert!((cfg.speed - 2.0).abs() < 1e-4);
-        assert!((cfg.fps - 30.0).abs() < 1e-4);
         assert!(cfg.flat);
         assert!(cfg.original_glyphs);
         assert_eq!(
@@ -1470,16 +1465,20 @@ mod tests {
     }
 
     #[test]
-    fn rotation_speed_independent_of_fps() {
-        let mut slow = AnimConfig::from_animation_str(Some("spin y speed=2.0 fps=12"));
+    fn faster_speed_means_faster_spin() {
+        let mut slow = AnimConfig::from_animation_str(Some("spin y speed=1.0"));
         slow.spin_x = false;
         slow.spin_z = false;
-        let mut fast = AnimConfig::from_animation_str(Some("spin y speed=2.0 fps=30"));
+        let mut fast = AnimConfig::from_animation_str(Some("spin y speed=4.0"));
         fast.spin_x = false;
         fast.spin_z = false;
-        let a = render_frame(&solid_test_logo(), 12, &slow, 36, 4);
-        let b = render_frame(&solid_test_logo(), 30, &fast, 36, 4);
-        assert_eq!(a.lines, b.lines, "1s of spin looks identical at 12 and 30 fps");
+        let a = render_frame(&solid_test_logo(), 24, &slow, 36, 4);
+        let b = render_frame(&solid_test_logo(), 24, &fast, 36, 4);
+        assert_ne!(a.lines, b.lines, "speed changes the pose at the same frame");
+        assert!(
+            fast.auto_fps() > slow.auto_fps(),
+            "higher speed raises refresh rate"
+        );
     }
 
     #[test]

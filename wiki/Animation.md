@@ -39,13 +39,11 @@ it parses again).
 
 | Key | Effect |
 |-----|--------|
-| `speed=N` | Overall multiplier |
-| `speed_x` / `speed_y` / `speed_z` | Per-axis (negative reverses) |
-| `fps=N` | Smoothness only, in frames per second (default 12, clamped 1–120) — spin speed stays the same |
+| `speed=N` | Overall multiplier — refresh rate follows automatically so fast spins stay smooth |
 
 ```jsonc
-"animation": "spin y speed=2.0 fps=30"   // smoother spin
-"animation": "spin z fps=60"             // max smoothness
+"animation": "spin y speed=2.0"          // default, 12 fps
+"animation": "spin y speed=6.0"          // 3x faster and auto-raises to ~36 fps
 ```
 
 ## Style: flat or 3d
@@ -100,7 +98,7 @@ Or as a separate logo key:
 "animation": "spin yz speed_y=0.6 speed_z=-1"
 "animation": "spin x speed=1.0"
 "animation": "spin z speed=1.5 flat chars=ascii"    // flat, original chars
-"animation": "spin xyz speed=2.0 fps=30 flat chars=ascii"  // everything in one line (add color=red to force one color)
+"animation": "spin xyz speed=2.0 flat chars=ascii"  // everything in one line (add color=red to force one color)
 ```
 
 Next: [Logos](Logos.md) →
