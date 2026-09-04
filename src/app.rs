@@ -594,13 +594,21 @@ fn resolve_logo(cfg: &Config) -> Option<ResolvedLogo> {
         }
     }
 
-    // Builtin logo by type.
+    // Builtin logo by name: an explicit non-empty `source` wins, then
+    // `type` (unless "auto"), then OS auto-detect. (A `source` that is a
+    // file path or multi-line text was already handled above.)
     let id = crate::detection::os::detect().id;
     let name = cfg
         .logo
-        .logo_type
+        .source
         .clone()
-        .filter(|t| !t.eq_ignore_ascii_case("auto"))
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            cfg.logo
+                .logo_type
+                .clone()
+                .filter(|t| !t.eq_ignore_ascii_case("auto"))
+        })
         .unwrap_or(id);
     builtin_logo_v(name.to_ascii_lowercase().as_str(), &cfg.logo)
 }
