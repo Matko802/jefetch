@@ -36,11 +36,9 @@ brightColor = true
 [logo]
 # Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
 name = ""
-# Areofetch-like animation: "off" (static, default) or "spin" (animated, q/Ctrl-C to quit)
-# Axes: x / y / z (e.g. "spin x", "spin y", "spin z", "spin xyz", "spin yz")
-# Speed/direction: speed=1.0, speed_x=1.0, speed_y=1.0, speed_z=1.0 (negative = reverse)
-# Full example: animation = "spin y speed=2.0" or "spin xyz speed=1.5 speed_z=-1"
-# animation = "spin"
+# animation = "spin"                      # "off" = static
+# animation = "spin y speed=2.0"          # spin_x/y/z, negative speed = reverse
+# animation = "spin xyz speed=1.5 speed_z=-1"
 
 [logo.padding]
 top = 0
@@ -71,11 +69,9 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     "logo": {
         // Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
         "source": "",
-        // Areofetch-like animation: "off" (static) or "spin" (animated, q/Ctrl-C to quit)
-        // Axes: x / y / z  e.g. "spin x", "spin y", "spin z", "spin xyz"
-        // Speed/direction: speed=1.0, speed_x=1.0, speed_y=1.0, speed_z=1.0 (negative = reverse)
-        // e.g. "spin y speed=2.0" or "spin xyz speed=1.5 speed_z=-1"
-        // "animation": "spin",
+        // "animation": "spin",                     // "off" = static
+        // "animation": "spin y speed=2.0",         // spin_x/y/z, negative = reverse
+        // "animation": "spin xyz speed=1.5 speed_z=-1",
         "padding": {
             "top": 0,
             "left": 0,
@@ -189,7 +185,6 @@ fn parse_logo(doc: &TomlDoc) -> LogoConfig {
             }
         }
     }
-    // Areofetch-like animation: animation = "spin" or "off"/"static"
     if let Some(v) = doc.get_in("logo", "animation").and_then(|v| v.as_str()) {
         l.animation = Some(v.to_string());
     } else if let Some(v) = doc.get("animation").and_then(|v| v.as_str()) {

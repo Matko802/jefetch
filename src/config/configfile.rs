@@ -19,7 +19,7 @@ pub struct LogoConfig {
     pub logo_key: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    /// Areofetch-like animation: "off"/"static" = no animation, "spin" = spinning logo
+    /// Animation string: "off"/"static" = static, "spin xyz speed=1" etc = animated.
     pub animation: Option<String>,
 }
 
