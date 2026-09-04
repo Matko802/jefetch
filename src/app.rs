@@ -13,6 +13,8 @@ pub struct CliOptions {
     pub no_config: bool,
     pub json: bool,
     pub force_static: bool,
+    /// Override logo via `--logo <name>` without editing the config.
+    pub logo_name: Option<String>,
 }
 
 /// A resolved logo: plain lines plus the ANSI color for each line.
@@ -137,6 +139,11 @@ impl App {
         // Create default config only if none was loaded (first run).
         if self.config.loaded_from.is_none() && !self.options.no_config {
             self.ensure_default_config();
+        }
+        // `--logo <name>` overrides the config logo without editing it.
+        if let Some(name) = &self.options.logo_name {
+            self.config.logo.source = Some(name.clone());
+            self.config.logo.logo_type = Some("builtin".to_string());
         }
         self.pick_logo();
 

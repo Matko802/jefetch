@@ -9,6 +9,7 @@ Options:
   -h, --help                  Show this help message
   -v, --version               Show the full version
   -s, --structure <modules>   Set custom `module:module:module` structure
+  -l, --logo <name>           Override logo (builtin id, e.g. "nixos") for this run
   -c, --config <path>         Load a custom config file
       --no-config             Don't load config file
       --list-modules          List all available modules
@@ -103,6 +104,12 @@ fn main() {
                     i += 1;
                 }
             }
+            "-l" | "--logo" => {
+                if i + 1 < args.len() {
+                    opts.logo_name = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
             "-j" | "--json" => {
                 opts.json = true;
             }
@@ -112,6 +119,7 @@ fn main() {
                     match k {
                         "-s" | "--structure" => opts.structure = Some(v.to_string()),
                         "-c" | "--config" => opts.config_path = Some(v.to_string()),
+                        "-l" | "--logo" => opts.logo_name = Some(v.to_string()),
                         _ => {
                             eprintln!("Error: unknown option: {}", other);
                             std::process::exit(400);
