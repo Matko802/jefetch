@@ -262,7 +262,6 @@ impl App {
                 out.push_str(line.trim_end());
                 out.push('\n');
             }
-            out.push_str("\n\x1b[2m[press q or Ctrl-C to quit]\x1b[0m\n");
             print!("{}", out);
             let _ = std::io::Write::flush(&mut std::io::stdout());
             for _ in 0..8 {
