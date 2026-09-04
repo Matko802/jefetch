@@ -453,16 +453,59 @@ struct Point {
     glyph: char,
 }
 
-fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, usize) {
-    let mut cells: Vec<Vec<(String, i32)>> = Vec::new();
+fn fg_payload(seq: &str) -> Option<String> {
+    let t = seq.strip_prefix("\x1b[").unwrap_or(seq);
+    let t = t.strip_suffix('m').unwrap_or(t);
+    let parts: Vec<&str> = t.split(';').collect();
+    let mut cur: Option<String> = None;
+    let mut i = 0;
+    while i < parts.len() {
+        let p = parts[i];
+        if p.is_empty() {
+            cur = Some(String::new());
+        } else if let Ok(38) = p.parse::<i32>() {
+            if parts.get(i + 1) == Some(&"5") && i + 2 < parts.len() && !parts[i + 2].is_empty() {
+                cur = Some(format!("38;5;{}", parts[i + 2]));
+                i += 2;
+            } else if parts.get(i + 1) == Some(&"2") && i + 4 < parts.len() {
+                cur = Some(format!(
+                    "38;2;{};{};{}",
+                    parts[i + 2], parts[i + 3], parts[i + 4]
+                ));
+                i += 4;
+            } else {
+                cur = Some(String::new());
+            }
+        } else if let Ok(num) = p.parse::<i32>() {
+            if (30..=37).contains(&num) || (90..=97).contains(&num) {
+                cur = Some(num.to_string());
+            } else if num == 0 || num == 39 {
+                cur = Some(String::new());
+            }
+        }
+        i += 1;
+    }
+    cur
+}
+
+fn pal_pos(palette: &[String], p: &str) -> i32 {
+    palette
+        .iter()
+        .position(|x| x == p)
+        .map(|i| i as i32)
+        .unwrap_or(-1)
+}
+
+fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, String)>>, bool, usize, usize) {
+    let mut cells: Vec<Vec<(String, String)>> = Vec::new();
     let mut has_ansi = false;
     let mut max_cols = 0usize;
     for line in &logo.lines {
-        let mut row: Vec<(String, i32)> = Vec::new();
+        let mut row: Vec<(String, String)> = Vec::new();
         let s = line.as_str();
         let bytes = s.as_bytes();
         let mut i = 0usize;
-        let mut cur: i32 = 0;
+        let mut cur = String::new();
         let n = s.len();
         while i < n {
             let b = bytes[i];
@@ -473,23 +516,11 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
                 }
                 if j < n && bytes[j] as char == 'm' {
                     let seq = &s[i + 2..j];
-                    if seq.is_empty() {
-                        cur = 0;
-                    } else {
-                        for part in seq.split(';') {
-                            if part.is_empty() {
-                                cur = 0;
-                                continue;
-                            }
-                            if let Ok(num) = part.parse::<i32>() {
-                                if (30..=37).contains(&num) || (90..=97).contains(&num) {
-                                    cur = num;
-                                    has_ansi = true;
-                                } else if num == 0 || num == 39 {
-                                    cur = 0;
-                                }
-                            }
+                    if let Some(p) = fg_payload(seq) {
+                        if !p.is_empty() {
+                            has_ansi = true;
                         }
+                        cur = p;
                     }
                     i = j + 1;
                     continue;
@@ -512,7 +543,7 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
                 actual = 1;
             }
             let ch = &s[i..i + actual];
-            row.push((ch.to_string(), cur));
+            row.push((ch.to_string(), cur.clone()));
             i += actual;
         }
         if row.len() > max_cols {
@@ -525,16 +556,12 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
     if !has_ansi {
         for c in &logo.colors {
             if !c.is_empty() {
-
-                for part in c.split(';') {
-                    if let Ok(num) = part.parse::<i32>() {
-                        if (30..=37).contains(&num) || (90..=97).contains(&num) {
-                            has_ansi = true;
-                            break;
-                        }
+                if let Some(p) = fg_payload(c) {
+                    if !p.is_empty() {
+                        has_ansi = true;
+                        break;
                     }
                 }
-                if has_ansi { break; }
             }
         }
     }
@@ -545,18 +572,11 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
             if r >= logo.colors.len() { break; }
             let col_s = &logo.colors[r];
             if col_s.is_empty() { continue; }
-            let mut col_num = 0;
-            for part in col_s.split(';') {
-                if let Ok(num) = part.parse::<i32>() {
-                    if (30..=37).contains(&num) || (90..=97).contains(&num) {
-                        col_num = num;
-                    }
-                }
-            }
-            if col_num == 0 { continue; }
+            let col_pay = fg_payload(col_s).unwrap_or_default();
+            if col_pay.is_empty() { continue; }
             for cell in row.iter_mut() {
-                if cell.1 == 0 {
-                    cell.1 = col_num;
+                if cell.1.is_empty() {
+                    cell.1 = col_pay.clone();
                 }
             }
         }
@@ -565,14 +585,27 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
 }
 
 fn build_points(
-    cells: &[Vec<(String, i32)>],
+    cells: &[Vec<(String, String)>],
     has_ansi: bool,
     config: &AnimConfig,
     rows: usize,
     cols: usize,
-) -> Vec<Point> {
+) -> (Vec<Point>, Vec<String>) {
+    let mut palette: Vec<String> = Vec::new();
+    if !has_ansi {
+        palette.push("37".to_string());
+        palette.push("35".to_string());
+    } else {
+        for row in cells {
+            for (_, p) in row {
+                if !p.is_empty() && !palette.iter().any(|x| x == p) {
+                    palette.push(p.clone());
+                }
+            }
+        }
+    }
     if rows == 0 || cols == 0 {
-        return Vec::new();
+        return (Vec::new(), palette);
     }
     const SX: f32 = 0.07;
     const SY: f32 = 0.14;
@@ -720,7 +753,12 @@ fn build_points(
                         if points.len() >= MAX_POINTS {
                             break;
                         }
-                        let col_val = if has_ansi { cells[row][col].1 } else { 1 };
+                        let col_val = if has_ansi {
+                            let p = &cells[row][col].1;
+                            if p.is_empty() { -1 } else { pal_pos(&palette, p) }
+                        } else {
+                            0
+                        };
                         points.push(Point {
                             x: ox,
                             y: oy,
@@ -767,12 +805,13 @@ fn build_points(
                         let py = oy;
                         let pz = t * 2.0 * zr;
                         let col_val = if has_ansi {
-                            cells[row][col].1
+                            let p = &cells[row][col].1;
+                            if p.is_empty() { -1 } else { pal_pos(&palette, p) }
                         } else {
                             if k == 0 || k == layers - 1 {
-                                1
-                            } else {
                                 0
+                            } else {
+                                1
                             }
                         };
                         let (nx, ny, nz) = if k == 0 {
@@ -826,7 +865,7 @@ fn build_points(
             }
         }
     }
-    points
+    (points, palette)
 }
 
 pub fn render_frame(
@@ -844,7 +883,7 @@ pub fn render_frame(
         return logo.clone();
     }
 
-    let points = build_points(&cells, has_ansi, config, rows, cols);
+    let (points, palette) = build_points(&cells, has_ansi, config, rows, cols);
     if points.is_empty() {
         return logo.clone();
     }
@@ -952,17 +991,23 @@ pub fn render_frame(
     let total_sub = sub_rows * sub_cols;
     let full_mask = (1u32 << total_sub) - 1;
 
-    fn push_color(line: &mut String, has_ansi: bool, c: i32, prev_color: &mut i32) {
+    fn push_color(
+        line: &mut String,
+        palette: &[String],
+        has_ansi: bool,
+        c: i32,
+        prev_color: &mut i32,
+    ) {
         if c != *prev_color {
             if *prev_color != -2 && *prev_color != -1 {
                 line.push_str("\x1b[0m");
             }
-            if has_ansi && c > 0 && c < 128 {
-                line.push_str(&format!("\x1b[1;{}m", c));
+            if c >= 0 {
+                if let Some(p) = palette.get(c as usize) {
+                    line.push_str(&format!("\x1b[1;{}m", p));
+                }
             } else if has_ansi {
                 line.push_str("\x1b[0m");
-            } else if c == 1 {
-                line.push_str("\x1b[1;37m");
             } else {
                 line.push_str("\x1b[1;35m");
             }
@@ -985,7 +1030,7 @@ pub fn render_frame(
                     line.push(' ');
                     continue;
                 }
-                push_color(&mut line, has_ansi, colorbuf[idx], &mut prev_color);
+                push_color(&mut line, &palette, has_ansi, colorbuf[idx], &mut prev_color);
                 line.push(glyphbuf[idx]);
                 continue;
             }
@@ -1034,7 +1079,7 @@ pub fn render_frame(
             } else {
                 &config.shading[ci]
             };
-            push_color(&mut line, has_ansi, best_c, &mut prev_color);
+            push_color(&mut line, &palette, has_ansi, best_c, &mut prev_color);
             line.push_str(glyph);
         }
         if prev_color != -2 && prev_color != -1 {
@@ -1147,6 +1192,70 @@ mod tests {
 
         let d = AnimConfig::from_animation_str(Some("spin fps=20")).frame_interval();
         assert!((d.as_secs_f32() - 0.05).abs() < 1e-3);
+    }
+
+    #[test]
+    fn fg_payload_parses_extended_colors() {
+        assert_eq!(fg_payload("31").as_deref(), Some("31"));
+        assert_eq!(fg_payload("1;31").as_deref(), Some("31"));
+        assert_eq!(fg_payload("38;5;225").as_deref(), Some("38;5;225"));
+        assert_eq!(
+            fg_payload("1;38;5;200").as_deref(),
+            Some("38;5;200")
+        );
+        assert_eq!(
+            fg_payload("38;2;41;19;182").as_deref(),
+            Some("38;2;41;19;182")
+        );
+        assert_eq!(fg_payload("0"), Some(String::new()));
+        assert_eq!(fg_payload("39"), Some(String::new()));
+        assert_eq!(fg_payload(""), Some(String::new()));
+        assert_eq!(fg_payload("1"), None);
+        assert_eq!(fg_payload("\x1b[1;38;5;225m").as_deref(), Some("38;5;225"));
+    }
+
+    fn ext_color_logo() -> ResolvedLogo {
+        ResolvedLogo {
+            lines: vec![
+                "\x1b[38;5;225m@@\x1b[0m".to_string(),
+                "\x1b[38;5;225m@@\x1b[0m".to_string(),
+            ],
+            colors: Vec::new(),
+            width: 2,
+            padding_right: 2,
+        }
+    }
+
+    #[test]
+    fn animated_keeps_256_colors() {
+        let mut cfg = AnimConfig::from_animation_str(Some("spin"));
+        cfg.spin_x = false;
+        cfg.spin_y = false;
+        cfg.spin_z = false;
+        let out = render_frame(&ext_color_logo(), 0, &cfg, 36, 4);
+        let text = out.lines.join("\n");
+        assert!(
+            text.contains("38;5;225"),
+            "keeps 256-color payload, got:\n{}",
+            crate::app::strip_ansi(&text)
+        );
+    }
+
+    #[test]
+    fn animated_plain_colors_unchanged() {
+        let mut cfg = AnimConfig::from_animation_str(Some("spin"));
+        cfg.spin_x = false;
+        cfg.spin_y = false;
+        cfg.spin_z = false;
+        let logo = ResolvedLogo {
+            lines: vec!["\x1b[31mAB\x1b[0m".to_string()],
+            colors: Vec::new(),
+            width: 2,
+            padding_right: 2,
+        };
+        let out = render_frame(&logo, 0, &cfg, 36, 4);
+        let text = out.lines.join("\n");
+        assert!(text.contains("\x1b[1;31m"), "still emits 1;31, got:\n{}", text);
     }
 
     fn test_logo() -> ResolvedLogo {
