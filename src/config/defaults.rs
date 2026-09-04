@@ -17,8 +17,18 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
         // Builtin logo id (e.g. "nixos", "arch", "ubuntu"). Empty = OS auto-detect.
         "source": "",
         //  "animation": "spin z speed=1.5",
-        //  "style": "flat",   // "flat" or "3d"
-        //  "chars": "ascii",  // "ascii" keeps logo chars, or custom ".,-~:;=!*#$@"
+        //  "animation": "spin xyz speed=2.0 fps=30",
+        //  "animation": "spin y flat chars=ascii",
+        //  "animation": "spin z chars=.,-~:;=!*#$@",
+        //  "animation": "off",
+        //  "style": "flat",
+        //  "style": "3d",
+        //  "chars": "ascii",
+        //  "chars": "blocks",
+        //  "chars": ".,-~:;=!*#$@",
+        //  "type": "none",
+        //  "type": "file",
+        //  "color": "red",
         "padding": {
             "top": 0,
             "left": 0,
