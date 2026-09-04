@@ -18,7 +18,7 @@ pub fn detect() -> UptimeInfo {
     if let Some(boot) = read_file("/proc/sys/kernel/btime") {
         info.boot_time_secs = boot.trim().parse().unwrap_or(0);
     }
-    // Fallback: boot time = now - uptime when btime is unavailable.
+
     if info.boot_time_secs == 0 && info.uptime_secs > 0 {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

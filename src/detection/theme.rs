@@ -11,15 +11,13 @@ pub struct GtkThemeInfo {
     pub desktop: String,
 }
 
-/// GTK theme settings from gsettings when available, else the config file
-/// ~/.config/gtk-3.0/settings.ini (fastfetch uses both).
 pub fn detect() -> GtkThemeInfo {
     let mut info = GtkThemeInfo {
         desktop: desktop_name(),
         ..Default::default()
     };
     parse_settings_file(&mut info);
-    // gsettings overrides file-based settings when present.
+
     if let Some(v) = gsettings_lookup("gtk-theme") {
         info.gtk_theme = v;
     }

@@ -1,8 +1,6 @@
 use crate::detection::getenv;
 use std::collections::HashMap;
 
-// SIOC* request codes are not exported by libc for musl; the values are ABI
-// stable across Linux architectures.
 const SIOCGIFFLAGS: libc::Ioctl = 0x8913;
 const SIOCGIFMTU: libc::Ioctl = 0x8921;
 const SIOCGIFHWADDR: libc::Ioctl = 0x8927;
@@ -41,7 +39,6 @@ pub fn detect() -> Vec<IpInfo> {
         .collect()
 }
 
-/// Enumerate interface addresses (IPv4 + IPv6) with getifaddrs.
 fn addrs_via_getifaddrs(map: &mut HashMap<String, IpInfo>) {
     const SKIP: &[&str] = &["lo"];
     unsafe {
@@ -87,7 +84,6 @@ fn addrs_via_getifaddrs(map: &mut HashMap<String, IpInfo>) {
     }
 }
 
-/// Render the raw 32-bit s_addr as an IPv4 dotted string.
 fn format_addr4(s_addr: u32) -> String {
     let b = match cfg!(target_endian = "little") {
         true => s_addr.to_le_bytes(),
@@ -96,14 +92,13 @@ fn format_addr4(s_addr: u32) -> String {
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
-/// Format an IPv6 address manually (avoid inet_ntop availability issues).
 fn format_addr6(addr: &libc::in6_addr) -> String {
     let bytes = addr.s6_addr;
     let groups: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|c| u16::from_be_bytes([c[0], c[1]]))
         .collect();
-    // Longest run of consecutive zero groups collapses to "::".
+
     let mut best: (usize, usize) = (0, 0);
     let mut i = 0;
     while i < groups.len() {
@@ -132,7 +127,7 @@ fn format_addr6(addr: &libc::in6_addr) -> String {
         out.push_str("::");
         out.push_str(&tail);
     } else if groups.iter().any(|&g| g == 0) {
-        // Single zero group cannot elide; fall back to full form.
+
         out = format_hex(&groups);
     } else {
         out = format_hex(&groups);
@@ -194,7 +189,6 @@ fn mtu_for(ifname: &str) -> u64 {
     unsafe { ifr.ifr_ifru.ifru_mtu as u64 }
 }
 
-/// Link speed in Mbps via ethtool ioctl (legacy ETHTOOL_GSET).
 fn speed_mbps(ifname: &str) -> u64 {
     const ETHTOOL_GSET: u32 = 0x00000001;
     #[repr(C)]
@@ -277,8 +271,6 @@ fn flags_for(ifname: &str) -> String {
     parts.join(",")
 }
 
-/// Convenience for the dns module: the system hostname (used by modules
-/// that need it without full user detection).
 pub fn hostname_hint() -> Option<String> {
     getenv("HOSTNAME").filter(|h| !h.is_empty())
 }

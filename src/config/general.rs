@@ -1,4 +1,3 @@
-// General (global, non-module) config, mirroring fastfetch's FFGlobalGeneralConfig.
 use super::json::JsonValue;
 
 #[derive(Debug, Clone, Default)]

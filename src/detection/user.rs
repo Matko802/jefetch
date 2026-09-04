@@ -27,7 +27,6 @@ pub fn detect() -> UserInfo {
         ..Default::default()
     };
 
-    // Apply user@host truncation rules fastfetch uses.
     info.user_name_part = user.split('@').next().unwrap_or(&user).to_string();
     info.host_name_part = host.split('.').next().unwrap_or(&host).to_string();
     info

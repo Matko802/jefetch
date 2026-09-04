@@ -1,12 +1,3 @@
-// GENERATED FILE - do not edit by hand.
-// All ASCII logos imported from fastfetch (src/logo/ascii/**/*.txt).
-// name: primary distro name used by by_name()/auto-detect.
-// aliases: other names that map to this logo (for distro-id matching).
-// palette: fastfetch FF_COLOR palette entries as SGR payloads (e.g. "34", "38;5;36").
-//   `$N` markers in lines expand to \x1b[{palette[N-1]}m.
-// color_keys/color_title: per-logo default key/title SGR payloads (fastfetch colorKeys/colorTitle).
-
-
 pub static LOGOS: &[Logo] = &[
     Logo {
         name: "ALTLinux",

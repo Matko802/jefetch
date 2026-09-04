@@ -8,17 +8,15 @@ pub struct CpuInfo {
     pub packages: usize,
     pub physical_cores: usize,
     pub logical_cores: usize,
-    /// Maximum frequency in MHz (from sysfs, fallback /proc/cpuinfo).
+
     pub freq_max_mhz: u64,
-    /// Current frequency in MHz (from sysfs scaling_cur_freq).
+
     pub freq_cur_mhz: u64,
-    /// Performance core count for hybrid CPUs, if known.
+
     pub pe_cores: Option<usize>,
     pub ee_cores: Option<usize>,
 }
 
-/// Approximate the microarchitecture level from /proc/cpuinfo flags,
-/// following the x86-64-vN (PSABI) ladder.
 pub fn march() -> Option<String> {
     let text = read_file("/proc/cpuinfo").unwrap_or_default();
     let mut flags = String::new();
@@ -50,7 +48,6 @@ pub fn march() -> Option<String> {
     None
 }
 
-/// Number of NUMA nodes on the system.
 pub fn numa_nodes() -> u64 {
     let Ok(e) = std::fs::read_dir("/sys/devices/system/node") else {
         return 1;
@@ -70,7 +67,7 @@ pub fn detect() -> CpuInfo {
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() {
-            // Processor block ended; record the core.
+
             if !phys_id.is_empty() || !core_id.is_empty() {
                 unique_cores.insert((phys_id.clone(), core_id.clone()));
                 phys_id.clear();
@@ -117,7 +114,6 @@ pub fn detect() -> CpuInfo {
         info.physical_cores = info.logical_cores;
     }
 
-    // Frequency: prefer the sysfs cpufreq values.
     info.freq_max_mhz = read_file("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
         .and_then(|s| s.trim().parse::<u64>().ok())
         .map(|khz| khz / 1000)
@@ -134,7 +130,7 @@ pub fn detect() -> CpuInfo {
 
     if info.freq_max_mhz == 0 {
         info.freq_max_mhz = info.freq_cur_mhz;
-        // AMD reports base frequency in cpuinfo; Intel max is in sysfs.
+
         if info.freq_max_mhz == 0 {
             info.freq_max_mhz = cur_mhz.first().copied().unwrap_or(0);
         }
@@ -143,9 +139,6 @@ pub fn detect() -> CpuInfo {
     info
 }
 
-/// For hybrid Intel CPUs, /sys/devices/system/cpu/hybrid_cpu_list lists the
-/// performance CPUs (e.g. "0-6,8-14"), one entry per enabled thread. Count
-/// unique core_ids among them to get physical P cores.
 fn detect_hybrid(info: &mut CpuInfo) {
     let list = read_file("/sys/devices/system/cpu/hybrid_cpu_list");
     let Some(list) = list else { return };

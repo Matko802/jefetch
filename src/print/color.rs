@@ -1,22 +1,13 @@
-// Fastfetch-style color codes and ANSI helpers.
-//
-// fastfetch format strings embed `$`-prefixed color codes and `{#...}` color
-// blocks, e.g.:
-//   $reset, $c1..$c9, $b (bold), $i (italic), $u (underline), $s
-//   {#white}, {#bright_green}, {#underline_yellow}, {#38;2;r;g;b}, {#} (reset)
-
 pub const RESET: &str = "\x1b[0m";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyResult {
-    /// Color can be applied by emitting ANSI codes around the text.
+
     Ansi { start: String, end: String },
-    /// No color to apply (opaque / unset).
+
     None,
 }
 
-/// Parse a fastfetch color-name string (e.g. "32", "green", "bright-red",
-/// "214", "#ff8800", "38;2;255;0;0") into something that can be applied.
 pub fn color_code_to_ansi(color: &str) -> ApplyResult {
     if let Some(sgr) = named_color_sgr(color) {
         return ApplyResult::Ansi {
@@ -25,12 +16,10 @@ pub fn color_code_to_ansi(color: &str) -> ApplyResult {
         };
     }
 
-    // ANSI SGR number directly: "32", "1", "214", "38;5;123"
     if let Some(num) = color.parse::<u16>().ok() {
         return ansi_from_fg(num);
     }
 
-    // #rrggbb
     if let Some(hex) = color.strip_prefix('#') {
         if hex.len() == 6 {
             if let Ok(v) = u32::from_str_radix(hex, 16) {
@@ -48,9 +37,6 @@ pub fn color_code_to_ansi(color: &str) -> ApplyResult {
     ApplyResult::None
 }
 
-/// Map a fastfetch color name to a full SGR sequence.
-/// Supports named colors, bright colors, and style prefixes
-/// (bold_, italic_, underline_, invert_, dim_, strikethrough_, fg_, bg_).
 pub fn named_color_sgr(name: &str) -> Option<String> {
     let n = name.trim();
     if n.is_empty() || n == "reset" || n == "reset_default" || n == "#" {
@@ -63,7 +49,6 @@ pub fn named_color_sgr(name: &str) -> Option<String> {
         return Some("\x1b[49m".to_string());
     }
 
-    // Style prefixes.
     let (style, base) = split_style(n);
     let mut codes: Vec<u8> = Vec::new();
     match style.as_str() {
@@ -76,7 +61,6 @@ pub fn named_color_sgr(name: &str) -> Option<String> {
         _ => {}
     }
 
-    // Foreground by default, background with bg_ prefix.
     let is_bg = base.starts_with("bg_") || base.starts_with("bg-");
     let base: &str = &base;
     let base = base
@@ -106,7 +90,7 @@ pub fn named_color_sgr(name: &str) -> Option<String> {
         _ => 0,
     };
     if base_escape == 0 {
-        // Could be a raw SGR like "38;2;255;0;0" or numeric color.
+
         if let Some(num) = base.parse::<u16>().ok() {
             codes.push(num as u8);
             return Some(sgr_from_codes(&codes));
@@ -138,7 +122,7 @@ fn split_style(n: &str) -> (String, String) {
 }
 
 fn hex_or_semicolons(s: &str) -> Option<String> {
-    // "38;2;r;g;b" or a 24bit hex without '#'
+
     if let Some(hex) = s.strip_prefix('#') {
         if hex.len() == 6 {
             if let Ok(v) = u32::from_str_radix(hex, 16) {
@@ -173,8 +157,6 @@ fn ansi_from_fg(num: u16) -> ApplyResult {
     }
 }
 
-/// Common `$`-code expansion used inside format strings.
-/// Returns `Some(text)` if `code` is a known standalone color code.
 pub fn expand_dollar_code(code: &str) -> Option<String> {
     match code {
         "reset" => Some(RESET.to_string()),

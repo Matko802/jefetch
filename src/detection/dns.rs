@@ -6,7 +6,6 @@ pub struct DnsInfo {
     pub domain: String,
 }
 
-/// Parse /etc/resolv.conf nameserver lines.
 pub fn detect() -> Option<DnsInfo> {
     let text = read_file("/etc/resolv.conf")?;
     let mut info = DnsInfo::default();

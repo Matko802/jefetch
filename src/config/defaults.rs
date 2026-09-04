@@ -1,7 +1,3 @@
-// Default JSONC config written on first run. Config is JSONC-only.
-
-/// The stock `config.jsonc` written on first run. It reproduces fastfetch's
-/// default structure and display settings.
 pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     "modules": [
         "title", "separator", "os", "host", "kernel", "uptime", "packages",

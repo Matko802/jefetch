@@ -1,6 +1,3 @@
-// Module execution: dispatch a configured module to its implementation,
-// then apply its format string (or default key:value rendering).
-
 use super::{ModuleInstance, ModuleOutput};
 use crate::config::configfile::Config;
 use crate::print::format::{self, Resolver};
@@ -8,7 +5,6 @@ use crate::print::format::{self, Resolver};
 pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     let name = inst.module.to_ascii_lowercase();
 
-    // Special non-data modules.
     match name.as_str() {
         "break" => return Some(super::ModuleOutput::blank()),
         "separator" => return Some(render_separator(cfg)),
@@ -17,7 +13,6 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
 
     let base = super::exec_impl::render(name.as_str(), inst, cfg)?;
 
-    // A module's own format string replaces its value output.
     let values: Vec<String> = if let Some(fmt_str) = &inst.args.format {
         base.values
             .iter()
@@ -27,7 +22,6 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
         base.values.clone()
     };
 
-    // The key may contain format syntax ({#white}...). Render it.
     let raw_key = inst
         .args
         .key
@@ -38,8 +32,6 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     let mut out = super::ModuleOutput::supported("", values);
     out.key = key_rendered;
 
-    // If the key has no inline color codes, colour it with keyColor for
-    // consistency with fastfetch's default behaviour.
     if !out.key.contains('\x1b') {
         if let Some(c) = inst
             .args
@@ -58,8 +50,6 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     Some(out)
 }
 
-/// Render the module key through the format engine, resolving `{key}` to the
-/// module's base key.
 fn render_key(raw_key: &str, base_key: &str, inst: &ModuleInstance) -> String {
     let r = format::format(raw_key, &KeyResolver { base_key, inst });
     r.text
@@ -81,7 +71,7 @@ impl<'a> Resolver for KeyResolver<'a> {
         self.base_key
     }
     fn get_color(&self, name: &str) -> Option<String> {
-        // `{#keys}` resolves to the module key color.
+
         if name == "keys" {
             let c = self.inst.args.key_color.as_deref().unwrap_or("");
             return crate::print::color::named_color_sgr(c);
@@ -90,8 +80,6 @@ impl<'a> Resolver for KeyResolver<'a> {
     }
 }
 
-/// Render a module's custom format string. The single value is exposed as
-/// `{value}`/`{title}`.
 fn render(fmt_str: &str, inst: &ModuleInstance, value: &str) -> String {
     let value_s = value.to_string();
     let key_s = inst.args.key.clone().unwrap_or_default();
@@ -122,12 +110,12 @@ impl<'a> Resolver for ValueResolver<'a> {
         {
             return Some(v.1.clone());
         }
-        // `{default}` maps to the whole value.
+
         if name.eq_ignore_ascii_case("default") {
             render_empty("default");
             return self.values.first().map(|(_, v)| v.clone());
         }
-        // `{all}` and `{1}` are single-value aliases.
+
         if name.eq_ignore_ascii_case("all")
             || name == "1"
             || name == "value"
@@ -153,8 +141,7 @@ impl<'a> Resolver for ValueResolver<'a> {
 fn render_empty(_: &str) {}
 
 fn render_separator(_cfg: &Config) -> ModuleOutput {
-    // fastfetch's separator prints `-` repeated across the title width
-    // (1 + username + hostname), not the full terminal width.
+
     let u = crate::detection::user::detect();
     let title_len = 1
         + crate::print::format::visible_len(&u.user_name_part)

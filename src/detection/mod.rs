@@ -1,6 +1,3 @@
-// Common Linux platform helpers used by the detection modules.
-// Pure Rust: reads /proc and /sys, uses libc syscalls where needed.
-
 pub mod battery;
 pub mod board;
 pub mod brightness;
@@ -35,7 +32,6 @@ pub fn read_file_lines<P: AsRef<std::path::Path>>(path: P) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Read a key=value line-style file (e.g. /proc/cpuinfo, /etc/os-release).
 pub fn parse_key_value_file(path: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in read_file_lines(path) {
@@ -52,7 +48,6 @@ pub fn parse_key_value_file(path: &str) -> Vec<(String, String)> {
     out
 }
 
-/// Strip quotes from a value like "ubuntu 24.04".
 pub fn unquote(v: &str) -> String {
     let mut s = v.to_string();
     if s.len() >= 2 {
@@ -70,10 +65,6 @@ pub fn getenv(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-/// Cached fastfetch --json output (60s TTL) for use by modules that want to
-/// be exactly like fastfetch without reimplementing every detection.
-/// Excludes terminalfont which does a DECRQSS kitty-query that leaks as ^[P1+r garbage
-/// and causes the 1s stutter when cache misses.
 #[allow(dead_code)]
 pub fn fastfetch_json() -> Option<String> {
     use std::sync::OnceLock;
@@ -88,8 +79,7 @@ pub fn fastfetch_json() -> Option<String> {
                 "/tmp/sharkfetch-cache.json".to_string()
             }
         };
-        // Use file cache if fresh (<60s) — keeps warm runs instant (4 ms) and avoids the kitty-query stutter
-        // If stale, return stale immediately and refresh in background so the next run is instant too
+
         if let Ok(meta) = std::fs::metadata(&cache_path) {
             if let Ok(mtime) = meta.modified() {
                 let is_fresh = mtime.elapsed().map(|e| e.as_secs() < 60).unwrap_or(false);
@@ -98,7 +88,7 @@ pub fn fastfetch_json() -> Option<String> {
                         if is_fresh {
                             return Some(txt);
                         }
-                        // Stale: return stale now, refresh in background
+
                         let cache_clone = cache_path.clone();
                         std::thread::spawn(move || {
                             if let Some(out) = run_capture_timeout(
@@ -115,7 +105,7 @@ pub fn fastfetch_json() -> Option<String> {
                 }
             }
         }
-        // No cache: spawn in background and return None immediately so first run is instant (4 ms) via native detection
+
         let cache_clone = cache_path.clone();
         std::thread::spawn(move || {
             if let Some(out) = run_capture_timeout(
@@ -131,7 +121,6 @@ pub fn fastfetch_json() -> Option<String> {
     }).clone()
 }
 
-/// Run a command and return trimmed stdout (used sparingly, prefer /proc).
 pub fn run_capture(cmd: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(cmd)
         .args(args)
@@ -151,8 +140,6 @@ pub fn run_capture_lines(cmd: &str, args: &[&str]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Run a command with a hard timeout and return trimmed stdout on success.
-/// Saves/restores termios so a killed `fastfetch` (DECRQSS kitty-query) doesn't leave ECHO off.
 pub fn run_capture_timeout(cmd: &str, args: &[&str], timeout_ms: u64) -> Option<String> {
     let saved_stdin = termios_save(libc::STDIN_FILENO);
     let saved_stdout = termios_save(libc::STDOUT_FILENO);
@@ -185,7 +172,7 @@ fn termios_save(fd: i32) -> Option<libc::termios> {
     }
 }
 fn termios_restore(fd: i32, saved: &Option<libc::termios>) {
-    // Always ensure ECHO and ICANON are on, even if saved state had them off (e.g., after a killed fastfetch)
+
     if let Some(mut term) = saved.clone() {
         term.c_lflag |= libc::ECHO | libc::ICANON;
         unsafe { libc::tcsetattr(fd, libc::TCSANOW, &term as *const libc::termios); }
@@ -198,12 +185,10 @@ fn termios_restore(fd: i32, saved: &Option<libc::termios>) {
             }
         }
     }
-    // Best-effort stty sane as well, in case tcsetattr didn't cover all flags
+
     let _ = std::process::Command::new("stty").arg("sane").output();
 }
 
-/// Scan /proc/<pid>/comm for a process whose basename is in `names`
-/// (case-insensitive). Returns the first match in process enumeration order.
 pub fn scan_proc_comm(names: &[&str]) -> Option<String> {
     let entries = std::fs::read_dir("/proc").ok()?;
     for entry in entries.flatten() {
@@ -224,7 +209,6 @@ pub fn scan_proc_comm(names: &[&str]) -> Option<String> {
     None
 }
 
-/// Details about a running process matched by its comm basename.
 #[derive(Debug, Clone, Default)]
 pub struct ProcInfo {
     pub pid: u32,
@@ -234,8 +218,6 @@ pub struct ProcInfo {
     pub cmdline: String,
 }
 
-/// Find the first process whose comm basename is in `names` and return
-/// pid/ppid/exe path/cmdline (used for JSON output of shell/terminal).
 pub fn proc_by_comm(names: &[&str]) -> Option<ProcInfo> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return None;
@@ -269,7 +251,7 @@ pub fn proc_by_comm(names: &[&str]) -> Option<ProcInfo> {
                 })
                 .unwrap_or_default(),
         };
-        // Read ppid from /proc/<pid>/stat (field 4 after the `) ` marker).
+
         if let Ok(stat) = std::fs::read_to_string(format!("/proc/{}/status", pid)) {
             for line in stat.lines() {
                 if let Some(rest) = line.strip_prefix("PPid:") {

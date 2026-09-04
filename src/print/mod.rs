@@ -5,23 +5,22 @@ use crate::config::display::DisplayConfig;
 use crate::config::moduleargs::ModuleArgs;
 use color::ApplyResult;
 
-/// A rendered module: a key plus one or more value lines.
 pub struct ModuleRender<'a> {
     pub key: String,
     pub value_lines: Vec<String>,
     pub display: &'a DisplayConfig,
     pub args: &'a ModuleArgs,
-    /// Number of spaces to pad to the right of each value (logo column width).
+
     pub pad_right: usize,
 }
 
 impl<'a> ModuleRender<'a> {
-    /// Build the final ANSI lines ready for printing.
+
     pub fn to_ansi_lines(&self) -> Vec<String> {
         if self.value_lines.is_empty() {
             return Vec::new();
         }
-        // Compute the key prefix: colored key + separator + padding.
+
         let key_prefix = self.key_prefix();
         let key_visible = format::visible_len(&key_prefix);
 

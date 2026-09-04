@@ -33,7 +33,7 @@ fn parse_string_escapes() {
 
 #[test]
 fn parse_surrogate_pair() {
-    // U+1F600 (grinning face) as surrogate pair \uD83D\uDE00
+
     let v = parse(r#""\uD83D\uDE00""#).unwrap();
     assert_eq!(v.as_str(), Some("\u{1F600}"));
 }

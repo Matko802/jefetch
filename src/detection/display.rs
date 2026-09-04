@@ -8,7 +8,6 @@ pub struct DisplayInfo {
     pub name: String,
 }
 
-/// Enumerate connected displays and their active mode via DRM sysfs.
 pub fn detect() -> Vec<DisplayInfo> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
@@ -16,7 +15,7 @@ pub fn detect() -> Vec<DisplayInfo> {
     };
     for entry in entries.flatten() {
         let dir_name = entry.file_name().to_string_lossy().into_owned();
-        // e.g. card0-DP-1, card0-eDP-1, card0-HDMI-A-1
+
         if let Some(rest) = dir_name.strip_prefix("card") {
             if !rest.contains('-') {
                 continue;
@@ -31,7 +30,7 @@ pub fn detect() -> Vec<DisplayInfo> {
         if !status.eq_ignore_ascii_case("connected") {
             continue;
         }
-        // The active/preferred mode is generally the first entry.
+
         let modes = read_file(path.join("modes")).unwrap_or_default();
         let line = modes.lines().find(|l| !l.trim().is_empty());
         let Some(line) = line else { continue };

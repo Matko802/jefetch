@@ -6,7 +6,6 @@ pub struct WmInfo {
     pub session_type: String,
 }
 
-/// Known window manager process names (from /proc comm/maps).
 const WMS: &[&str] = &[
     "hyprland",
     "sway",
@@ -41,11 +40,10 @@ pub fn detect() -> WmInfo {
 fn detect_uncached() -> WmInfo {
     let mut info = WmInfo::default();
 
-    // Prefer the compositor name found in /proc (fastfetch scans /proc).
     if let Some(w) = scan_proc_comm(WMS) {
         info.name = w;
     } else {
-        // Environment fallbacks.
+
         for key in [
             "DWMSESSION",
             "DESKTOP_SESSION",

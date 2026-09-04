@@ -5,7 +5,6 @@ pub struct DeInfo {
     pub name: String,
 }
 
-/// Desktop environment from environment variables (fastfetch order).
 pub fn detect() -> DeInfo {
     let mut info = DeInfo::default();
     for key in [

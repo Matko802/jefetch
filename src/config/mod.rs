@@ -1,7 +1,3 @@
-// A small hand-written JSONC (JSON with comments) parser, no external deps.
-// Supports: line comments (`//`), block comments (`/* */`), trailing commas,
-// nested objects/arrays, all JSON string escapes, numbers, booleans and null.
-
 pub mod json;
 
 use crate::config::json::{JsonResult, JsonValue};
@@ -58,7 +54,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // Skip whitespace and comments.
     fn skip_ws_comments(&mut self) {
         loop {
             self.skip_ws();
@@ -244,7 +239,7 @@ impl<'a> Parser<'a> {
                         b't' => out.push('\t'),
                         b'u' => {
                             let cp = self.parse_hex4()?;
-                            // Handle surrogate pairs.
+
                             if (0xD800..=0xDBFF).contains(&cp) {
                                 if let Some((b'\\', b'u')) = self.peek2() {
                                     self.pos += 2;
@@ -279,7 +274,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(c) => {
-                    // Copy a UTF-8 run of bytes as-is.
+
                     let start = self.pos - 1;
                     let len = utf8_len(c);
                     if let Some(end) = self.bytes.get(start..start + len) {
@@ -319,7 +314,7 @@ impl<'a> Parser<'a> {
 
     fn parse_number(&mut self) -> JsonResult<JsonValue> {
         let start = self.pos;
-        self.bump(); // '-' or digit
+        self.bump();
 
         let mut is_float = false;
         while let Some(c) = self.peek() {
@@ -346,7 +341,7 @@ impl<'a> Parser<'a> {
             if let Ok(v) = s.parse::<i64>() {
                 Ok(JsonValue::Int(v))
             } else {
-                // Underflow: fall back to f64.
+
                 let f: f64 = s
                     .parse()
                     .map_err(|_| format!("invalid number '{}'", s))?;

@@ -1,4 +1,3 @@
-// Loading a fastfetch config.jsonc file and turning it into a Config.
 use crate::config::json::JsonValue;
 use crate::config::parse;
 use super::display::DisplayConfig;
@@ -10,7 +9,7 @@ pub struct LogoConfig {
     pub logo_type: Option<String>,
     pub source: Option<String>,
     pub color: Option<String>,
-    /// Per-line color map: (line-spec like "1" or "1-4", color name).
+
     pub color_map: Vec<(String, String)>,
     pub padding_top: Option<usize>,
     pub padding_left: Option<usize>,
@@ -19,13 +18,11 @@ pub struct LogoConfig {
     pub logo_key: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    /// Animation string: "off"/"static" = static, "spin xyz speed=1" etc = animated.
+
     pub animation: Option<String>,
-    /// Logo style override for animation: "flat" or "3d".
+
     pub style: Option<String>,
-    /// Logo glyph override for animation: "ascii" keeps logo chars,
-    /// "blocks" uses the shading ramp, anything else is a custom ramp
-    /// (dark -> bright), e.g. ".,-~:;=!*#$@".
+
     pub chars: Option<String>,
 }
 
@@ -44,7 +41,7 @@ impl LogoConfig {
                         if let Some(s) = v.as_str() {
                             l.source = Some(s.to_string());
                         } else {
-                            // Custom logo as raw string text.
+
                             l.source = Some(v.to_json_string());
                         }
                     }
@@ -102,7 +99,7 @@ impl LogoConfig {
                 }
             }
         }
-        // Also support top-level "animation" string like "spin" or "spin xyz"
+
         if l.animation.is_none() {
             if let Some(v) = root.get("animation").and_then(|v| v.as_str()) {
                 l.animation = Some(v.to_string());
@@ -112,12 +109,11 @@ impl LogoConfig {
     }
 }
 
-// A single entry in the modules array.
 #[derive(Debug, Clone)]
 pub enum ModuleEntry {
-    /// A bare string, e.g. `"title"`.
+
     Name(String),
-    /// An object, e.g. `{"type": "os", "key": "OS", "format": "..."}`.
+
     Object {
         module: String,
         args: ModuleArgs,
@@ -141,7 +137,7 @@ pub struct Config {
     pub general: GeneralConfig,
     pub modules: Vec<ModuleEntry>,
     pub loaded_from: Option<String>,
-    /// Top-level module option sections, keyed by module name (e.g. "cpu").
+
     pub module_options: std::collections::HashMap<String, JsonValue>,
 }
 
@@ -174,8 +170,6 @@ impl Config {
             module_options: std::collections::HashMap::new(),
         };
 
-        // Collect top-level sections that correspond to a known module name
-        // (e.g. a top-level "cpu": {...}). Ignore the well-known sections.
         if let Some(obj) = root.obj() {
             let reserved = ["logo", "display", "general", "modules"];
             for (k, v) in obj {
@@ -196,8 +190,6 @@ impl Config {
         Ok(cfg)
     }
 
-    // Find module options that appear as a top-level section named after the
-    // module (e.g. a top-level "cpu" object with CPU-specific options).
     pub fn module_options(&self, module: &str) -> Option<&JsonValue> {
         self.module_options.get(&module.to_ascii_lowercase())
     }
@@ -233,4 +225,3 @@ fn parse_modules(v: &JsonValue) -> Result<Vec<ModuleEntry>, String> {
     }
     Ok(out)
 }
-

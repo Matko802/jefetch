@@ -9,8 +9,6 @@ pub struct WifiInfo {
     pub security: String,
 }
 
-/// Best-effort Wi-Fi detection: find the 802.11 interface, then signal from
-/// /proc/net/wireless and SSID via `iwgetid` when available.
 pub fn detect() -> Vec<WifiInfo> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir("/sys/class/net") else {
@@ -39,9 +37,6 @@ pub fn detect() -> Vec<WifiInfo> {
     out
 }
 
-/// Read signal quality (percent) from /proc/net/wireless.
-/// Format: Inter-| sta | Quality | Discarded packets | Missed | WE
-///         face | essid | level  | ...
 fn wireless_signal(ifname: &str) -> Option<u8> {
     let text = read_file("/proc/net/wireless")?;
     for line in text.lines() {
@@ -51,7 +46,7 @@ fn wireless_signal(ifname: &str) -> Option<u8> {
             continue;
         }
         let rest = rest.trim();
-        // Quality is the second whitespace token: "50/70".
+
         let quality = rest.split_whitespace().nth(1)?;
         let (cur, max) = quality.split_once('/')?;
         let cur: f64 = cur.parse().ok()?;
@@ -64,7 +59,6 @@ fn wireless_signal(ifname: &str) -> Option<u8> {
     None
 }
 
-/// SSID via `iwgetid -r` (fastfetch uses nl80211; this avoids netlink code).
 fn iwgetid_ssid(ifname: &str) -> Option<String> {
     let out = crate::detection::run_capture("iwgetid", &["-r", ifname])?;
     if out.is_empty() {

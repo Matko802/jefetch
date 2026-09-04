@@ -1,9 +1,6 @@
 use std::net::TcpStream;
 use std::time::Duration;
 
-/// Fetch IPv4 address by talking plain HTTP over raw TCP sockets.
-/// Each provider is probed in its own worker thread (so a hung network node
-/// can't stall the others); the first valid reply wins.
 pub fn detect(timeout_ms: u128) -> Option<String> {
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     for host in ["api.ipify.org", "ipv4.icanhazip.com", "ifconfig.me", "ipinfo.io/ip"] {
@@ -22,8 +19,7 @@ pub fn detect(timeout_ms: u128) -> Option<String> {
 }
 
 fn http_get(host: &str, port: u16) -> Option<String> {
-    // (host, port) triggers getaddrinfo-based resolution; blocking only the
-    // worker thread (the channel timeout bounds the total fetch time).
+
     let stream = TcpStream::connect((host, port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(4))).ok()?;
     stream.set_write_timeout(Some(Duration::from_secs(4))).ok()?;

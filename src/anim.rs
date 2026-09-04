@@ -1,8 +1,3 @@
-// Faithful Rust port of areofyl/fetch 3D spinning engine (fetch.c)
-// Replicates build_points (heightmap + extruded sides + normals), K1/K2
-// projection onto a sized canvas, z-buffer and Blinn-Phong
-// (diffuse + specular). The logo keeps its own ANSI two-tone colours.
-
 use crate::app::ResolvedLogo;
 
 const K2: f32 = 5.5;
@@ -10,8 +5,6 @@ const ANIM_WIDTH: i32 = 60;
 const GAP: usize = 2;
 const MAX_POINTS: usize = 400_000;
 
-// Solid blocks — 1:1 to fetch --shading-mode blocks (visually matches
-// areofyl's solid look; ascii ".,-~:;=!*#$@" is fetch default but too faint)
 const DEFAULT_SHADING: &[&str] = &["░", "▒", "▓", "█"];
 
 #[derive(Debug, Clone)]
@@ -20,7 +13,7 @@ pub struct AnimConfig {
     pub spin_y: bool,
     pub spin_z: bool,
     pub speed: f32,
-    /// per-axis speed multipliers (1.0 = normal, negative = reverse)
+
     pub speed_x: f32,
     pub speed_y: f32,
     pub speed_z: f32,
@@ -32,11 +25,9 @@ pub struct AnimConfig {
     pub light_y: f32,
     pub light_z: f32,
     pub shading: Vec<String>,
-    /// false = 3D extruded logo (default), true = flat single-sided plane
-    /// that still rotates in 3D (no thickness).
+
     pub flat: bool,
-    /// false = shade with the `shading` ramp (default blocks), true = keep
-    /// the logo's original ASCII characters as glyphs.
+
     pub original_glyphs: bool,
 }
 
@@ -64,27 +55,18 @@ impl Default for AnimConfig {
     }
 }
 
-/// Option keys consumed as `key=value` (or `key:value`, `key value`) so their
-/// letters must not leak into axis detection (e.g. "size" contains 'z',
-/// "style" contains 'y', "speed_x" contains 'x').
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp",
 ];
 
-/// Quadrant blocks by coverage mask (bit 0 top-left .. bit 3 bottom-right),
-/// 1:1 to areofyl's `quadrant_glyphs`. Partially covered cells draw the
-/// covered fraction instead of vanishing — this is what keeps rotated
-/// surfaces solid instead of full of gaps.
 const QUADRANT_GLYPHS: &[&str] = &[
     " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛", "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█",
 ];
 
 impl AnimConfig {
-    /// Sub-cell grid per character cell, 1:1 to areofyl's `select_shading`:
-    /// shading ramps sample 2x2 and collapse to quadrants, original logo
-    /// glyphs stay 1x1 (quadrants would replace the logo's own chars).
+
     fn sub_divs(&self) -> (usize, usize) {
         if self.original_glyphs {
             (1, 1)
@@ -97,7 +79,7 @@ impl AnimConfig {
         let mut cfg = Self::default();
         if let Some(raw) = s {
             let low = raw.to_ascii_lowercase();
-            // --- style: flat plane vs 3D extruded (explicit key wins over bare word)
+
             let mut flat_opt: Option<bool> = None;
             for key in ["style", "mode"] {
                 if let Some(v) = extract_word(&low, raw, key, true) {
@@ -116,13 +98,13 @@ impl AnimConfig {
             if let Some(f) = flat_opt {
                 cfg.flat = f;
             }
-            // --- glyphs: original logo chars vs shading ramp (explicit key wins)
+
             let mut chars_opt: Option<String> = None;
             for key in [
                 "characters", "chars", "glyphs", "glyph", "shading", "symbols", "symbol",
                 "ramp",
             ] {
-                // Ramps like ".,-~:;=!*#$@" contain commas — don't stop there.
+
                 if let Some(v) = extract_word(&low, raw, key, false) {
                     chars_opt = Some(v);
                 }
@@ -135,21 +117,19 @@ impl AnimConfig {
                 cfg.original_glyphs = false;
                 cfg.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
             }
-            // --- axes: detect x/y/z only outside option key=value spans, so
-            // words like "size" (z), "style" (y) or "speed_x" (x) don't fake axes.
-            // Tolerates "spin x", "spin=x", "spin: x y z", "xyz", etc.
+
             let axis_src = blank_option_spans(&low, OPTION_KEYS);
             let has_x = axis_src.contains('x');
             let has_y = axis_src.contains('y');
             let has_z = axis_src.contains('z');
-            // Only override spin if animation string mentions axes/spin
+
             if low.contains("spin") || has_x || has_y || has_z || low.contains("rotate") {
                 if has_x || has_y || has_z {
                     cfg.spin_x = has_x;
                     cfg.spin_y = has_y;
                     cfg.spin_z = has_z;
                 } else if low.contains("spin") {
-                    // bare "spin" -> keep default (spin_y)
+
                 }
             }
             if let Some(v) = extract_number(&low, "speed_x") {
@@ -162,8 +142,7 @@ impl AnimConfig {
                 cfg.speed_z = v;
             }
             if let Some(v) = extract_number(&low, "speed") {
-                // generic speed scales all axes
-                // (and keeps sign for direction: negative = reverse)
+
                 cfg.speed = v;
             }
             if let Some(v) = extract_number(&low, "size") {
@@ -180,7 +159,6 @@ impl AnimConfig {
         cfg
     }
 
-    /// "flat"/"2d" -> flat plane, "3d"/"three"/"depth" -> extruded 3D.
     fn parse_style_value(v: &str) -> Option<bool> {
         let t = v.to_ascii_lowercase();
         let t = t.trim();
@@ -193,8 +171,6 @@ impl AnimConfig {
         None
     }
 
-    /// "ascii"/"original" -> keep logo chars; "blocks"/"default" -> stock ramp;
-    /// anything else is a custom ramp (dark -> bright), e.g. ".,-~:;=!*#$@".
     fn apply_chars_value(&mut self, v: &str) {
         let t = v.trim();
         if t.is_empty() {
@@ -222,8 +198,7 @@ impl AnimConfig {
             self.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
             return;
         }
-        // Custom ramp: one glyph per char, dark -> bright. Case matters for
-        // the drawn glyphs, so use the original-case value.
+
         let ramp: Vec<String> = t.chars().map(|c| c.to_string()).collect();
         if !ramp.is_empty() {
             self.original_glyphs = false;
@@ -231,7 +206,6 @@ impl AnimConfig {
         }
     }
 
-    /// Explicit `"style"` / `"chars"` logo keys override the animation string.
     pub fn apply_logo_overrides(&mut self, logo: &crate::config::configfile::LogoConfig) {
         if let Some(s) = &logo.style {
             if let Some(f) = Self::parse_style_value(s) {
@@ -244,15 +218,10 @@ impl AnimConfig {
     }
 }
 
-/// Byte-exactness note: `low` must be `raw.to_ascii_lowercase()` so byte
-/// indices found in `low` are valid in `raw` (ASCII case mapping is 1:1).
-
 fn is_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
 
-/// Find `key` as a standalone word (not inside another identifier), so
-/// "speed" doesn't match inside "speed_x" and "glyph" not inside "glyphs".
 fn find_key(s: &str, key: &str) -> Option<usize> {
     let mut from = 0;
     while from + key.len() <= s.len() {
@@ -270,19 +239,14 @@ fn find_key(s: &str, key: &str) -> Option<usize> {
     None
 }
 
-/// Standalone word check, e.g. bare "flat" shouldn't match inside "platform".
 fn has_word(s: &str, word: &str) -> bool {
     find_key(s, word).is_some()
 }
 
-/// Extract `key=value` / `key:value` / `key value`. Quoted values keep
-/// everything to the closing quote (so ramps may contain spaces); otherwise
-/// the value runs to whitespace (and to comma when `stop_comma` is set).
-/// Case is taken from `raw`.
 fn extract_word(low: &str, raw: &str, key: &str, stop_comma: bool) -> Option<String> {
     let pos = find_key(low, key)? + key.len();
     let low_rest = &low[pos..];
-    // Skip separators between key and value.
+
     let mut off = 0;
     for (i, c) in low_rest.char_indices() {
         if c == '=' || c == ':' || c == ' ' || c == '\t' || c == ',' {
@@ -313,14 +277,14 @@ fn extract_word(low: &str, raw: &str, key: &str, stop_comma: bool) -> Option<Str
     if end == 0 {
         return None;
     }
-    // Map the low-based byte span back onto raw (identical layout).
+
     Some(raw_rest[..end].to_string())
 }
 
 fn extract_number(s: &str, key: &str) -> Option<f32> {
     let start = find_key(s, key)? + key.len();
     let rest = &s[start..];
-    // Skip the separator(s) between the key and the value (e.g. "=", ":", spaces).
+
     let rest = rest.trim_start_matches(|c: char| !c.is_ascii_digit() && c != '-' && c != '.');
     let mut end = 0;
     for (i, c) in rest.char_indices() {
@@ -336,9 +300,6 @@ fn extract_number(s: &str, key: &str) -> Option<f32> {
     rest[..end].parse::<f32>().ok()
 }
 
-/// Replace every `key<sep>value` span with spaces so option words/values
-/// can't fake axis letters ('z' in "size", 'y' in "style", 'x' in "speed_x",
-/// or letters inside a custom chars ramp).
 fn blank_option_spans(s: &str, keys: &[&str]) -> String {
     let mut buf: Vec<char> = s.chars().collect();
     for key in keys {
@@ -382,8 +343,7 @@ fn blank_option_spans(s: &str, keys: &[&str]) -> String {
                     j += 1;
                 }
             } else {
-                // Values run to whitespace (commas belong to values, e.g. a
-                // ".,-~:;=!*#$@" ramp, and must not leak axis letters).
+
                 while j < buf.len()
                     && buf[j] != ' '
                     && buf[j] != '\t'
@@ -450,21 +410,21 @@ fn char_weight_utf8(ch: &str) -> f32 {
     }
     if bytes.len() >= 3 && bytes[0] == 0xe2 && bytes[1] == 0x96 {
         match bytes[2] {
-            0x88 => return 1.00, // █
-            0x93 => return 0.75, // ▓
-            0x92 => return 0.50, // ▒
-            0x91 => return 0.25, // ░
-            0x80 => return 0.50, // ▀
-            0x84 => return 0.50, // ▄
-            0x8c => return 0.50, // ▌
-            0x90 => return 0.50, // ▐
-            0x82 => return 0.55, // ▂
-            0x81 => return 0.30, // ▁
+            0x88 => return 1.00,
+            0x93 => return 0.75,
+            0x92 => return 0.50,
+            0x91 => return 0.25,
+            0x80 => return 0.50,
+            0x84 => return 0.50,
+            0x8c => return 0.50,
+            0x90 => return 0.50,
+            0x82 => return 0.55,
+            0x81 => return 0.30,
             _ => return 0.50,
         }
     }
     if bytes[0] == 0xe2 && (bytes[1] == 0x94 || bytes[1] == 0x95) {
-        return 0.20; // box drawing
+        return 0.20;
     }
     0.30
 }
@@ -477,11 +437,10 @@ struct Point {
     ny: f32,
     nz: f32,
     color: i32,
-    /// Source logo glyph for this point (used when `original_glyphs` is set).
+
     glyph: char,
 }
 
-// Parse ResolvedLogo.lines (may contain ANSI) into per-cell (glyph, color) grid.
 fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, usize) {
     let mut cells: Vec<Vec<(String, i32)>> = Vec::new();
     let mut has_ansi = false;
@@ -550,12 +509,11 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
         cells.push(row);
     }
     let rows = cells.len();
-    // Fallback: many builtin logos store colour in `logo.colors` (e.g. "34")
-    // not inline ANSI. Treat that as has_ansi so the 3D keeps the logo colour.
+
     if !has_ansi {
         for c in &logo.colors {
             if !c.is_empty() {
-                // c is like "34" or "1;34" — extract the fg number
+
                 for part in c.split(';') {
                     if let Ok(num) = part.parse::<i32>() {
                         if (30..=37).contains(&num) || (90..=97).contains(&num) {
@@ -568,10 +526,9 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, i32)>>, bool, usize, us
             }
         }
     }
-    // If still no ANSI but we have a base colour, inject it into cells
-    // so the point cloud gets coloured instead of grey.
+
     if has_ansi {
-        // Fill in per-cell colour from logo.colors where cell colour is 0
+
         for (r, row) in cells.iter_mut().enumerate() {
             if r >= logo.colors.len() { break; }
             let col_s = &logo.colors[r];
@@ -648,7 +605,6 @@ fn build_points(
     }
     let zmax = 0.18 * effective_depth;
 
-    // Per-cell gradient normals.
     let mut gnx = vec![vec![0.0f32; cols]; rows];
     let mut gny = vec![vec![0.0f32; cols]; rows];
     let mut gnz = vec![vec![1.0f32; cols]; rows];
@@ -690,12 +646,7 @@ fn build_points(
     }
 
     let z_layers = ((6.0 * config.size) as i32).max(6) as usize;
-    // Subdivide grid for larger sizes to avoid gaps. Sub-cell modes sample
-    // a finer grid, so they need proportionally more points to fill it
-    // (1:1 to areofyl: subdiv = size * sub_rows, min sub_rows).
-    // Original-glyph mode stays at exactly one point per cell: extra
-    // sub-points land in neighbouring pixels and stamp the same glyph
-    // twice, smearing ASCII strokes into a bold doubled mess.
+
     let (sbr, _) = config.sub_divs();
     let mut subdiv = if config.original_glyphs {
         1
@@ -753,8 +704,6 @@ fn build_points(
                     let oy = (cy - frow) * SY;
                     let zr = ih * zmax;
 
-                    // Flat style: single-sided plane, no thickness — still
-                    // rotates in 3D, with plane normal (0,0,1) for lighting.
                     if config.flat {
                         if points.len() >= MAX_POINTS {
                             break;
@@ -868,10 +817,6 @@ fn build_points(
     points
 }
 
-/// Render a single 3D frame of the logo into a canvas of `render_height` rows
-/// and ANIM_WIDTH columns. The returned ResolvedLogo has `render_height` lines
-/// each `ANIM_WIDTH` wide (RGB-coloured), so callers can lay the logo beside
-/// system-info lines, vertically centred like areofyl.
 pub fn render_frame(
     logo: &ResolvedLogo,
     frame: usize,
@@ -892,7 +837,6 @@ pub fn render_frame(
         return logo.clone();
     }
 
-    // --- areofyl layout sizing ---
     let render_height = render_height.max(1);
     let logo_height = render_height.min((ANIM_WIDTH * 3 / 5) as usize).max(1);
     let k1 = 37.0 * logo_height as f32 / 36.0;
@@ -900,8 +844,6 @@ pub fn render_frame(
     let w = ANIM_WIDTH as usize;
     let h = render_height;
 
-    // Coverage is sampled on a grid finer than the character cell (1:1 to
-    // areofyl's sub_rows/sub_cols) so rotated surfaces stay solid.
     let (sub_rows, sub_cols) = config.sub_divs();
     let sw = w * sub_cols;
     let sh = h * sub_rows;
@@ -931,7 +873,6 @@ pub fn render_frame(
         (0.0, 0.0, -1.0)
     };
 
-    // Vertically centre the logo on the info block like areofyl.
     let y_center = if info_line_count > 0 && info_line_count + 2 <= render_height {
         1.0 + info_line_count as f32 * 0.5
     } else {
@@ -952,7 +893,7 @@ pub fn render_frame(
         let nx2 = nx * cb + nz1 * sb;
         let nz2 = -nx * sb + nz1 * cb;
         let ny2 = ny1;
-        // Z rotation (around view axis) — enabled via `spin z`
+
         let x3 = x2 * cc - y2 * sc;
         let y3 = x2 * sc + y2 * cc;
         let z3 = z2;
@@ -994,15 +935,11 @@ pub fn render_frame(
         }
     }
 
-    // Render each canvas row to a (possibly empty) coloured glyph string.
-    // Collapse each cell's sub-samples into one glyph (1:1 to areofyl's
-    // cell_glyph): full cells take the shading ramp by ink, partial cells
-    // draw the covered fraction as a quadrant block instead of vanishing.
     let scount = config.shading.len();
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
     let full_mask = (1u32 << total_sub) - 1;
-    // Emits the ANSI color switch for a winning sub-sample color.
+
     fn push_color(line: &mut String, has_ansi: bool, c: i32, prev_color: &mut i32) {
         if c != *prev_color {
             if *prev_color != -2 && *prev_color != -1 {
@@ -1026,7 +963,7 @@ pub fn render_frame(
         let mut prev_color: i32 = -2;
         for col in 0..w {
             if config.original_glyphs {
-                // 1x1 path: winning sub-sample keeps its logo glyph.
+
                 let idx = row * sw + col;
                 if zbuf[idx] <= 0.0 {
                     if prev_color != -2 && prev_color != -1 {
@@ -1072,15 +1009,12 @@ pub fn render_frame(
             }
             let coverage = n as f32 / total_sub as f32;
             let ink = lsum / n as f32 * coverage;
-            // Round to the nearest step: truncating biases every cell one
-            // level lighter and leaves the top of the ramp unreachable.
+
             let mut ci = (ink * smax as f32 + 0.5) as usize;
             if ci > smax {
                 ci = smax;
             }
-            // The sub-cell block is always full ink over the part it covers,
-            // the ramp spreads a lighter shade over the whole cell: pick by
-            // ink so edges stay crisp instead of ringing a bright outline.
+
             let glyph: &str = if mask != full_mask
                 && (coverage - ink).abs() <= ((ci as f32 + 1.0) / scount as f32 - ink).abs()
             {
@@ -1131,8 +1065,7 @@ mod tests {
 
     #[test]
     fn option_words_do_not_fake_axes() {
-        // "size" contains 'z', "style" contains 'y', "speed_x" contains 'x' —
-        // none of those may enable an axis on their own.
+
         let cfg = AnimConfig::from_animation_str(Some("spin y size=2"));
         assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z, "{:?}", cfg);
 
@@ -1147,7 +1080,7 @@ mod tests {
 
     #[test]
     fn generic_speed_not_clobbered_by_per_axis() {
-        // "speed" must not match inside "speed_y".
+
         let cfg = AnimConfig::from_animation_str(Some("spin xyz speed_y=-1"));
         assert!((cfg.speed - 2.0).abs() < 1e-4, "speed={}", cfg.speed);
         assert!((cfg.speed_y - (-1.0)).abs() < 1e-4);
@@ -1171,11 +1104,9 @@ mod tests {
         assert_eq!(cfg.shading[0], ".");
         assert_eq!(cfg.shading[11], "@");
 
-        // bare keywords
         let cfg = AnimConfig::from_animation_str(Some("spin z ascii"));
         assert!(cfg.original_glyphs);
 
-        // defaults stay 3d + blocks
         let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
         assert!(!cfg.flat && !cfg.original_glyphs);
         assert_eq!(cfg.shading.len(), 4);
@@ -1222,8 +1153,6 @@ mod tests {
         assert!(!text.contains('A'), "no logo chars in block mode");
     }
 
-    /// Rotated frames must stay solid: count empty cells inside the logo's
-    /// bounding box — with quadrant collapse there should be almost none.
     fn bbox_hole_ratio(logo: &ResolvedLogo, frame: usize) -> f32 {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let out = render_frame(logo, frame, &cfg, 36, 4);
@@ -1260,7 +1189,7 @@ mod tests {
     }
 
     fn solid_test_logo() -> ResolvedLogo {
-        // Bigger solid block: rotation must not punch holes in it.
+
         ResolvedLogo {
             lines: vec!["████████".to_string(); 8],
             colors: Vec::new(),

@@ -14,7 +14,6 @@ pub fn detect() -> KernelInfo {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
 
-    // /proc/sys/kernel/version holds the gcc build version string.
     if let Some(v) = read_file("/proc/sys/kernel/version") {
         info.version = v.trim().to_string();
     }
@@ -22,6 +21,6 @@ pub fn detect() -> KernelInfo {
 }
 
 fn uname_sysname() -> String {
-    // Fastfetch reports "Linux".
+
     "Linux".to_string()
 }

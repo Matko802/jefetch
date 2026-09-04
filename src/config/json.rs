@@ -1,6 +1,3 @@
-// A minimal JSON/JSONC value type, mirroring the subset of yyjson that
-// fastfetch relies on. Strings are stored decoded (borrowed where possible).
-
 pub type JsonResult<T> = Result<T, String>;
 
 #[derive(Debug, Clone)]
@@ -99,14 +96,12 @@ impl JsonValue {
         matches!(self, JsonValue::Null)
     }
 
-    /// Serialize to a compact JSON string (used for custom logo strings).
     pub fn to_json_string(&self) -> String {
         let mut out = String::new();
         self.write(&mut out);
         out
     }
 
-    /// Serialize with 2-space indentation, matching fastfetch's --json output.
     pub fn to_json_pretty(&self) -> String {
         let mut out = String::new();
         self.write_pretty(0, &mut out);

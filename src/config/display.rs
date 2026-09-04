@@ -1,4 +1,3 @@
-// Display options, mirroring fastfetch's FFDisplayConfig.
 use super::json::JsonValue;
 
 #[derive(Debug, Clone)]

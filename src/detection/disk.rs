@@ -12,7 +12,6 @@ pub struct DiskInfo {
     pub name: String,
 }
 
-/// Detect disks for the given mount folders. By default the root filesystem.
 pub fn detect(folders: &[String]) -> Vec<DiskInfo> {
     let mountpoints: Vec<String> = if folders.is_empty() {
         vec!["/".to_string()]
@@ -54,8 +53,6 @@ fn stat_one(mp: &str) -> Option<DiskInfo> {
     })
 }
 
-/// Look up the filesystem type, source device and mount options of a mount
-/// point in /proc/self/mounts (space-escaped like `/dev/sda2\040...`).
 fn mounts_info(mp: &str) -> (String, String, String) {
     let mut fs = String::new();
     let mut from = String::new();
@@ -78,7 +75,6 @@ fn mounts_info(mp: &str) -> (String, String, String) {
     (fs, from, opts)
 }
 
-/// Resolve the filesystem name (label) from /dev/disk/by-label symlinks.
 fn label_for(mount_from: &str) -> String {
     if mount_from.is_empty() {
         return String::new();

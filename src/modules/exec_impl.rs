@@ -1,11 +1,7 @@
-// Concrete module implementations (detection + default rendering).
-// Returns None when a module is not implemented or produced no data.
-
 use super::{ModuleInstance, ModuleOutput};
 use crate::common;
 use crate::config::configfile::Config;
 
-/// Render a configured module. Returns None for unimplemented/empty modules.
 pub fn render(name: &str, inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     match name {
         "title" => render_title(cfg),
@@ -45,19 +41,16 @@ pub fn render(name: &str, inst: &ModuleInstance, cfg: &Config) -> Option<ModuleO
         "cursor" => render_theme(cfg, "cursor"),
         "font" => render_theme(cfg, "font"),
         "break" => Some(ModuleOutput::blank()),
-        "separator" => None, // handled in exec.rs
+        "separator" => None,
         _ => None,
     }
 }
 
-/// A `custom` module: its value is its format string (fully rendered).
 fn render_custom(_inst: &ModuleInstance) -> Option<ModuleOutput> {
-    // exec.rs renders the module's format string over a single empty value,
-    // producing exactly the format content.
+
     Some(ModuleOutput::supported("", vec![String::new()]))
 }
 
-/// A `command` module: run `text` via the current shell and show output.
 fn render_command(inst: &ModuleInstance) -> Option<ModuleOutput> {
     use crate::config::json::JsonValue;
     let raw = inst.raw.as_ref()?;
@@ -70,8 +63,6 @@ fn render_command(inst: &ModuleInstance) -> Option<ModuleOutput> {
         _ => None,
     }?;
 
-    // Execute via /bin/sh (fastfetch uses sh for command modules, so
-    // bash-style command text works regardless of the user shell).
     let out = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(&text)
@@ -86,7 +77,7 @@ fn render_command(inst: &ModuleInstance) -> Option<ModuleOutput> {
 }
 
 fn render_colors(_cfg: &Config) -> Option<ModuleOutput> {
-    // 8 color blocks using the standard fastfetch colors palette.
+
     let blocks = [
         (41u8, "black"),
         (42u8, "red"),
@@ -111,7 +102,7 @@ fn render_datetime(cfg: &Config) -> Option<ModuleOutput> {
         .ok()?
         .as_secs() as i64;
     let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
-    // Give libc a writable fd for localtime_r.
+
     let _fd = std::io::stdout().as_raw_fd();
     let tm = unsafe {
         let p = libc::localtime_r(&t, tm.as_mut_ptr());
@@ -289,8 +280,7 @@ fn render_de(cfg: &Config) -> Option<ModuleOutput> {
     if d.name.is_empty() {
         return None;
     }
-    // fastfetch: if the "desktop environment" is actually just the WM
-    // (e.g. a standalone Wayland compositor like mango), don't repeat it.
+
     let wm = crate::detection::wm::detect();
     if !wm.name.is_empty() && d.name.eq_ignore_ascii_case(&wm.name) {
         return None;
@@ -303,7 +293,7 @@ fn render_terminal(cfg: &Config) -> Option<ModuleOutput> {
     if t.name.is_empty() {
         return None;
     }
-    // For electron, fastfetch shows the full cmdline (exe) as the terminal value
+
     let value = if !t.exe.is_empty() {
         t.exe
     } else if t.version.is_empty() {
@@ -328,8 +318,7 @@ fn fastfetch_terminal() -> Option<String> {
         let pretty = o.iter().find(|(k, _)| k == "prettyName").and_then(|(_, v)| v.as_str()).unwrap_or("");
         let exe = o.iter().find(|(k, _)| k == "exe").and_then(|(_, v)| v.as_str()).unwrap_or("");
         let version = o.iter().find(|(k, _)| k == "version").and_then(|(_, v)| v.as_str()).unwrap_or("");
-        // prettyName for electron is already "ai.opencode.desktop --standard-schemes=oc ..."
-        // which is exactly what plain shows, so return it directly
+
         if pretty.starts_with("ai.opencode.desktop") {
             return Some(pretty.to_string());
         }
@@ -343,7 +332,7 @@ fn fastfetch_terminal() -> Option<String> {
             return Some(pretty.to_string());
         }
         if !exe.is_empty() {
-            // For electron, exe is full path, but pretty is already handled above
+
             return Some(exe.to_string());
         }
     }
@@ -391,8 +380,7 @@ fn render_host(_cfg: &Config) -> Option<ModuleOutput> {
     let name = crate::detection::read_file("/sys/class/dmi/id/product_name")
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
-    // Fastfetch filters generic placeholder names like "System Product Name"
-    // and "To Be Filled By O.E.M." — hide them to be identical.
+
     let is_generic = |s: &str| {
         let l = s.to_ascii_lowercase();
         l == "system product name"
@@ -417,11 +405,11 @@ fn render_cpu(inst: &ModuleInstance) -> Option<ModuleOutput> {
     }
 
     let mut model = c.model.clone();
-    // Fastfetch strips " with Radeon Graphics" suffix for cleaner display
+
     if let Some(stripped) = model.strip_suffix(" with Radeon Graphics") {
         model = stripped.to_string();
     }
-    // Fastfetch plain always shows core count like " (12)"
+
     let cores = if c.logical_cores > 0 { c.logical_cores } else { c.physical_cores };
     let show_pe = matches!(
         inst.raw.as_ref().and_then(|r| r.get("showPeCoreCount")),
@@ -443,7 +431,6 @@ fn render_cpu(inst: &ModuleInstance) -> Option<ModuleOutput> {
         value = format!("{} ({})", model, cores);
     }
 
-    // Append frequency like fastfetch's default format.
     let freq = if c.freq_max_mhz > 0 {
         c.freq_max_mhz
     } else {
@@ -536,7 +523,7 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
     }
     let mut values = Vec::new();
     for d in &ds {
-        // Normalize card0-DP-1 → DP-1, card0-eDP-1 → eDP-1.
+
         let mut name = d.name.clone();
         if let Some(rest) = name.strip_prefix("card") {
             if let Some(sep) = rest.find('-') {
@@ -614,7 +601,7 @@ fn fastfetch_disk(_inst: &ModuleInstance) -> Option<ModuleOutput> {
         for d in disks {
             let o = d.obj()?;
             let mp = o.iter().find(|(k, _)| k == "mountpoint").and_then(|(_, v)| v.as_str()).unwrap_or("/");
-            // Fastfetch plain filters to Regular only (not Subvolume)
+
             let vol_type = o.iter().find(|(k, _)| k == "volumeType").and_then(|(_, v)| v.arr());
             let is_regular = vol_type.map(|arr| arr.iter().any(|v| v.as_str() == Some("Regular"))).unwrap_or(false);
             let is_subvol = vol_type.map(|arr| arr.iter().any(|v| v.as_str() == Some("Subvolume"))).unwrap_or(false);
@@ -694,7 +681,7 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
         if i == 0 {
             values.push(v);
         } else {
-            // Subsequent disks: self-contained line with its own key.
+
             values.push(format!("Disk ({}): {}", mp, v));
         }
     }
@@ -802,7 +789,7 @@ fn fastfetch_localip() -> Option<ModuleOutput> {
             let o = ip.obj()?;
             let name = o.iter().find(|(k, _)| k == "name").and_then(|(_, v)| v.as_str()).unwrap_or("");
             let ipv4 = o.iter().find(|(k, _)| k == "ipv4").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            // Fastfetch shows "Local IP (enp9s0): 192.168.1.48/24"
+
             let v = if !ipv4.is_empty() { ipv4.to_string() } else { String::new() };
             if v.is_empty() { continue; }
             if first_key.is_empty() {
@@ -903,7 +890,7 @@ fn fastfetch_theme(which: &str) -> Option<String> {
         if typ != target_type { continue; }
         let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
         if let Some(obj) = result.obj() {
-            // Theme/Icons use theme2/icons2, Font uses display, Cursor uses theme+size
+
             let key = match which {
                 "theme" => "theme2",
                 "icons" => "icons2",
@@ -913,7 +900,7 @@ fn fastfetch_theme(which: &str) -> Option<String> {
             };
             if let Some(v) = obj.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_str()) {
                 if !v.is_empty() {
-                    // Cursor needs size
+
                     if which == "cursor" {
                         if let Some(size) = obj.iter().find(|(k, _)| k == "size").and_then(|(_, v)| v.as_str()) {
                             if !size.is_empty() {
@@ -924,7 +911,7 @@ fn fastfetch_theme(which: &str) -> Option<String> {
                     return Some(v.to_string());
                 }
             }
-            // Fallback for Font: try fonts array
+
             if which == "font" {
                 if let Some(arr) = obj.iter().find(|(k, _)| k == "fonts").and_then(|(_, v)| v.arr()) {
                     for f in arr {
@@ -941,14 +928,9 @@ fn fastfetch_theme(which: &str) -> Option<String> {
     None
 }
 
-/// Wrap a single key/value into a supported ModuleOutput.
 fn render_single(key: &str, value: String, _cfg: &Config) -> ModuleOutput {
     ModuleOutput::supported(key, vec![value])
 }
-
-// ---------------------------------------------------------------------------
-// --json support: structured result objects matching fastfetch's schema.
-// ---------------------------------------------------------------------------
 
 use crate::config::json::JsonValue as J;
 
@@ -956,7 +938,6 @@ fn jobj(kv: Vec<(&str, J)>) -> J {
     J::Obj(kv.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
 }
 
-/// fastfetch's `type` string for a module name.
 pub fn json_type_name(name: &str) -> &'static str {
     match name {
         "os" => "OS",
@@ -998,15 +979,13 @@ pub fn json_type_name(name: &str) -> &'static str {
     }
 }
 
-/// The error payload for a module in JSON mode. `Some(error)` means the entry
-/// is emitted as `{"type": ..., "error": ...}`; `None` means it has a result.
 pub fn json_error(name: &str, _inst: &ModuleInstance, _cfg: &Config) -> Option<String> {
     match name {
-        // Modules fastfetch refuses to encode structurally.
+
         "custom" | "colors" | "break" | "separator" => {
             Some("Unsupported for JSON format".to_string())
         }
-        // Not-yet-implemented modules with a plausible reason.
+
         "wmtheme" => {
             let wm = crate::detection::wm::detect();
             Some(format!("Unknown WM: {}", wm.name))
@@ -1019,15 +998,13 @@ pub fn json_error(name: &str, _inst: &ModuleInstance, _cfg: &Config) -> Option<S
     }
 }
 
-/// Structured JSON result for a module. None means "no data" (the caller
-/// emits an error entry).
 pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J> {
-    // Unsupported-with-error modules never have a result.
+
     if json_error(name, inst, _cfg).is_some() {
         return None;
     }
     match name {
-        "title" => None, // titles are not emitted (logo covers it)
+        "title" => None,
         "os" => {
             let o = crate::detection::os::detect();
             Some(jobj(vec![
@@ -1404,7 +1381,7 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
             if u.uptime_secs == 0 {
                 return None;
             }
-            // fastfetch reports uptime in milliseconds and the real boot time.
+
             Some(jobj(vec![
                 ("uptime", J::Uint(u.uptime_secs * 1000)),
                 ("bootTime", J::Str(boot_time_iso(u.boot_time_secs))),
@@ -1517,7 +1494,6 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
     }
 }
 
-/// Parse the publicip `timeout` module option (mirrors render_publicip).
 fn publicip_timeout(inst: &ModuleInstance) -> u128 {
     let mut timeout_ms = 1000u128;
     if let Some(J::Obj(m)) = &inst.raw {
@@ -1532,7 +1508,6 @@ fn publicip_timeout(inst: &ModuleInstance) -> u128 {
     timeout_ms
 }
 
-/// Per-swap-device (name, used, total) bytes from /proc/swaps.
 fn proc_swaps() -> Vec<(String, u64, u64)> {
     let mut out = Vec::new();
     if let Some(text) = crate::detection::read_file("/proc/swaps") {
@@ -1552,7 +1527,6 @@ fn proc_swaps() -> Vec<(String, u64, u64)> {
     out
 }
 
-/// Format boot time as ISO-8601 with local offset, e.g. `2026-09-01T11:25:03`.
 fn boot_time_iso(secs: u64) -> String {
     let t = secs as i64;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };

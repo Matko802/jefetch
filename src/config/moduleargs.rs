@@ -1,4 +1,3 @@
-// Per-module shared arguments, mirroring fastfetch's FFModuleArgs.
 use super::json::JsonValue;
 
 #[derive(Debug, Clone, Default)]
@@ -17,7 +16,7 @@ pub struct ModuleArgs {
 }
 
 impl ModuleArgs {
-    // Parse the common fields shared by all modules from a JSON object.
+
     pub fn parse(obj: &JsonValue) -> Self {
         let mut a = ModuleArgs::default();
         if let Some(v) = obj.get("key") {

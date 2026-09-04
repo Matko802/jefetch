@@ -1,15 +1,3 @@
-// Fastfetch-style format string engine.
-//
-// A format string is a mix of literal text, `{placeholder}` tokens,
-// `{#color}` blocks, `{$N}` constants and `{?expr}..{?}` conditionals, e.g.:
-//
-//   "{key}: $c1{name}@$c5{freq-max}{freq-ghz}GHz"
-//   "{#white}│ {#blue} OS {name}"
-//   "{?6}({#yellow}{6}{#}){?}"
-//
-// The engine RESOLVES placeholders through a Resolver and computes the
-// visible (ANSI-stripped) length for alignment.
-
 use super::color::{expand_dollar_code, named_color_sgr, RESET};
 
 #[derive(Debug)]
@@ -19,40 +7,39 @@ pub struct Result {
 }
 
 pub trait Resolver {
-    /// Named or numbered placeholder value ("name", "1", "all", "key").
+
     fn get_placeholder(&self, name: &str) -> Option<String>;
-    /// The module's key name.
+
     fn key(&self) -> &str;
-    /// Special color names the module defines (e.g. "keys" -> keyColor ANSI).
+
     fn get_color(&self, name: &str) -> Option<String> {
         let _ = name;
         None
     }
-    /// Module constants referenced via {$N}.
+
     fn get_constant(&self, index: usize) -> Option<String> {
         let _ = index;
         None
     }
 }
 
-/// Parse and render a format string against a resolver.
 pub fn format<F: Resolver + ?Sized>(fmt: &str, resolver: &F) -> Result {
     let mut text = String::new();
     let mut length = 0usize;
     let bytes = fmt.as_bytes();
     let mut i = 0;
     let n = bytes.len();
-    // Conditional depth tracking: a stack of "skip" flags.
+
     let mut cond: Vec<bool> = Vec::new();
 
     while i < n {
         let c = bytes[i];
-        // Skip rendering entirely while inside a false conditional.
+
         if cond.iter().any(|&s| s) {
-            // Still scan for structure tokens so conditionals balance.
+
             match c {
                 b'{' => {
-                    // Consume the token so invalids don't echo later.
+
                     if let Some((token, next)) = read_brace(fmt, i) {
                         i = next;
                         track_cond(&token, &mut cond, resolver);
@@ -110,8 +97,6 @@ pub fn format<F: Resolver + ?Sized>(fmt: &str, resolver: &F) -> Result {
     Result { text, length }
 }
 
-/// Read a `{...}` token (possibly nested) starting at index `i` (which points
-/// at `{`). Returns the inner text and the index just after the closing `}`.
 fn read_brace(fmt: &str, i: usize) -> Option<(String, usize)> {
     let bytes = fmt.as_bytes();
     let mut depth = 1;
@@ -132,15 +117,13 @@ fn read_brace(fmt: &str, i: usize) -> Option<(String, usize)> {
     None
 }
 
-/// Read a `$`-code starting at `$`. Returns (code, next_index).
-/// Supports `$reset`, `$c1`, `${...}`, `$b`, etc.
 fn read_dollar(fmt: &str, i: usize) -> Option<(String, usize)> {
     let bytes = fmt.as_bytes();
     if i + 1 >= bytes.len() {
         return None;
     }
     if bytes[i + 1] == b'{' {
-        // Braced form: ${code}
+
         let inner = i + 2;
         let mut j = inner;
         while j < bytes.len() && bytes[j] != b'}' {
@@ -151,7 +134,7 @@ fn read_dollar(fmt: &str, i: usize) -> Option<(String, usize)> {
         }
         return None;
     }
-    // Alphanumeric short form $c1 / $reset
+
     let mut len = 0;
     for &b in &bytes[i + 1..] {
         if b.is_ascii_alphanumeric() || b == b'-' {
@@ -167,7 +150,6 @@ fn read_dollar(fmt: &str, i: usize) -> Option<(String, usize)> {
     }
 }
 
-/// Handle a single `{token}`.
 #[allow(clippy::too_many_arguments)]
 fn handle_token<F: Resolver + ?Sized>(
     token: &str,
@@ -178,7 +160,6 @@ fn handle_token<F: Resolver + ?Sized>(
 ) {
     let t = token.trim();
 
-    // Conditional open: {?expr}
     if let Some(rest) = t.strip_prefix('?') {
         let expr = rest.trim();
         let has = if let Some(name) = expr.strip_prefix('!') {
@@ -189,17 +170,16 @@ fn handle_token<F: Resolver + ?Sized>(
         cond.push(!has);
         return;
     }
-    // Conditional close: {?}
+
     if t == "?" {
         cond.pop();
         return;
     }
 
-    // Color block: {#...} or {#}
     if t.starts_with('#') {
         let name = t[1..].trim();
         if name.is_empty() {
-            // reset: {"#"} -> default color
+
             text.push_str(RESET);
             return;
         }
@@ -213,12 +193,11 @@ fn handle_token<F: Resolver + ?Sized>(
             text.push_str(&sgr);
             return;
         }
-        // Unknown color: render literally.
+
         push_rendered(text, length, &format!("{{#{}}}", name));
         return;
     }
 
-    // Constant: {$N}
     if let Some(idx) = t.strip_prefix('$') {
         if let Ok(n) = idx.parse::<usize>() {
             if let Some(v) = resolver.get_constant(n) {
@@ -228,7 +207,6 @@ fn handle_token<F: Resolver + ?Sized>(
         }
     }
 
-    // Regular placeholder, possibly with options.
     resolve_placeholder(t, text, length, resolver);
 }
 
@@ -255,7 +233,6 @@ fn resolve_placeholder<F: Resolver + ?Sized>(
         return;
     }
 
-    // Split off width/format options on ',' or ':'.
     let mut base = trimmed;
     let mut opts: Option<&str> = None;
     for sep in [',', ':'] {
@@ -280,16 +257,12 @@ fn resolve_placeholder<F: Resolver + ?Sized>(
     }
 }
 
-/// Apply fastfetch width options: `{v,10}`, `{v,-10}`, `{v:10}`, `{v:-10}`.
-/// Positive width right-aligns (pad-left), negative left-aligns (pad-right).
 fn apply_options(v: &str, opts: &str) -> String {
     let opt = opts.trim();
     if opt.is_empty() {
         return v.to_string();
     }
 
-    // Support fractional style options like "28.5" (truncate to 28 cols) and
-    // things like "pct", "1" etc. Simplest: numeric width handling.
     let (neg, num) = if let Some(rest) = opt.strip_prefix('-') {
         (true, rest)
     } else {
@@ -301,10 +274,10 @@ fn apply_options(v: &str, opts: &str) -> String {
         return if cur < width {
             let pad = width - cur;
             if neg {
-                // left align: pad right
+
                 format!("{}{}", v, " ".repeat(pad))
             } else {
-                // right align: pad left
+
                 format!("{}{}", " ".repeat(pad), v)
             }
         } else if cur > width {
@@ -360,7 +333,6 @@ fn push_rendered(out: &mut String, length: &mut usize, rendered: &str) {
     }
 }
 
-/// Track conditional opens/closes even while inside a skipped region.
 fn track_cond<F: Resolver + ?Sized>(token: &str, cond: &mut Vec<bool>, resolver: &F) {
     let t = token.trim();
     if let Some(rest) = t.strip_prefix('?') {
@@ -376,7 +348,6 @@ fn track_cond<F: Resolver + ?Sized>(token: &str, cond: &mut Vec<bool>, resolver:
     }
 }
 
-/// Visible (ANSI-stripped) character length of a rendered string.
 pub fn visible_len(s: &str) -> usize {
     let mut count = 0;
     let b = s.as_bytes();
@@ -406,7 +377,6 @@ fn utf8_len(first: u8) -> usize {
     }
 }
 
-/// Convenience wrapper for modules that simply map names to values.
 pub struct MapResolver<'a> {
     pub key_name: &'a str,
     pub values: &'a [(&'a str, String)],

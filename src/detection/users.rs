@@ -9,9 +9,6 @@ pub struct UserInfo {
     pub host: String,
 }
 
-// glibc struct utmpx layout (utmp files are written by glibc tools even on
-// static-musl builds). Only the leading fields are read here; they share
-// offsets with the musl layout up through ut_host.
 #[repr(C)]
 struct UtmpEntry {
     ut_type: i16,
@@ -30,10 +27,8 @@ struct UtmpEntry {
 
 const USER_PROCESS: i16 = 7;
 
-// Record strides seen across glibc/musl releases (verified: glibc 2.39 = 384).
 const RECORD_STRIDES: [usize; 3] = [384, 400, 380];
 
-/// List active login sessions by parsing the system utmp file.
 pub fn detect() -> Vec<UserInfo> {
     const LINE_LEN: usize = 32;
     const USER_LEN: usize = 32;
@@ -49,8 +44,6 @@ pub fn detect() -> Vec<UserInfo> {
         return Vec::new();
     }
 
-    // Wrong strides can still slip a spurious record through, so parse with
-    // every known stride and keep the interpretation that found the most.
     let mut best: Vec<UserInfo> = Vec::new();
     for &stride in &RECORD_STRIDES {
         let out = parse_with_stride(&buf, stride, LINE_LEN, USER_LEN, HOST_LEN);
@@ -111,7 +104,6 @@ fn cstr_of(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
-/// Convenience: the login username (from utmpx or env).
 pub fn hint() -> String {
     let v = detect();
     if !v.is_empty() {

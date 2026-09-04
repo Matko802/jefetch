@@ -8,14 +8,13 @@ pub struct BatteryInfo {
     pub technology: String,
     pub capacity_percent: u8,
     pub status: String,
-    /// Energy capacity now vs full in Wh (0 when unknown).
+
     pub energy_now: f64,
     pub energy_full: f64,
     pub temp_c: f64,
     pub voltage_mv: u64,
 }
 
-/// Enumerate batteries from /sys/class/power_supply/BAT*.
 pub fn detect() -> Vec<BatteryInfo> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") else {

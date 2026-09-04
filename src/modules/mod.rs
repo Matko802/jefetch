@@ -1,10 +1,3 @@
-// The module registry, mirroring fastfetch's ffModuleInfos registry.
-//
-// Modules are indexed alphabetically (A-Z) so lookups can be done via
-// `toupper(name[0]) - 'A'`. Each entry carries the module's name and
-// description, which drives `--list-modules`, structure parsing and
-// config loading.
-
 use crate::config::configfile::ModuleEntry;
 use crate::config::moduleargs::ModuleArgs;
 
@@ -25,7 +18,6 @@ macro_rules! mod_info {
     };
 }
 
-// A flat registry of every module in alphabetical order by name.
 pub static MODULES: &[ModuleInfo] = &[
     mod_info!("Battery", "Print battery information", true),
     mod_info!("BIOS", "Print first-stage bootloader information (name, version, release date, etc.)", true),
@@ -114,14 +106,13 @@ pub fn list() -> impl Iterator<Item = &'static ModuleInfo> {
     MODULES.iter()
 }
 
-/// Output produced by a module: a key plus value line(s).
 #[derive(Debug, Clone, Default)]
 pub struct ModuleOutput {
     pub key: String,
     pub values: Vec<String>,
-    /// Whether detection actually produced data (else the row is skipped).
+
     pub supported: bool,
-    /// Whether the module is deliberately blank (Break, empty separator).
+
     pub blank: bool,
 }
 
@@ -152,7 +143,6 @@ impl ModuleOutput {
     }
 }
 
-/// Configured module instance from CLI / config.
 pub struct ModuleInstance {
     pub module: String,
     pub entry: ModuleEntry,
@@ -160,8 +150,6 @@ pub struct ModuleInstance {
     pub raw: Option<crate::config::json::JsonValue>,
 }
 
-/// Execute a module and return its rendered output, honouring format strings
-/// where the module supports them.
 pub fn run_instance(
     inst: &ModuleInstance,
     cfg: &crate::config::configfile::Config,

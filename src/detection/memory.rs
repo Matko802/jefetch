@@ -17,7 +17,7 @@ pub fn detect() -> MemoryInfo {
         let mut parts = line.split_whitespace();
         let key = parts.next().unwrap_or("").trim_end_matches(':');
         let val_kb: u64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        // Convert KiB to MiB-ish * 1024 to keep fastfetch's "bytes" concept.
+
         let val_bytes = val_kb.saturating_mul(1024);
         match key {
             "MemTotal" => info.mem_total = val_bytes,
@@ -35,7 +35,6 @@ pub fn detect() -> MemoryInfo {
     info
 }
 
-// Replicate fastfetch's default linux mem calculation using "available".
 fn fastfetch_used(total: u64, available: u64) -> u64 {
     if available >= total {
         0

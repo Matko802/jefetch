@@ -25,7 +25,6 @@ fn detect_uncached() -> OSInfo {
     let mut info = OSInfo::default();
     info.arch = arch();
 
-    // Prefer /etc/os-release (or /usr/lib/os-release).
     let mut osrel = parse_key_value_file("/etc/os-release");
     if osrel.is_empty() {
         osrel = parse_key_value_file("/usr/lib/os-release");
@@ -47,7 +46,6 @@ fn detect_uncached() -> OSInfo {
         }
     }
 
-    // Fallback for very minimal systems.
     if info.name.is_empty() {
         for line in read_file_lines("/etc/issue") {
             let line = line.trim_end();
@@ -66,7 +64,7 @@ fn detect_uncached() -> OSInfo {
 
 pub fn arch() -> String {
     let a = std::env::consts::ARCH;
-    // fastfetch reports x86_64 etc; std already gives matching triplets.
+
     match a {
         "x86_64" => "x86_64".to_string(),
         "aarch64" => "aarch64".to_string(),

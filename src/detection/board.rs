@@ -8,8 +8,6 @@ pub struct BoardInfo {
     pub date: String,
 }
 
-/// Read motherboard info from DMI (works on x86; values can be empty on
-/// some systems without DMI populated).
 pub fn detect() -> BoardInfo {
     let t = |p: &str| read_file(p).map(|s| s.trim().to_string()).unwrap_or_default();
     BoardInfo {

@@ -5,17 +5,14 @@ pub struct PackagesInfo {
     pub amounts: Vec<(String, usize)>,
 }
 
-/// Count installed packages. Supports the Nix package manager (NixOS)
-/// by querying the system profile closure.
 pub fn detect() -> PackagesInfo {
     let mut info = PackagesInfo::default();
 
-    // Manual Nix + flatpak counts with fastfetch's isValidNixPkg filtering.
     let mut nix_system = 0;
     let mut nix_user = 0;
     if std::path::Path::new("/nix/var/nix/profiles/system").exists() {
         nix_system = count_nix_filtered("/run/current-system").unwrap_or(0);
-        // Also try user profiles
+
         nix_user = count_nix_filtered(&format!("{}/.nix-profile", std::env::var("HOME").unwrap_or_default())).unwrap_or(0);
         if nix_user == 0 {
             if let Some(home) = std::env::var_os("HOME") {
@@ -39,7 +36,7 @@ pub fn detect() -> PackagesInfo {
     if nix_user > 0 {
         info.amounts.push(("nix-user".to_string(), nix_user));
     }
-    // Fallback single Nix if split failed
+
     if info.amounts.is_empty() {
         if let Some(n) = count_nix() {
             info.amounts.push(("nix".to_string(), n));
@@ -73,15 +70,13 @@ fn count_nix_filtered(path: &str) -> Option<usize> {
 }
 
 fn is_valid_nix_pkg(pkg: &str) -> bool {
-    // Mirrors fastfetch's isValidNixPkg in packages_nix.c
+
     use std::path::Path;
     if !Path::new(&format!("/nix/store/{}", pkg)).exists() && !Path::new(pkg).exists() {
-        // Fastfetch checks ffPathExists on full path, but we check basename existence via store dir
-        // Keep simple: just check naming.
+
     }
     let mut s = pkg.to_string();
-    // Strip hash prefix like "abc123-foo-1.2.3" -> need basename after hash
-    // fastfetch does ffStrbufSubstrAfterLastC(pkg, '/') then checks
+
     if let Some(slash) = s.rfind('/') {
         s = s[slash + 1..].to_string();
     }
@@ -94,8 +89,8 @@ fn is_valid_nix_pkg(pkg: &str) -> bool {
     {
         return false;
     }
-    // Must contain version pattern digit '.' digit
-    let mut state = 0; // 0 START, 1 DIGIT, 2 DOT
+
+    let mut state = 0;
     for c in s.chars() {
         match state {
             0 => if c.is_ascii_digit() { state = 1; },
@@ -112,9 +107,7 @@ fn is_valid_nix_pkg(pkg: &str) -> bool {
 }
 
 fn count_nix() -> Option<usize> {
-    // Persistent cache in XDG_CACHE_HOME/sharkfetch/packages.count + tmp fallback.
-    // Stale cache is returned immediately while background refresh updates it,
-    // so warm and “cold” (post-reboot) runs stay ~5 ms.
+
     let uid = unsafe { libc::getuid() };
     let cache_path = {
         if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
@@ -127,7 +120,6 @@ fn count_nix() -> Option<usize> {
     };
     let tmp_cache = format!("/tmp/sharkfetch-packages.{}.cache", uid);
 
-    // Helper to read cached value if exists.
     let read_cached = |p: &str| -> Option<(usize, std::time::SystemTime)> {
         let txt = std::fs::read_to_string(p).ok()?;
         let n = txt.trim().parse::<usize>().ok()?;
@@ -136,7 +128,6 @@ fn count_nix() -> Option<usize> {
         Some((n, mtime))
     };
 
-    // Try persistent cache first, then tmp.
     let mut cached: Option<(usize, std::time::SystemTime, String)> = None;
     for p in [&cache_path, &tmp_cache] {
         if let Some((n, mtime)) = read_cached(p) {
@@ -154,7 +145,7 @@ fn count_nix() -> Option<usize> {
         if !stale && !sys_newer {
             return Some(n);
         }
-        // Stale or profile changed: return stale immediately, refresh in background.
+
         let cache_path_clone = path.clone();
         let tmp_clone = tmp_cache.clone();
         std::thread::spawn(move || {
@@ -176,7 +167,6 @@ fn count_nix() -> Option<usize> {
         return Some(n);
     }
 
-    // No cache: synchronous (first run ever) — still slow but only once.
     let out = run_capture_timeout(
         "nix-store",
         &["-q", "--requisites", "/nix/var/nix/profiles/system"],

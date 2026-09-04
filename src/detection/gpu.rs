@@ -9,7 +9,6 @@ pub struct GpuInfo {
     pub device_id: String,
 }
 
-/// Known PCI vendor IDs for display adapters.
 const VENDOR_NAMES: &[(&str, &str)] = &[
     ("0x1002", "AMD/ATI"),
     ("0x10de", "NVIDIA"),
@@ -23,7 +22,6 @@ const VENDOR_NAMES: &[(&str, &str)] = &[
     ("0x1518", "Kontron"),
 ];
 
-/// Enumerate GPUs from sysfs DRM cards.
 pub fn detect() -> Vec<GpuInfo> {
     let ids = parse_pci_ids();
     let mut out = Vec::new();
@@ -32,7 +30,7 @@ pub fn detect() -> Vec<GpuInfo> {
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        // Only interface "cardN" dirs; skip cardN-<connector> duplicates.
+
         if !name.starts_with("card") {
             continue;
         }
@@ -88,10 +86,9 @@ fn vendor_name(id: &str) -> String {
         .unwrap_or_else(|| id.to_string())
 }
 
-/// Minimal pci.ids parser ("XXXX  <vendor>" / "  XXXX  <device>").
 #[derive(Clone)]
 struct PciIds {
-    map: Vec<(String, String, String)>, // (vendor, device, device_name)
+    map: Vec<(String, String, String)>,
 }
 
 impl PciIds {
@@ -110,7 +107,7 @@ impl PciIds {
             } else {
                 let line = line.trim_start_matches('\t');
                 if line.starts_with('\t') {
-                    continue; // subsystem lines, ignored
+                    continue;
                 }
                 if let Some((dev, name)) = split_ids_line(line) {
                     map.push((cur_vendor.clone(), dev, name));
@@ -144,7 +141,7 @@ fn split_ids_line(line: &str) -> Option<(String, String)> {
 static PCI_CACHE: std::sync::OnceLock<PciIds> = std::sync::OnceLock::new();
 
 fn parse_pci_ids() -> PciIds {
-    // Clone from cache if already loaded; pci.ids is 1-2 MB, don't re-read.
+
     if let Some(cached) = PCI_CACHE.get() {
         return PciIds { map: cached.map.clone() };
     }

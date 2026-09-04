@@ -8,7 +8,6 @@ pub struct BrightnessInfo {
     pub percentage: u8,
 }
 
-/// Brightness of the main backlight device.
 pub fn detect() -> Vec<BrightnessInfo> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir("/sys/class/backlight") else {
