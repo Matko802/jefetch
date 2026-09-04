@@ -73,7 +73,26 @@ const OPTION_KEYS: &[&str] = &[
     "symbols", "symbol", "ramp",
 ];
 
+/// Quadrant blocks by coverage mask (bit 0 top-left .. bit 3 bottom-right),
+/// 1:1 to areofyl's `quadrant_glyphs`. Partially covered cells draw the
+/// covered fraction instead of vanishing — this is what keeps rotated
+/// surfaces solid instead of full of gaps.
+const QUADRANT_GLYPHS: &[&str] = &[
+    " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛", "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█",
+];
+
 impl AnimConfig {
+    /// Sub-cell grid per character cell, 1:1 to areofyl's `select_shading`:
+    /// shading ramps sample 2x2 and collapse to quadrants, original logo
+    /// glyphs stay 1x1 (quadrants would replace the logo's own chars).
+    fn sub_divs(&self) -> (usize, usize) {
+        if self.original_glyphs {
+            (1, 1)
+        } else {
+            (2, 2)
+        }
+    }
+
     pub fn from_animation_str(s: Option<&str>) -> Self {
         let mut cfg = Self::default();
         if let Some(raw) = s {
@@ -671,9 +690,13 @@ fn build_points(
     }
 
     let z_layers = ((6.0 * config.size) as i32).max(6) as usize;
-    let mut subdiv = (config.size) as usize;
-    if subdiv < 1 {
-        subdiv = 1;
+    // Subdivide grid for larger sizes to avoid gaps. Sub-cell modes sample
+    // a finer grid, so they need proportionally more points to fill it
+    // (1:1 to areofyl: subdiv = size * sub_rows, min sub_rows).
+    let (sbr, _) = config.sub_divs();
+    let mut subdiv = (config.size * sbr as f32) as usize;
+    if subdiv < sbr {
+        subdiv = sbr;
     }
 
     let mut points: Vec<Point> = Vec::new();
@@ -870,10 +893,15 @@ pub fn render_frame(
     let w = ANIM_WIDTH as usize;
     let h = render_height;
 
-    let mut zbuf = vec![0.0f32; h * w];
-    let mut lumbuf = vec![0.0f32; h * w];
-    let mut colorbuf = vec![0i32; h * w];
-    let mut glyphbuf = vec![' '; h * w];
+    // Coverage is sampled on a grid finer than the character cell (1:1 to
+    // areofyl's sub_rows/sub_cols) so rotated surfaces stay solid.
+    let (sub_rows, sub_cols) = config.sub_divs();
+    let sw = w * sub_cols;
+    let sh = h * sub_rows;
+    let mut zbuf = vec![0.0f32; sh * sw];
+    let mut lumbuf = vec![0.0f32; sh * sw];
+    let mut colorbuf = vec![0i32; sh * sw];
+    let mut glyphbuf = vec![' '; sh * sw];
 
     let mul = frame as f32;
     let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
@@ -930,12 +958,12 @@ pub fn render_frame(
             continue;
         }
         let ooz = 1.0 / zc;
-        let xs = (half_aw + k1x2 * x3 * ooz) as i32;
-        let ys = (y_center - k1 * y3 * ooz) as i32;
-        if xs < 0 || xs >= w as i32 || ys < 0 || ys >= h as i32 {
+        let xs = ((half_aw + k1x2 * x3 * ooz) * sub_cols as f32) as i32;
+        let ys = ((y_center - k1 * y3 * ooz) * sub_rows as f32) as i32;
+        if xs < 0 || xs >= sw as i32 || ys < 0 || ys >= sh as i32 {
             continue;
         }
-        let idx = ys as usize * w + xs as usize;
+        let idx = ys as usize * sw + xs as usize;
         if ooz > zbuf[idx] {
             let mut diff = nx3 * lx + ny3 * ly + nz3 * lz;
             if diff < 0.0 {
@@ -960,14 +988,74 @@ pub fn render_frame(
     }
 
     // Render each canvas row to a (possibly empty) coloured glyph string.
-    let smax = config.shading.len().saturating_sub(1);
+    // Collapse each cell's sub-samples into one glyph (1:1 to areofyl's
+    // cell_glyph): full cells take the shading ramp by ink, partial cells
+    // draw the covered fraction as a quadrant block instead of vanishing.
+    let scount = config.shading.len();
+    let smax = scount.saturating_sub(1);
+    let total_sub = sub_rows * sub_cols;
+    let full_mask = (1u32 << total_sub) - 1;
+    // Emits the ANSI color switch for a winning sub-sample color.
+    fn push_color(line: &mut String, has_ansi: bool, c: i32, prev_color: &mut i32) {
+        if c != *prev_color {
+            if *prev_color != -2 && *prev_color != -1 {
+                line.push_str("\x1b[0m");
+            }
+            if has_ansi && c > 0 && c < 128 {
+                line.push_str(&format!("\x1b[1;{}m", c));
+            } else if has_ansi {
+                line.push_str("\x1b[0m");
+            } else if c == 1 {
+                line.push_str("\x1b[1;37m");
+            } else {
+                line.push_str("\x1b[1;35m");
+            }
+            *prev_color = c;
+        }
+    }
     let mut lines: Vec<String> = Vec::with_capacity(h);
     for row in 0..h {
         let mut line = String::new();
         let mut prev_color: i32 = -2;
         for col in 0..w {
-            let idx = row * w + col;
-            if zbuf[idx] <= 0.0 {
+            if config.original_glyphs {
+                // 1x1 path: winning sub-sample keeps its logo glyph.
+                let idx = row * sw + col;
+                if zbuf[idx] <= 0.0 {
+                    if prev_color != -2 && prev_color != -1 {
+                        line.push_str("\x1b[0m");
+                        prev_color = -1;
+                    }
+                    line.push(' ');
+                    continue;
+                }
+                push_color(&mut line, has_ansi, colorbuf[idx], &mut prev_color);
+                line.push(glyphbuf[idx]);
+                continue;
+            }
+            let mut mask = 0u32;
+            let mut bit = 0u32;
+            let mut n = 0usize;
+            let mut lsum = 0.0f32;
+            let mut best = 0.0f32;
+            let mut best_c = 0i32;
+            for sr in 0..sub_rows {
+                for sc in 0..sub_cols {
+                    let idx = (row * sub_rows + sr) * sw + (col * sub_cols + sc);
+                    let z = zbuf[idx];
+                    if z > 0.0 {
+                        mask |= 1 << bit;
+                        lsum += lumbuf[idx];
+                        n += 1;
+                        if z > best {
+                            best = z;
+                            best_c = colorbuf[idx];
+                        }
+                    }
+                    bit += 1;
+                }
+            }
+            if n == 0 {
                 if prev_color != -2 && prev_color != -1 {
                     line.push_str("\x1b[0m");
                     prev_color = -1;
@@ -975,32 +1063,26 @@ pub fn render_frame(
                 line.push(' ');
                 continue;
             }
-            let lum = lumbuf[idx];
-            let mut ci = (lum * smax as f32 + 0.5) as usize;
+            let coverage = n as f32 / total_sub as f32;
+            let ink = lsum / n as f32 * coverage;
+            // Round to the nearest step: truncating biases every cell one
+            // level lighter and leaves the top of the ramp unreachable.
+            let mut ci = (ink * smax as f32 + 0.5) as usize;
             if ci > smax {
                 ci = smax;
             }
-            let c = colorbuf[idx];
-            if c != prev_color {
-                if prev_color != -2 && prev_color != -1 {
-                    line.push_str("\x1b[0m");
-                }
-                if has_ansi && c > 0 && c < 128 {
-                    line.push_str(&format!("\x1b[1;{}m", c));
-                } else if has_ansi {
-                    line.push_str("\x1b[0m");
-                } else if c == 1 {
-                    line.push_str("\x1b[1;37m");
-                } else {
-                    line.push_str("\x1b[1;35m");
-                }
-                prev_color = c;
-            }
-            if config.original_glyphs {
-                line.push(glyphbuf[idx]);
+            // The sub-cell block is always full ink over the part it covers,
+            // the ramp spreads a lighter shade over the whole cell: pick by
+            // ink so edges stay crisp instead of ringing a bright outline.
+            let glyph: &str = if mask != full_mask
+                && (coverage - ink).abs() <= ((ci as f32 + 1.0) / scount as f32 - ink).abs()
+            {
+                QUADRANT_GLYPHS[mask as usize]
             } else {
-                line.push_str(&config.shading[ci]);
-            }
+                &config.shading[ci]
+            };
+            push_color(&mut line, has_ansi, best_c, &mut prev_color);
+            line.push_str(glyph);
         }
         if prev_color != -2 && prev_color != -1 {
             line.push_str("\x1b[0m");
@@ -1131,6 +1213,66 @@ mod tests {
             text
         );
         assert!(!text.contains('A'), "no logo chars in block mode");
+    }
+
+    /// Rotated frames must stay solid: count empty cells inside the logo's
+    /// bounding box — with quadrant collapse there should be almost none.
+    fn bbox_hole_ratio(logo: &ResolvedLogo, frame: usize) -> f32 {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let out = render_frame(logo, frame, &cfg, 36, 4);
+        let text = joined_text(&out);
+        let rows: Vec<Vec<char>> = text.lines().map(|l| l.chars().collect()).collect();
+        let mut min_r = usize::MAX;
+        let mut max_r = 0usize;
+        let mut min_c = usize::MAX;
+        let mut max_c = 0usize;
+        for (r, row) in rows.iter().enumerate() {
+            for (c, ch) in row.iter().enumerate() {
+                if *ch != ' ' {
+                    min_r = min_r.min(r);
+                    max_r = max_r.max(r);
+                    min_c = min_c.min(c);
+                    max_c = max_c.max(c);
+                }
+            }
+        }
+        if max_r <= min_r || max_c <= min_c {
+            return 1.0;
+        }
+        let mut holes = 0usize;
+        let mut total = 0usize;
+        for r in min_r..=max_r {
+            for c in min_c..=max_c {
+                total += 1;
+                if rows[r][c] == ' ' {
+                    holes += 1;
+                }
+            }
+        }
+        holes as f32 / total as f32
+    }
+
+    fn solid_test_logo() -> ResolvedLogo {
+        // Bigger solid block: rotation must not punch holes in it.
+        ResolvedLogo {
+            lines: vec!["████████".to_string(); 8],
+            colors: Vec::new(),
+            width: 8,
+            padding_right: 2,
+        }
+    }
+
+    #[test]
+    fn rotated_frames_stay_solid() {
+        for frame in [0usize, 5, 13, 27] {
+            let ratio = bbox_hole_ratio(&solid_test_logo(), frame);
+            assert!(
+                ratio < 0.25,
+                "frame {} has {:.0}% holes inside logo bbox",
+                frame,
+                ratio * 100.0
+            );
+        }
     }
 
     #[test]
