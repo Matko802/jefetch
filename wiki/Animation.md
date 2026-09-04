@@ -42,8 +42,8 @@ it parses again).
 | `speed=N` | Overall multiplier — refresh rate follows automatically so fast spins stay smooth |
 
 ```jsonc
-"animation": "spin y speed=2.0"          // default, 12 fps
-"animation": "spin y speed=6.0"          // 3x faster and auto-raises to ~36 fps
+"animation": "spin y speed=2.0"          // default, 30 fps
+"animation": "spin y speed=6.0"          // 3x faster and auto-raises to ~90 fps
 ```
 
 ## Style: flat or 3d

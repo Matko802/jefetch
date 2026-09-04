@@ -165,7 +165,7 @@ impl AnimConfig {
             .abs()
             .max((self.speed * self.speed_y).abs())
             .max((self.speed * self.speed_z).abs());
-        (BASE_FPS * (eff / 2.0).max(1.0)).clamp(BASE_FPS, 120.0)
+        (30.0 * (eff / 2.0).max(1.0)).clamp(30.0, 120.0)
     }
 
     pub fn frame_interval(&self) -> std::time::Duration {
@@ -1256,22 +1256,22 @@ mod tests {
     #[test]
     fn fps_follows_speed() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        assert!((cfg.auto_fps() - 12.0).abs() < 1e-4);
+        assert!((cfg.auto_fps() - 30.0).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=1.0"));
-        assert!((cfg.auto_fps() - 12.0).abs() < 1e-4);
+        assert!((cfg.auto_fps() - 30.0).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=4.0"));
-        assert!((cfg.auto_fps() - 24.0).abs() < 1e-4);
+        assert!((cfg.auto_fps() - 60.0).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin xyz speed=2.0 speed_z=3.0"));
-        assert!((cfg.auto_fps() - 36.0).abs() < 1e-4);
+        assert!((cfg.auto_fps() - 90.0).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=40.0"));
         assert!((cfg.auto_fps() - 120.0).abs() < 1e-4);
 
         let d = AnimConfig::from_animation_str(Some("spin y speed=4.0")).frame_interval();
-        assert!((d.as_secs_f32() - 1.0 / 24.0).abs() < 1e-3);
+        assert!((d.as_secs_f32() - 1.0 / 60.0).abs() < 1e-3);
     }
 
     #[test]
