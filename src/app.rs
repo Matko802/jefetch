@@ -317,7 +317,7 @@ impl App {
                 out.clear();
                 out.push_str("\x1b[2J\x1b[H");
                 let logo_h = base_logo.as_ref().map(|l| l.lines.len()).unwrap_or(0);
-                let logo_start = render_height.saturating_sub(logo_h) / 2;
+                let logo_start = 1;
                 for row in 0..render_height {
                     let mut line = String::new();
                     if let Some(l) = &base_logo {
