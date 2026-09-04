@@ -5,7 +5,7 @@ A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output
 | Page | What you'll find |
 |------|------------------|
 | [Installation](Installation) | Install & update |
-| [Configuration](Configuration) | `.toml` vs `.jsonc`, all sections |
+| [Configuration](Configuration) | `config.jsonc`, all sections |
 | [Animation](Animation) | Spin axes, speed, direction |
 | [Logos](Logos) | Builtin / custom, colors, padding |
 | [Modules](Modules) | The `modules` list & options |
@@ -35,6 +35,6 @@ A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output
     ./target/x86_64-unknown-linux-musl/release/sharkfetch
     ```
 
-First run auto-creates your config. Tabs throughout this wiki show both `TOML` and `JSONC` — pick the one matching your file; JSONC takes precedence if both exist.
+First run auto-creates `~/.config/sharkfetch/config.jsonc`.
 
 Continue to [Installation](Installation) →

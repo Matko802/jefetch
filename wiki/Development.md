@@ -1,6 +1,6 @@
 # Development
 
-Zero-crate (only `libc`), hand-rolled JSONC + TOML parsers. Build with `./build.sh` or `make` — **not** `cargo build --release` directly (Nix's cargo has no musl target → dynamic binary).
+Zero-crate (only `libc`), hand-rolled JSONC parser. Build with `./build.sh` or `make` — **not** `cargo build --release` directly (Nix's cargo has no musl target → dynamic binary).
 
 ## Build
 
@@ -38,7 +38,7 @@ src/
   app.rs           # App::run(), config, animation
   anim.rs          # areofyl 1:1 3D engine
   logo/            # 530 logos (data.rs generated)
-  config/          # JSONC + TOML parsers, Config structs
+  config/          # JSONC parser, Config structs
   detection/       # os, terminal, packages, shell
   modules/         # renderers
   print/           # color & width helpers

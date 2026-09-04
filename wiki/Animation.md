@@ -4,19 +4,11 @@ sharkfetch embeds a faithful Rust port of areofyl/fetch's 3D engine — the logo
 
 ## Enable
 
-=== "TOML"
+Add `animation` to `~/.config/sharkfetch/config.jsonc`:
 
-    ```toml
-    [logo]
-    name = "nixos"
-    animation = "spin y speed=2.0"
-    ```
-
-=== "JSONC"
-
-    ```jsonc
-    { "logo": { "source": "nixos", "animation": "spin y speed=2.0" } }
-    ```
+```jsonc
+{ "logo": { "source": "nixos", "animation": "spin y speed=2.0" } }
+```
 
 | Value | Effect |
 |-------|--------|
@@ -30,12 +22,12 @@ sharkfetch embeds a faithful Rust port of areofyl/fetch's 3D engine — the logo
 
 `animation` accepts `x` / `y` / `z` (any combo) and per-axis speed (negative = reverse):
 
-```toml
-animation = "spin y speed=2.0"               # default
-animation = "spin x"                         # pitch
-animation = "spin z speed=1.5"               # roll (in-plane)
-animation = "spin xyz speed=1.5 speed_z=-1"  # all axes, Z reversed
-animation = "off"                            # disable
+```jsonc
+"animation": "spin y speed=2.0"               // default
+"animation": "spin x"                         // pitch
+"animation": "spin z speed=1.5"               // roll (in-plane)
+"animation": "spin xyz speed=1.5 speed_z=-1"  // all axes, Z reversed
+"animation": "off"                            // disable
 ```
 
 | Key | Effect |
@@ -45,11 +37,11 @@ animation = "off"                            # disable
 
 ## Presets
 
-```toml
-animation = "spin y speed=2.0"          # gentle, areofyl-like
-animation = "spin xyz speed=2.5"        # fast tumble
-animation = "spin yz speed_y=0.6 speed_z=-1"
-animation = "spin x speed=1.0"
+```jsonc
+"animation": "spin y speed=2.0"          // gentle, areofyl-like
+"animation": "spin xyz speed=2.5"        // fast tumble
+"animation": "spin yz speed_y=0.6 speed_z=-1"
+"animation": "spin x speed=1.0"
 ```
 
 Next: [Logos](Logos) →

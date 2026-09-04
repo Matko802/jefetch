@@ -40,35 +40,38 @@ sharkfetch --help
 | ------ | ----------- |
 | `--help` | show help |
 | `--static` | force static (no animation) |
+| `--logo <name>` | override logo (builtin id) for one run |
 | `--list-logos` | show all logos |
 | `--list-modules` | list of available modules |
 
-The config file is looked up in `~/.config/sharkfetch/config.jsonc` (preferred) then `config.toml`. It is auto-created on first run. See the **[Wiki](wiki/Home.md)** for detailed tabbed guides.
+The config file is `~/.config/sharkfetch/config.jsonc` (JSONC, fastfetch-style). It is auto-created on first run. See the **[Wiki](wiki/Home.md)** for detailed guides.
 
-Animated like `areofetch` — add to `~/.config/sharkfetch/config.toml`:
+Animated like `areofetch` — add to `~/.config/sharkfetch/config.jsonc`:
 
-```toml
-[logo]
-name = "nixos"
-animation = "spin"  # "spin" to animate, "off"/"static" for static
-# animation = "spin y speed=2.0"
-# animation = "spin xyz speed=1.5 speed_z=-1"  # X/Y/Z + per-axis speed (negative = reverse)
+```jsonc
+{
+    "logo": {
+        "source": "nixos",
+        "animation": "spin y speed=2.0"   // "spin" = animate, "off" = static
+        // "animation": "spin xyz speed=1.5 speed_z=-1"   // X/Y/Z + per-axis speed (negative = reverse)
+    }
+}
 ```
 
-Then `sharkfetch` will animate until you press `q`/`Esc`/`Ctrl-C`; `sharkfetch --static` forces one static frame.
+Then `sharkfetch` will animate until you press `q`/`Esc`/`Ctrl-C`; `sharkfetch --static` forces one static frame. Override the logo without editing config: `sharkfetch --logo arch`.
 
-**Wiki (tabbed, like ironbar):**
+**Wiki (tabbed):**
 
-| Page | Tabs |
+| Page | What you'll find |
 |------|------|
-| [Home](wiki/Home.md) | Nix / Cargo / Static |
-| [Installation](wiki/Installation.md) | Nix flake / Nix shell / Cargo / Make / Prebuilt |
-| [Configuration](wiki/Configuration.md) | TOML vs JSONC |
-| [Animation](wiki/Animation.md) | Axes (X/Y/Z) / Speed / Presets |
-| [Logos](wiki/Logos.md) | File / Inline, `$N` slots, Padding |
-| [Modules](wiki/Modules.md) | Bare string / Object, Display / General |
-| [Development](wiki/Development.md) | Nix / Make / build.sh |
-| [FAQ](wiki/FAQ.md) | TOML→JSONC, `spin` not working, etc. |
+| [Home](wiki/Home.md) | Quick start |
+| [Installation](wiki/Installation.md) | Install & update |
+| [Configuration](wiki/Configuration.md) | `config.jsonc`, all sections |
+| [Animation](wiki/Animation.md) | Spin axes, speed, direction |
+| [Logos](wiki/Logos.md) | Builtin / custom, `$N` colors, padding |
+| [Modules](wiki/Modules.md) | The `modules` list & options |
+| [Development](wiki/Development.md) | Build, layout, contributing |
+| [FAQ](wiki/FAQ.md) | Quick answers |
 
 > `mkdocs` with tabs: `pip install mkdocs-material && mkdocs serve` (reads `mkdocs.yml` → `wiki/` with `pymdownx.tabbed`).
 

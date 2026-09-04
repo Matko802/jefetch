@@ -1,63 +1,37 @@
 # Configuration
 
-sharkfetch reads an optional config file. **Both TOML and JSONC are supported**; JSONC takes precedence if both exist.
+sharkfetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */` comments, trailing commas).
 
 ## File Lookup (in order)
 
-1. `-c /path/to/config` (`.toml` → TOML, else JSONC)
+1. `-c /path/to/config.jsonc`
 2. `~/.config/sharkfetch/config.jsonc`
-3. `~/.config/sharkfetch/config.toml` (auto-created on first run)
-4. Compiled defaults
+3. Compiled defaults
 
-**To use JSONC:** `rm ~/.config/sharkfetch/config.toml && touch ~/.config/sharkfetch/config.jsonc && sharkfetch` — it will auto-fill `config.jsonc` for you.
+`config.jsonc` is auto-created on first run. To start fresh: `rm ~/.config/sharkfetch/config.jsonc && sharkfetch`.
 
-## Tabs: TOML vs JSONC
+## Example
 
-=== "TOML (`config.toml`)"
-
-    ```toml
-    modules = [
+```jsonc
+{
+    "modules": [
         "title", "separator", "os", "host", "kernel", "uptime", "packages",
         "shell", "display", "wm", "theme", "icons", "font", "cursor", "terminal",
         "cpu", "gpu", "memory", "swap", "disk", "localip", "locale", "break",
-        "colors",
-    ]
-
-    [display]
-    separator = ": "
-    keyColor = "bold_cyan"
-    titleColor = "bold_blue"
-    brightColor = true
-
-    [logo]
-    name = ""              # "" = auto-detect (e.g. nixos)
-    # animation = "spin y speed=2.0"
-    ```
-
-=== "JSONC (`config.jsonc`)"
-
-    ```jsonc
-    {
-        "modules": [
-            "title", "separator", "os", "host", "kernel", "uptime", "packages",
-            "shell", "display", "wm", "theme", "icons", "font", "cursor", "terminal",
-            "cpu", "gpu", "memory", "swap", "disk", "localip", "locale", "break",
-            "colors"
-        ],
-        "display": {
-            "separator": ": ",
-            "keyColor": "bold_cyan",
-            "titleColor": "bold_blue",
-            "brightColor": true
-        },
-        "logo": {
-            "source": "",  // "" = auto-detect
-            // "animation": "spin y speed=2.0"
-        }
+        "colors"
+    ],
+    "display": {
+        "separator": ": ",
+        "keyColor": "bold_cyan",
+        "titleColor": "bold_blue",
+        "brightColor": true
+    },
+    "logo": {
+        "source": "",  // "" = auto-detect
+        // "animation": "spin z speed=1.5"
     }
-    ```
-
-Both parse to the same config. JSONC supports `//` and `/* */` comments, TOML uses `#`.
+}
+```
 
 ## Sections
 
@@ -82,7 +56,7 @@ Ordered list of modules. Each is a bare name or an object with options:
 
 | Key | Notes |
 |-----|-------|
-| `source`/`name` | Builtin id or `""` to auto-detect |
+| `source` | Builtin id or `""` to auto-detect |
 | `type` | `"builtin"` / `"none"` / `"file"` |
 | `color` | `"red"` or per-line `{ "1": "green", "2-4": "blue" }` |
 | `padding` | `4` or `{ top, left, right }` (`right` default `4`) |
@@ -93,6 +67,7 @@ Ordered list of modules. Each is a bare name or an object with options:
 | Flag | Effect |
 |------|--------|
 | `-c <path>` | Use an explicit config |
+| `--logo <name>` | Override logo (builtin id) for one run |
 | `--no-config` | Ignore all configs, use defaults |
 | `--static` | Force static (disable animation) |
 | `--structure "os:kernel:"` | Override `modules` order |
