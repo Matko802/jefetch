@@ -1195,6 +1195,17 @@ mod tests {
     }
 
     #[test]
+    fn all_options_combine_in_one_line() {
+        let cfg =
+            AnimConfig::from_animation_str(Some("spin xyz speed=2.0 fps=30 flat chars=ascii"));
+        assert!(cfg.spin_x && cfg.spin_y && cfg.spin_z);
+        assert!((cfg.speed - 2.0).abs() < 1e-4);
+        assert!((cfg.fps - 30.0).abs() < 1e-4);
+        assert!(cfg.flat);
+        assert!(cfg.original_glyphs);
+    }
+
+    #[test]
     fn fg_payload_parses_extended_colors() {
         assert_eq!(fg_payload("31").as_deref(), Some("31"));
         assert_eq!(fg_payload("1;31").as_deref(), Some("31"));

@@ -706,14 +706,30 @@ fn logo_from_lines(text: &str, lc: &LogoConfig) -> ResolvedLogo {
     }
 }
 
+fn color_payload(name: &str) -> Option<String> {
+    let sgr = color::named_color_sgr(name)?;
+    let t = sgr.strip_prefix("\x1b[").unwrap_or(&sgr);
+    let t = t.strip_suffix('m').unwrap_or(t);
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
 fn builtin_logo_v(name: &str, lc: &crate::config::configfile::LogoConfig) -> Option<ResolvedLogo> {
     let logo = crate::logo::by_name(name)?;
 
-    let slots: Vec<&str> = if logo.slots.is_empty() {
-        vec![logo.color]
+    let mut slots: Vec<String> = if logo.slots.is_empty() {
+        vec![logo.color.to_string()]
     } else {
-        logo.slots.to_vec()
+        logo.slots.iter().map(|s| s.to_string()).collect()
     };
+    if let Some(forced) = lc.color.as_deref().and_then(color_payload) {
+        for s in slots.iter_mut() {
+            s.clone_from(&forced);
+        }
+    }
     let pad_top = lc.padding_top.unwrap_or(0);
     let pad_left = lc.padding_left.unwrap_or(0);
     let pad_right = lc.padding_right.unwrap_or(4);
