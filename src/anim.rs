@@ -6,6 +6,7 @@ const GAP: usize = 2;
 const MAX_POINTS: usize = 400_000;
 
 const DEFAULT_SHADING: &[&str] = &["░", "▒", "▓", "█"];
+const BASE_FPS: f32 = 12.0;
 
 #[derive(Debug, Clone)]
 pub struct AnimConfig {
@@ -52,7 +53,7 @@ impl Default for AnimConfig {
             shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
             flat: false,
             original_glyphs: false,
-            fps: 12.0,
+            fps: BASE_FPS,
         }
     }
 }
@@ -915,7 +916,7 @@ pub fn render_frame(
     let mut colorbuf = vec![0i32; sh * sw];
     let mut glyphbuf = vec![' '; sh * sw];
 
-    let mul = frame as f32;
+    let mul = frame as f32 * BASE_FPS / config.fps.clamp(1.0, 120.0);
     let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
     let b = if config.spin_y { mul * 0.06 * config.speed * config.speed_y } else { 0.0 };
     let c_ang = if config.spin_z { mul * 0.05 * config.speed * config.speed_z } else { 0.0 };
@@ -1395,6 +1396,19 @@ mod tests {
                 ratio * 100.0
             );
         }
+    }
+
+    #[test]
+    fn rotation_speed_independent_of_fps() {
+        let mut slow = AnimConfig::from_animation_str(Some("spin y speed=2.0 fps=12"));
+        slow.spin_x = false;
+        slow.spin_z = false;
+        let mut fast = AnimConfig::from_animation_str(Some("spin y speed=2.0 fps=30"));
+        fast.spin_x = false;
+        fast.spin_z = false;
+        let a = render_frame(&solid_test_logo(), 12, &slow, 36, 4);
+        let b = render_frame(&solid_test_logo(), 30, &fast, 36, 4);
+        assert_eq!(a.lines, b.lines, "1s of spin looks identical at 12 and 30 fps");
     }
 
     #[test]

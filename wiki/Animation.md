@@ -41,7 +41,7 @@ it parses again).
 |-----|--------|
 | `speed=N` | Overall multiplier |
 | `speed_x` / `speed_y` / `speed_z` | Per-axis (negative reverses) |
-| `fps=N` | Refresh rate in frames per second (default 12, clamped 1–120) |
+| `fps=N` | Smoothness only, in frames per second (default 12, clamped 1–120) — spin speed stays the same |
 
 ```jsonc
 "animation": "spin y speed=2.0 fps=30"   // smoother spin
