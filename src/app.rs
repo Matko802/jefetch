@@ -265,6 +265,9 @@ impl App {
         let mut last_refresh = std::time::Instant::now();
         let mut needs_draw = true;
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
+        let (info_tx, info_rx) = std::sync::mpsc::channel::<(u64, Vec<String>)>();
+        let mut refresh_gen: u64 = 0;
+        let mut refresh_busy: Option<u64> = None;
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
             print!("\x1b[?25h\x1b[0m");
@@ -294,12 +297,37 @@ impl App {
                                 .as_ref()
                                 .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
                             animated = self.should_animate() && base_logo.is_some();
+                            refresh_gen = refresh_gen.wrapping_add(1);
+                            refresh_busy = None;
+                            last_refresh = std::time::Instant::now()
+                                - std::time::Duration::from_secs(2);
                         }
                     }
                 }
-                base_lines = self.render_modules(&entries);
+            }
+            if last_refresh.elapsed() >= std::time::Duration::from_secs(1)
+                && refresh_busy.is_none()
+            {
                 last_refresh = std::time::Instant::now();
-                needs_draw = true;
+                let gen = refresh_gen;
+                refresh_busy = Some(gen);
+                let cfg = self.config.clone();
+                let disabled = self.options.structure_disabled.clone();
+                let ents = entries.clone();
+                let tx = info_tx.clone();
+                std::thread::spawn(move || {
+                    let lines = Self::render_modules_with(&cfg, &disabled, &ents);
+                    let _ = tx.send((gen, lines));
+                });
+            }
+            while let Ok((gen, lines)) = info_rx.try_recv() {
+                if Some(gen) == refresh_busy {
+                    refresh_busy = None;
+                }
+                if gen == refresh_gen {
+                    base_lines = lines;
+                    needs_draw = true;
+                }
             }
 
             let info_count = base_lines.len();
@@ -488,6 +516,14 @@ impl App {
     }
 
     fn render_modules(&self, entries: &[ModuleEntry]) -> Vec<String> {
+        Self::render_modules_with(&self.config, &self.options.structure_disabled, entries)
+    }
+
+    fn render_modules_with(
+        cfg: &Config,
+        disabled: &[String],
+        entries: &[ModuleEntry],
+    ) -> Vec<String> {
 
         let mut ordered: Vec<(usize, Option<ModuleOutput>)> = Vec::new();
         if entries.len() > 1 {
@@ -495,8 +531,7 @@ impl App {
                 let mut handles = Vec::new();
                 for (idx, entry) in entries.iter().enumerate() {
                     let entry = entry.clone();
-                    let cfg = &self.config;
-                    let disabled = self.options.structure_disabled.clone();
+                    let disabled = disabled.to_vec();
                     handles.push(s.spawn(move || {
                         let name = entry.module().to_string();
                         if disabled.iter().any(|d| d.eq_ignore_ascii_case(&name)) {
@@ -528,17 +563,28 @@ impl App {
         } else {
             for (idx, entry) in entries.iter().enumerate() {
                 let name = entry.module().to_string();
-                if self
-                    .options
-                    .structure_disabled
+                if disabled
                     .iter()
                     .any(|d| d.eq_ignore_ascii_case(&name))
                 {
                     ordered.push((idx, None));
                     continue;
                 }
-                let inst = self.instance_for(entry.clone());
-                ordered.push((idx, modules::run_instance(&inst, &self.config)));
+                let args = match entry {
+                    ModuleEntry::Object { args, .. } => args.clone(),
+                    ModuleEntry::Name(_) => crate::config::moduleargs::ModuleArgs::default(),
+                };
+                let raw = match entry {
+                    ModuleEntry::Object { raw, .. } => Some(raw.clone()),
+                    ModuleEntry::Name(_) => None,
+                };
+                let inst = ModuleInstance {
+                    module: entry.module().to_string(),
+                    entry: entry.clone(),
+                    args,
+                    raw,
+                };
+                ordered.push((idx, modules::run_instance(&inst, cfg)));
             }
         }
 
@@ -559,8 +605,8 @@ impl App {
                 }
                 continue;
             }
-            let padding = self.config.display.padding;
-            let sep_render = separator_colored(self.config.display.separator.as_str(), &self.config);
+            let padding = cfg.display.padding;
+            let sep_render = separator_colored(cfg.display.separator.as_str(), cfg);
             let indent = key_visible + crate::print::format::visible_len(&sep_render) + padding;
             for (idx, v) in out.values.iter().enumerate() {
                 if idx == 0 {
@@ -576,7 +622,7 @@ impl App {
                     if let Some(colon) = v.find(": ") {
                         let key_part = &v[..colon];
                         let rest = &v[colon + 2..];
-                        let colored_key = match self.config.display.key_color.as_deref().map(|c| crate::print::color::color_code_to_ansi(c)) {
+                        let colored_key = match cfg.display.key_color.as_deref().map(|c| crate::print::color::color_code_to_ansi(c)) {
                             Some(crate::print::color::ApplyResult::Ansi { start, end }) => format!("{}{}{}", start, key_part, end),
                             _ => {
 
@@ -586,7 +632,7 @@ impl App {
                                 }
                             }
                         };
-                        let sep = separator_colored(self.config.display.separator.as_str(), &self.config);
+                        let sep = separator_colored(cfg.display.separator.as_str(), cfg);
                         lines.push(format!("{}{}{}{}", colored_key, sep, " ".repeat(padding), rest));
                     } else {
                         lines.push(v.clone());
