@@ -693,10 +693,17 @@ fn build_points(
     // Subdivide grid for larger sizes to avoid gaps. Sub-cell modes sample
     // a finer grid, so they need proportionally more points to fill it
     // (1:1 to areofyl: subdiv = size * sub_rows, min sub_rows).
+    // Original-glyph mode stays at exactly one point per cell: extra
+    // sub-points land in neighbouring pixels and stamp the same glyph
+    // twice, smearing ASCII strokes into a bold doubled mess.
     let (sbr, _) = config.sub_divs();
-    let mut subdiv = (config.size * sbr as f32) as usize;
-    if subdiv < sbr {
-        subdiv = sbr;
+    let mut subdiv = if config.original_glyphs {
+        1
+    } else {
+        (config.size * sbr as f32) as usize
+    };
+    if subdiv < 1 {
+        subdiv = 1;
     }
 
     let mut points: Vec<Point> = Vec::new();
