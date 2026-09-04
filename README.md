@@ -43,7 +43,7 @@ sharkfetch --help
 | `--list-logos` | show all logos |
 | `--list-modules` | list of available modules |
 
-The config file is looked up in `~/.config/sharkfetch/config.toml`, then `~/.config/fastfetch/config.jsonc`. It is auto-created on first run.
+The config file is looked up in `~/.config/sharkfetch/config.jsonc` (preferred) then `config.toml`. It is auto-created on first run. See the **[Wiki](wiki/Home.md)** for detailed tabbed guides.
 
 Animated like `areofetch` — add to `~/.config/sharkfetch/config.toml`:
 
@@ -51,9 +51,26 @@ Animated like `areofetch` — add to `~/.config/sharkfetch/config.toml`:
 [logo]
 name = "nixos"
 animation = "spin"  # "spin" to animate, "off"/"static" for static
+# animation = "spin y speed=2.0"
+# animation = "spin xyz speed=1.5 speed_z=-1"  # X/Y/Z + per-axis speed (negative = reverse)
 ```
 
-Then `sharkfetch` will animate until you press `q` or `Ctrl-C`; `sharkfetch --static` forces one static frame.
+Then `sharkfetch` will animate until you press `q`/`Esc`/`Ctrl-C`; `sharkfetch --static` forces one static frame.
+
+**Wiki (tabbed, like ironbar):**
+
+| Page | Tabs |
+|------|------|
+| [Home](wiki/Home.md) | Nix / Cargo / Static |
+| [Installation](wiki/Installation.md) | Nix flake / Nix shell / Cargo / Make / Prebuilt |
+| [Configuration](wiki/Configuration.md) | TOML vs JSONC |
+| [Animation](wiki/Animation.md) | Axes (X/Y/Z) / Speed / Presets |
+| [Logos](wiki/Logos.md) | File / Inline, `$N` slots, Padding |
+| [Modules](wiki/Modules.md) | Bare string / Object, Display / General |
+| [Development](wiki/Development.md) | Nix / Make / build.sh |
+| [FAQ](wiki/FAQ.md) | TOML→JSONC, `spin` not working, etc. |
+
+> `mkdocs` with tabs: `pip install mkdocs-material && mkdocs serve` (reads `mkdocs.yml` → `wiki/` with `pymdownx.tabbed`).
 
 ## Any distro with Nix:
 

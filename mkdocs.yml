@@ -1,0 +1,26 @@
+site_name: sharkfetch Wiki
+site_url: https://github.com/Matko802/sharkfetch
+repo_url: https://github.com/Matko802/sharkfetch
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+markdown_extensions:
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences
+  - admonition
+  - toc:
+      permalink: true
+nav:
+  - Home: wiki/Home.md
+  - Installation: wiki/Installation.md
+  - Configuration: wiki/Configuration.md
+  - Animation: wiki/Animation.md
+  - Logos: wiki/Logos.md
+  - Modules: wiki/Modules.md
+  - Development: wiki/Development.md
+  - FAQ: wiki/FAQ.md
