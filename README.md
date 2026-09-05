@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="Logo/jefetch.png" width="120" alt="jefetch logo :3" />
+<img src="Logo/jefetch.png" width="120" alt="Its pronounced as ye fetch" />
 
 # jefetch
-
+<sub>Its pronounced as ye fetch<sub>
 Rust Based Cli System Stat fetcher
 
-Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub> and <sub>[fastfetch](https://github.com/areofyl/fetch)</sub>
+Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](https://github.com/areofyl/fetch)
 
 </div>
 
