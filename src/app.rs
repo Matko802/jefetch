@@ -380,7 +380,7 @@ impl App {
                     ];
                     let boom = anim_cfg.boom.unwrap_or(0.0);
                     fx.scale =
-                        1.0 + anim_cfg.grow * shark_live.beat + boom * shark_live.bass;
+                        1.0 + anim_cfg.grow * shark_live.beat + boom * shark_live.energy;
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(

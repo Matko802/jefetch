@@ -122,8 +122,8 @@ jefetch borrows its look and groove:
   sound yaws right, left-heavy yaws left, matched stereo pitches up and
   down, overall energy rolls. Audio motion applies on top of the idle
   spin, so even `speed=0` dances.
-- **Expand**: `boom=N` sizes the logo up with the bass
-  (`scale = 1 + boom × bass`, `0`–`1`).
+- **Expand**: `boom=N` sizes the logo up with the volume
+  (`scale = 1 + boom × energy`, `0`–`1`).
 
 ```jsonc
 "animation": "spin y speed=2.0 sharkvis"                 // the trigger: nothing without it
