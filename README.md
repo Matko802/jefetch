@@ -27,7 +27,7 @@ sudo make install
 ## Updating it
 
 ```sh
-cd /mnt/ssd/My-Files/Projects/jefetch && git pull && sudo make install
+cd jefetch && git pull && sudo make install
 ```
 ## Usage
 
@@ -61,7 +61,7 @@ nix flake update jefetch; nh os switch -H machine1
 Standalone:
 
 ```sh
-cd /mnt/ssd/My-Files/Projects/jefetch && git pull && sudo make install
+cd jefetch && git pull && sudo make install
 ```
 
 Restart running copies after updating (`q` to quit, relaunch).
