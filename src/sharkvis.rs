@@ -303,6 +303,8 @@ pub struct LiveState {
     pub color: Option<Rgb>,
     pub energy: Option<f32>,
     pub beat: Option<f32>,
+    pub glow: Option<Rgb>,
+    pub ghigh: Option<Rgb>,
 }
 
 pub fn read_live_state() -> Option<LiveState> {
@@ -319,7 +321,12 @@ pub fn read_live_state() -> Option<LiveState> {
         }
         if let Ok(text) = std::fs::read_to_string(&p) {
             let st = parse_state_text(&text);
-            if st.color.is_some() || st.energy.is_some() || st.beat.is_some() {
+            if st.color.is_some()
+                || st.energy.is_some()
+                || st.beat.is_some()
+                || st.glow.is_some()
+                || st.ghigh.is_some()
+            {
                 return Some(st);
             }
         }
@@ -422,6 +429,16 @@ pub fn parse_state_text(text: &str) -> LiveState {
             "color" | "colour" | "rgb" => {
                 if let Some(c) = parse_color(&v) {
                     st.color = Some(c);
+                }
+            }
+            "color_low" | "colour_low" | "glow" => {
+                if let Some(c) = parse_color(&v) {
+                    st.glow = Some(c);
+                }
+            }
+            "color_high" | "colour_high" | "ghigh" => {
+                if let Some(c) = parse_color(&v) {
+                    st.ghigh = Some(c);
                 }
             }
             "energy" | "level" | "bass" | "volume" | "rms" => {
@@ -1158,10 +1175,14 @@ impl Sync {
         let mut energy: Option<f32> = None;
         let mut beat: Option<f32> = None;
         let mut color: Option<Rgb> = None;
+        let mut live_grad: Option<(Rgb, Rgb)> = None;
         if let Some(live) = read_live_state() {
             energy = live.energy;
             beat = live.beat;
             color = live.color;
+            if let (Some(lo), Some(hi)) = (live.glow, live.ghigh) {
+                live_grad = Some((lo, hi));
+            }
         }
         if energy.is_none() || beat.is_none() {
             if self.monitor.is_none() {
@@ -1181,7 +1202,7 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        let grad = self.gradients;
+        let grad = live_grad.or(self.gradients);
         let flat = if grad.is_none() { color } else { None };
         let frame = LiveFrame {
             active: true,
@@ -1262,6 +1283,9 @@ mod tests {
         let st = parse_state_text("color=255,0,136;level=0.5,kick=0");
         assert_eq!(st.color, Some((255, 0, 136)));
         assert_eq!(st.beat, Some(0.0));
+        let st = parse_state_text("color_low=#0000ff color_high=#ff0000");
+        assert_eq!(st.glow, Some((0, 0, 255)));
+        assert_eq!(st.ghigh, Some((255, 0, 0)));
         let st = parse_state_text("nothing here");
         assert!(st.color.is_none() && st.energy.is_none() && st.beat.is_none());
     }
@@ -1427,6 +1451,33 @@ mod tests {
             tr.step(0.12, dt);
         }
         assert_eq!(tr.period(), 0.0, "lock drops without support");
+    }
+
+    #[test]
+    fn sync_prefers_live_gradients() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let cfg_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-prio-{}", std::process::id()));
+        std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = 111111\n").unwrap();
+        let state_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-prio-live-{}", std::process::id()));
+        std::fs::write(
+            &state_path,
+            "energy=0.5 beat=0 color_low=#0000ff color_high=#ff0000",
+        )
+        .unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        assert!(f.active);
+        assert_eq!(f.grad, Some(((0, 0, 255), (255, 0, 0))));
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&cfg_path);
+        let _ = std::fs::remove_file(&state_path);
     }
 
     #[test]
