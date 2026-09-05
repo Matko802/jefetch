@@ -1,6 +1,8 @@
 <div align="center">
+
+<img src="Logo/jefetch.png" width="120" alt="Its pronounced as ye fetch" />
+
 # jefetch
-  
 <sub>Its pronounced as ye fetch<sub>
 
 Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](https://github.com/areofyl/fetch)
