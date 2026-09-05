@@ -24,7 +24,12 @@ make deps
 make
 sudo make install
 ```
+## Updating it
 
+```sh
+cd jefetch && git pull && ./build.sh && sudo make install
+cd ../sharkvis && git pull && ./build.sh && sudo make install
+```
 ## Usage
 
 ```sh
@@ -44,26 +49,6 @@ jefetch --help
 | `--list-modules` | list of available modules |
 
 The config file is located in `~/.config/jefetch/config.jsonc`
-
-## Update
-
-Nix flake (updates both `jefetch` and
-[sharkvis](https://github.com/Matko802/sharkvis)):
-
-```sh
-cd ~/fish-flake
-nix flake update jefetch sharkvis
-nh os switch -H machine1
-```
-
-Standalone:
-
-```sh
-cd jefetch && git pull && ./build.sh && sudo make install
-cd ../sharkvis && git pull && ./build.sh && sudo make install
-```
-
-Restart running copies after updating (`q` to quit, relaunch).
 
 ## Any distro with Nix:
 
