@@ -28,6 +28,12 @@ Option blocks for a module go under its name (also settable as a top-level key):
 
 `disk.folders` accepts one path or a list. 
 
+`packages` shows a per-manager breakdown by default; `combined` shows one total:
+
+```jsonc
+{ "modules": [{ "type": "packages", "combined": true }] }
+```
+
 ## CLI Structure Override
 
 ```sh

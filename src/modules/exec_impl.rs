@@ -22,7 +22,7 @@ pub fn render(name: &str, inst: &ModuleInstance, cfg: &Config) -> Option<ModuleO
         "de" => render_de(cfg),
         "terminal" => render_terminal(cfg),
         "terminalfont" => render_terminal_font(cfg),
-        "packages" => render_packages(cfg),
+        "packages" => render_packages(inst, cfg),
         "board" => render_board(cfg),
         "host" => render_host(cfg),
         "cpu" => render_cpu(inst),
@@ -347,18 +347,36 @@ fn render_terminal_font(cfg: &Config) -> Option<ModuleOutput> {
     Some(render_single("Terminal Font", t.font, cfg))
 }
 
-fn render_packages(_cfg: &Config) -> Option<ModuleOutput> {
+fn render_packages(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     let p = crate::detection::packages::detect();
     if p.amounts.is_empty() {
         return None;
     }
-    let text = p
-        .amounts
-        .iter()
-        .map(|(name, n)| format!("{} ({})", n, name.to_lowercase()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Some(ModuleOutput::supported("Packages", vec![text]))
+    let combined = matches!(
+        inst.raw.as_ref().and_then(|r| r.get("combined")),
+        Some(J::Bool(true))
+    ) || matches!(
+        cfg.module_options("packages").and_then(|o| o.get("combined")),
+        Some(J::Bool(true))
+    );
+    Some(ModuleOutput::supported(
+        "Packages",
+        vec![format_packages(&p.amounts, combined)],
+    ))
+}
+
+fn format_packages(amounts: &[(String, usize)], combined: bool) -> String {
+    if combined {
+        let total: usize = amounts.iter().map(|(_, n)| n).sum();
+        let names: Vec<String> = amounts.iter().map(|(name, _)| name.to_lowercase()).collect();
+        format!("{} ({})", total, names.join(", "))
+    } else {
+        amounts
+            .iter()
+            .map(|(name, n)| format!("{} ({})", n, name.to_lowercase()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 fn render_board(_cfg: &Config) -> Option<ModuleOutput> {
@@ -1545,4 +1563,33 @@ fn boot_time_iso(secs: u64) -> String {
         (tm.tm_gmtoff / 3600).abs(),
         (tm.tm_gmtoff % 3600).abs() / 60,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_amounts() -> Vec<(String, usize)> {
+        vec![
+            ("flatpak-system".to_string(), 7),
+            ("nix-system".to_string(), 2199),
+        ]
+    }
+
+    #[test]
+    fn packages_split_lists_managers() {
+        assert_eq!(
+            format_packages(&sample_amounts(), false),
+            "7 (flatpak-system), 2199 (nix-system)"
+        );
+    }
+
+    #[test]
+    fn packages_combined_totals() {
+        assert_eq!(
+            format_packages(&sample_amounts(), true),
+            "2206 (flatpak-system, nix-system)"
+        );
+        assert_eq!(format_packages(&[], true), "0 ()");
+    }
 }
