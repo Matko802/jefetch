@@ -551,6 +551,7 @@ impl BeatTracker {
         }
     }
 
+    #[allow(dead_code)]
     fn period(&self) -> f32 {
         self.period
     }
