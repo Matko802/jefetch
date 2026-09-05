@@ -1,46 +1,18 @@
 # Logos
 
-jefetch ships **530 logos** — every `fastfetch` logo, matching `fastfetch --list-logos` names.
-
-## Use a Builtin
-
-In `~/.config/jefetch/config.jsonc`:
+530 builtins — every `fastfetch` logo: `jefetch --list-logos`.
 
 ```jsonc
-{ "logo": { "source": "arch" } }
-```
-
-`source`: `""` auto-detects your OS; any other value looks up a builtin (aliases included); unknown falls back to `linux`.
-
-List all: `jefetch --list-logos`
-
-## Override at runtime
-
-```sh
-jefetch --logo arch
-```
-
-`--logo <name>` temporarily overrides the config without editing it.
-
-## Custom Logo (file)
-
-```jsonc
+{ "logo": { "source": "arch" } }                 // builtin, "" = auto-detect
 { "logo": { "type": "file", "source": "~/logo.txt" } }
 ```
 
-## Colors
-
-- Builtins use `$N` slot colors automatically (e.g. `$1██`) — no setup needed.
-- Custom logos: `color: "red"` or per-line `color: { "1": "green", "2-4": "blue" }`.
-
-## Padding
-
-```jsonc
-{ "logo": { "padding": 4 } }
-// or
-{ "logo": { "padding": { "top": 1, "left": 2, "right": 4 } } }
+```sh
+jefetch --logo arch   # one-run override
 ```
 
-`top` inserts blank lines, `left` prefixes spaces, `right` (default 4) is the gap to the text.
+- Builtins use `$N` slot colors automatically — no setup needed.
+- Custom logos: `color: "red"` or per-line `color: { "1": "green", "2-4": "blue" }`.
+- Padding: `4` or `{ top, left, right }` (`right` default `4`).
 
 Next: [Modules](Modules.md) →

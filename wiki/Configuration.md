@@ -1,14 +1,12 @@
 # Configuration
 
-jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */` comments, trailing commas).
-
-## File Lookup (in order)
+Optional `config.jsonc` (JSON with `//` comments, trailing commas).
 
 1. `-c /path/to/config.jsonc`
-2. `~/.config/jefetch/config.jsonc`
+2. `~/.config/jefetch/config.jsonc` (auto-created on first run)
 3. Compiled defaults
 
-`config.jsonc` is auto-created on first run. To start fresh: `rm ~/.config/jefetch/config.jsonc && jefetch`.
+To start fresh: `rm ~/.config/jefetch/config.jsonc && jefetch`.
 
 ## Example
 
@@ -57,7 +55,8 @@ jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */
 ## Sections
 
 ### `modules`
-Ordered list of modules. Each is a bare name or an object with options:
+
+Ordered list shown in output. Bare name or object with options:
 
 ```jsonc
 { "modules": ["os", { "type": "cpu", "temp": true }, "break", "colors"] }
@@ -68,10 +67,9 @@ Ordered list of modules. Each is a bare name or an object with options:
 | Key | Default | Effect |
 |-----|---------|--------|
 | `separator` | `": "` | Between key and value |
-| `keyColor` | `"bold_cyan"` | Info key color |
-| `titleColor` | `"bold_blue"` | `user@host` color |
+| `keyColor` / `titleColor` | bold cyan / blue | Key and `user@host` colors |
 | `padding` | `0` | Left padding |
-| `brightColor` | `true` | Use bright/bold |
+| `brightColor` | `true` | Bright/bold |
 
 ### `logo`
 
@@ -81,19 +79,19 @@ Ordered list of modules. Each is a bare name or an object with options:
 | `type` | `"builtin"` / `"none"` / `"file"` |
 | `color` | `"red"` or per-line `{ "1": "green", "2-4": "blue" }` |
 | `padding` | `4` or `{ top, left, right }` (`right` default `4`) |
-| `animation` | `off` = static; see [Animation](Animation.md) |
-| `style` | `"flat"` or `"3d"` (animation logo style) |
-| `chars` | `"ascii"` keeps logo chars, `"blocks"` default, or custom ramp |
-| `sharkvis` | Separate sharkvis profile: mode word (`on`/`off`/`auto`) or animation options (`"speed=0 boom=0.3 chars=ascii"`) applied while sharkvis runs, per-key over `animation`; explicit `style`/`chars` keys win over both |
+| `animation` | `off` = static; needs a `speed`; see [Animation](Animation.md) |
+| `style` | `"flat"` or `"3d"` |
+| `chars` | `"ascii"`, `"blocks"` (default), or custom ramp |
+| `sharkvis` | Mode word or options (`"speed=0 boom=0.3 chars=ascii"`), per-key over `animation` |
 
 ## CLI Overrides
 
 | Flag | Effect |
 |------|--------|
-| `-c <path>` | Use an explicit config |
-| `--logo <name>` | Override logo (builtin id) for one run |
-| `--no-config` | Ignore all configs, use defaults |
-| `--static` | Force static (disable animation) |
-| `--structure "os:kernel:"` | Override `modules` order |
+| `-c <path>` | Explicit config |
+| `--logo <name>` | Logo override for one run |
+| `--no-config` | Ignore configs |
+| `--static` | Static output |
+| `--structure "os:kernel:"` | Module order override |
 
 Next: [Animation](Animation.md) →
