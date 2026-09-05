@@ -121,7 +121,8 @@ follows the music using that profile alone — base `animation` is ignored.
 Audio steers only enabled axes (right-heavy yaws `y` right, left-heavy
 yaws left, matched stereo pitches `x`, energy rolls `z`); quiet holds still:
 
-- Gradient `gradient_low` → `gradient_high`, sharkvis charset unless yours wins.
+- Logo keeps its own default colors unless you add `color=sharkvis`,
+  then it follows `gradient_low` → `gradient_high`. Sharkvis charset unless yours wins.
 - Dips per kick, pulses bigger, never dims. `boom=N` sizes up with volume.
 - `motion=continuous` accumulates (default), `motion=revert` winds to a turn then retracts (`retract=N` sets snap-back speed).
 
@@ -134,6 +135,7 @@ yaws left, matched stereo pitches `x`, energy rolls `z`); quiet holds still:
 |-------|--------|
 | `sharkvis` / `=auto` / `=on` | Enable while `sharkvis` runs (default is off) |
 | `sharkvis=off` / `no-sharkvis` | Never integrate |
+| `color=sharkvis` | Logo follows sharkvis colors; without it the logo keeps its defaults |
 | `beat=N` | Dip depth, `0`–`0.9` (default `0.6`) |
 | `boom=N` | Size-up with volume, `0`–`1` |
 | `grow=N` | Pulse depth, `0`–`0.3` (default `0.12`, `0` disables) |

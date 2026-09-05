@@ -1189,7 +1189,7 @@ impl Sync {
         }
     }
 
-    pub fn poll(&mut self, mode: SharkvisMode, beat_depth: f32) -> LiveFrame {
+    pub fn poll(&mut self, mode: SharkvisMode, beat_depth: f32, live_colors: bool) -> LiveFrame {
         if mode == SharkvisMode::Off {
             self.monitor = None;
             self.last = LiveFrame::inactive();
@@ -1260,8 +1260,8 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        let grad = live_grad.or(self.gradients);
-        let flat = if grad.is_none() { color } else { None };
+        let grad = if live_colors { live_grad.or(self.gradients) } else { None };
+        let flat = if live_colors && grad.is_none() { color } else { None };
         let frame = LiveFrame {
             active: true,
             grad,
@@ -1406,7 +1406,7 @@ mod tests {
     #[test]
     fn sync_off_stays_inactive() {
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Off, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Off, DEFAULT_BEAT_DEPTH, false);
         assert!(!f.active);
         assert!((f.speed_mult - 1.0).abs() < 1e-5);
     }    #[test]
@@ -1418,7 +1418,7 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
         for mode in [SharkvisMode::Auto, SharkvisMode::On] {
             let mut s = Sync::new();
-            let f = s.poll(mode, DEFAULT_BEAT_DEPTH);
+            let f = s.poll(mode, DEFAULT_BEAT_DEPTH, false);
             assert!(!f.active, "{:?} must stay inactive without the process", mode);
             assert!((f.speed_mult - 1.0).abs() < 1e-5);
             assert!(f.grad.is_none() && f.flat.is_none());
@@ -1434,7 +1434,7 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(!f.active);
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
@@ -1462,7 +1462,7 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, None);
         assert_eq!(f.flat, Some((255, 136, 0)), "single live color without gradients");
@@ -1529,7 +1529,7 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 255), (255, 0, 0))));
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
@@ -1548,20 +1548,48 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.flat, Some((0, 255, 0)));
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.flat, Some((0, 255, 0)), "gap holds last colors");
         std::thread::sleep(Duration::from_millis(800));
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.flat.is_none(), "holdover expires");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sync_gates_colors_behind_opt_in() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let cfg_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
+        std::fs::write(&cfg_path, "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n").unwrap();
+        let state_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-gate-live-{}", std::process::id()));
+        std::fs::write(&state_path, "color=#00ff00 energy=0.7 beat=1").unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, false);
+        assert!(f.active, "motion still follows sharkvis");
+        assert!(f.grad.is_none() && f.flat.is_none(), "no live colors without opt-in");
+        assert!((f.beat - 1.0).abs() < 1e-5);
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
+        assert!(f.active);
+        assert!(f.grad.is_some() || f.flat.is_some(), "opt-in restores live colors");
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&cfg_path);
+        let _ = std::fs::remove_file(&state_path);
     }
 
     #[test]
@@ -1574,11 +1602,11 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert_eq!(f.grad, Some(((0, 0, 0), (17, 17, 17))));
         std::fs::write(&cfg_path, "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n").unwrap();
         std::thread::sleep(Duration::from_millis(600));
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert_eq!(
             f.grad,
             Some(((255, 0, 0), (0, 0, 255))),
@@ -1607,7 +1635,7 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 0), (255, 0, 0))), "both gradient ends");
         assert_eq!(f.flat, None);

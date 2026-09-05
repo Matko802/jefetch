@@ -401,7 +401,7 @@ impl App {
             if animated {
 
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
-                    shark_live = shark_sync.poll(mode, active_cfg.beat_depth);
+                    shark_live = shark_sync.poll(mode, active_cfg.beat_depth, active_cfg.live_colors);
                     shark_polled = std::time::Instant::now();
                 } else {
                     shark_live = shark_sync.last();

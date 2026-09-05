@@ -34,6 +34,7 @@ pub struct AnimConfig {
 
     pub sharkvis: crate::sharkvis::SharkvisMode,
     pub sharkvis_set: bool,
+    pub live_colors: bool,
     pub beat_depth: f32,
     pub grow: f32,
     pub boom: Option<f32>,
@@ -66,6 +67,7 @@ impl Default for AnimConfig {
             original_glyphs: false,
             sharkvis: crate::sharkvis::SharkvisMode::default(),
             sharkvis_set: false,
+            live_colors: false,
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
@@ -120,6 +122,11 @@ impl AnimConfig {
             }
             if let Some(f) = flat_opt {
                 cfg.flat = f;
+            }
+            if let Some(v) = extract_word(&low, raw, "color", true) {
+                if v.trim().eq_ignore_ascii_case("sharkvis") {
+                    cfg.live_colors = true;
+                }
             }
 
             let mut chars_opt: Option<String> = None;
@@ -1556,6 +1563,18 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin z speed_x=0.5"));
         assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y, "{:?}", cfg);
         assert!((cfg.speed_x - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn live_colors_opt_in() {
+        let cfg = AnimConfig::from_animation_str(Some("motion=continuous color=sharkvis"));
+        assert!(cfg.live_colors);
+        let cfg = AnimConfig::from_animation_str(Some("motion=continuous COLOR=SharkVis"));
+        assert!(cfg.live_colors);
+        let cfg = AnimConfig::from_animation_str(Some("motion=continuous boom=10"));
+        assert!(!cfg.live_colors);
+        let cfg = AnimConfig::from_animation_str(Some("motion=continuous color=red"));
+        assert!(!cfg.live_colors);
     }
 
     #[test]
