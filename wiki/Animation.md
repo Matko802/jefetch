@@ -149,9 +149,9 @@ How it works:
   gradient. A fresh `$XDG_RUNTIME_DIR/sharkvis/state` file
   (`color=#rrggbb energy=0..1 beat=0..1`) supplies live energy/beat and
   its color when no gradients are configured.
-- **Beat**: from the state file when present (tracked on the bass
-  bars, where kicks live), otherwise from a tiny built-in PulseAudio
-  monitor (8 kHz mono RMS + onset envelope) that only runs while the
-  integration is active — no new dependencies.
+- **Beat**: from the state file when present (normalized bass onset —
+  kicks fire at any volume, sustained beds stay quiet), otherwise from a
+  tiny built-in PulseAudio monitor (same onset logic on 8 kHz mono RMS)
+  that only runs while the integration is active — no new dependencies.
 
 Next: [Logos](Logos.md) →

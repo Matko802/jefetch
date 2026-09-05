@@ -633,6 +633,8 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
     let mut raw = vec![0u8; BEAT_WINDOW * 2];
     let mut energy = 0.0f32;
     let mut avg = 0.0f32;
+    let mut peak = 0.0f32;
+    let mut prev = 0.0f32;
     let mut beat = 0.0f32;
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -666,12 +668,18 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
         let rms = (sum / BEAT_WINDOW as f32).sqrt();
         let target = (rms * 4.0).clamp(0.0, 1.0);
         energy += (target - energy) * 0.4;
+        // Normalized onset, same as sharkvis: strength relative to the
+        // recent dynamic range, rising edge only.
         avg += (energy - avg) * 0.05;
-        if energy > avg * 1.25 + 0.04 && energy > 0.06 {
+        peak = energy.max(peak * 0.995);
+        let range = (peak - avg).max(0.05);
+        let strength = ((energy - avg) / range).clamp(0.0, 1.0);
+        if strength > 0.55 && energy > 0.05 && energy > prev {
             beat = 1.0;
         } else {
             beat *= 0.92;
         }
+        prev = energy;
         sample.energy_bits.store(energy.to_bits(), Ordering::Relaxed);
         sample.beat_bits.store(beat.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         sample.updated_ms.store(now_ms(), Ordering::Relaxed);
