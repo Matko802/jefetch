@@ -9,10 +9,10 @@ make deps && make && sudo make install               # /usr/local/bin/jefetch
 nix build github:Matko802/jefetch && ./result/bin/jefetch
 ```
 
-Update: `nix flake lock --update-input jefetch`, or `git pull --rebase origin main && ./build.sh`.
+Update: `nix flake lock --update-input jefetch`, or `git pull --rebase origin main && sudo make install`.
 
 Verify: `ldd target/x86_64-unknown-linux-musl/release/jefetch` → `not a dynamic executable`.
-Use `./build.sh` / `make`, not `cargo build --release` (Nix's cargo lacks the musl target).
+Use `make`, not bare `cargo build --release` (Nix's cargo lacks the musl target; the Makefile routes through rustup when available).
 
 Makefile: `make deps`, `make` / `make release`, `make debug`, `make test`, `sudo make install`.
 

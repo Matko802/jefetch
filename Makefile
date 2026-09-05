@@ -1,11 +1,16 @@
 VERSION ?= 0.1.0
 PREFIX ?= /usr/local
 
-# Build through build.sh — uses rustup musl if available for a fully
-# static binary, otherwise falls back to plain `cargo build --release`
+# Static musl via rustup if available, otherwise plain `cargo build --release`
 # (works with vanilla rust). On NixOS, run inside `nix develop` or use `nix build`.
 all:
-	./build.sh
+	@if [ -x "$$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" ] && \
+		"$$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc" --print target-list 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then \
+		TC="$$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu"; \
+		RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTC="$$TC/bin/rustc" "$$TC/bin/cargo" build --release --target x86_64-unknown-linux-musl; \
+	else \
+		cargo build --release; \
+	fi
 
 install: all
 	@if [ -f target/x86_64-unknown-linux-musl/release/jefetch ]; then \
