@@ -358,7 +358,12 @@ impl App {
             if animated {
 
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
-                    shark_live = shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
+                    let depth = crate::sharkvis::dip_depth(
+                        anim_cfg.beat_depth,
+                        anim_cfg.slow,
+                        anim_cfg.speed,
+                    );
+                    shark_live = shark_sync.poll(anim_cfg.sharkvis, depth);
                     shark_polled = std::time::Instant::now();
                 } else {
                     // Keep the cached frame; Sync throttles the /proc scan

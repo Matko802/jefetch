@@ -79,6 +79,16 @@ impl SharkvisMode {
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
+/// Effective dip depth for a frame. `slow` (from `slow=N`) is an absolute
+/// slowed speed: `speed=10 slow=5` dips to half speed on a full beat.
+/// It wins over the relative `beat=` depth when present.
+pub fn dip_depth(beat_depth: f32, slow: Option<f32>, speed: f32) -> f32 {
+    match slow {
+        Some(s) => (1.0 - s / speed.abs().max(1e-6)).clamp(0.0, 1.0),
+        None => beat_depth.clamp(0.0, MAX_BEAT_DEPTH),
+    }
+}
+
 /// Speed reacts to bass beats only: full speed between kicks, dipping to
 /// `1 - depth` on a beat.
 pub fn beat_speed_mult(beat: f32, depth: f32) -> f32 {
@@ -1263,6 +1273,19 @@ mod tests {
         assert!((beat_speed_mult(1.0, 0.6) - 0.4).abs() < 1e-5);
         assert!((beat_speed_mult(1.0, 0.0) - 1.0).abs() < 1e-5);
         assert!((beat_speed_mult(1.0, 99.0) - 0.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn dip_depth_prefers_slow() {
+        // speed=10 slow=5 dips to half on a full beat.
+        assert!((dip_depth(0.6, Some(5.0), 10.0) - 0.5).abs() < 1e-5);
+        // slow=0 stops dead.
+        assert!((dip_depth(0.6, Some(0.0), 10.0) - 1.0).abs() < 1e-5);
+        // slow above speed means no dip.
+        assert!((dip_depth(0.6, Some(20.0), 10.0) - 0.0).abs() < 1e-5);
+        // No slow: plain beat depth, clamped.
+        assert!((dip_depth(0.6, None, 10.0) - 0.6).abs() < 1e-5);
+        assert!((dip_depth(99.0, None, 10.0) - MAX_BEAT_DEPTH).abs() < 1e-5);
     }
 
     #[test]

@@ -35,6 +35,9 @@ pub struct AnimConfig {
     pub sharkvis_set: bool,
     pub beat_depth: f32,
     pub grow: f32,
+    /// Absolute slowed speed on a full beat (`slow=5` with `speed=10`
+    /// dips to half). Overrides `beat_depth` when present.
+    pub slow: Option<f32>,
     /// True when the animation string / logo config picked an explicit
     /// charset (then sharkvis glyphs must not override it).
     pub shading_explicit: bool,
@@ -64,6 +67,7 @@ impl Default for AnimConfig {
             sharkvis_set: false,
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
+            slow: None,
             shading_explicit: false,
         }
     }
@@ -73,7 +77,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat", "grow",
+    "no-sharkvis", "beat", "grow", "slow",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -197,6 +201,9 @@ impl AnimConfig {
             }
             if let Some(v) = extract_number(&low, "grow") {
                 cfg.grow = v.clamp(0.0, crate::sharkvis::MAX_GROW);
+            }
+            if let Some(v) = extract_number(&low, "slow") {
+                cfg.slow = Some(v.max(0.0));
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -1887,6 +1894,12 @@ mod tests {
 
         let cfg = AnimConfig::from_animation_str(Some("spin y grow=99"));
         assert!((cfg.grow - crate::sharkvis::MAX_GROW).abs() < 1e-5);
+        assert!(cfg.slow.is_none());
+
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=10.0 slow=5"));
+        assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y);
+        assert!((cfg.speed - 10.0).abs() < 1e-4);
+        assert!((cfg.slow.unwrap() - 5.0).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
         assert!(cfg.shading_explicit);
