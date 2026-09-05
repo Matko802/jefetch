@@ -21,8 +21,7 @@ jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */
         "host",
         "kernel",
         "uptime",
-        // set "combined" to true for one total instead of per-manager counts
-        { "type": "packages", "combined": false },
+        { "type": "packages", "combined": true },
         "shell",
         "display",
         "wm",
@@ -42,14 +41,14 @@ jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */
         "colors"
     ],
     "display": {
-        "separator": ": ",
+        "separator": "->",
         "keyColor": "bold_cyan",
         "titleColor": "bold_blue",
         "brightColor": true
     },
     "logo": {
         "source": "",  // "" = auto-detect
-        // "animation": "spin z speed=1.5"
+        "animation": "spin xz speed=0 boom=10 flat chars=ascii sharkvis"
     }
 }
 ```

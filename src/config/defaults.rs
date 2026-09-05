@@ -6,8 +6,7 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
         "host",
         "kernel",
         "uptime",
-        // set "combined" to true for one total instead of per-manager counts
-        { "type": "packages", "combined": false },
+        { "type": "packages", "combined": true },
         "shell",
         "display",
         "wm",
@@ -27,16 +26,16 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
         "colors"
     ],
     "display": {
-        "separator": ": ",
+        "separator": "->",
         "separatorColor": "",
         "keyColor": "bold_cyan",
         "titleColor": "bold_blue",
-        "padding": 0,
+        "padding": 1,
         "brightColor": true
     },
     "logo": {
         "source": "",
-        //  "animation": "spin xyz speed=2.0 flat chars=ascii",
+        "animation": "spin xz speed=0 boom=10 flat chars=ascii sharkvis",
         "padding": {
             "top": 0,
             "left": 0,
