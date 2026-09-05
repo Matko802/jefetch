@@ -79,33 +79,69 @@ impl App {
         None
     }
 
+    pub(crate) fn anim_configs(
+        &self,
+    ) -> (
+        crate::anim::AnimConfig,
+        crate::anim::AnimConfig,
+        crate::sharkvis::SharkvisMode,
+    ) {
+        let mut base = crate::anim::AnimConfig::from_animation_str(
+            self.config.logo.animation.as_deref(),
+        );
+        base.apply_style_chars(&self.config.logo);
+        if !base.speed_set {
+            base.speed = 0.0;
+        }
+        let mut active =
+            crate::anim::AnimConfig::from_animation_str(self.config.logo.sharkvis.as_deref());
+        if let Some(s) = &self.config.logo.sharkvis {
+            if let Some(first) = s.split_whitespace().next() {
+                if let Some(m) = crate::sharkvis::SharkvisMode::parse_value(first) {
+                    active.sharkvis = m;
+                    active.sharkvis_set = true;
+                }
+            }
+            let t = s.trim();
+            if !active.sharkvis_set
+                && !t.is_empty()
+                && crate::sharkvis::SharkvisMode::parse_value(t).is_none()
+            {
+                active.sharkvis = crate::sharkvis::SharkvisMode::Auto;
+                active.sharkvis_set = true;
+            }
+        }
+        active.apply_style_chars(&self.config.logo);
+        if !active.speed_set {
+            active.speed = 0.0;
+        }
+        let mode = if active.sharkvis_set {
+            active.sharkvis
+        } else {
+            base.sharkvis
+        };
+        (base, active, mode)
+    }
+
     fn should_animate(&self) -> bool {
         if self.options.force_static {
             return false;
         }
-        let mut anim_cfg = crate::anim::AnimConfig::from_animation_str(
-            self.config.logo.animation.as_deref(),
-        );
-        anim_cfg.apply_logo_overrides(&self.config.logo);
-        if !anim_cfg.speed_set {
+        let anim = self.config.logo.animation.as_deref().unwrap_or("");
+        let a = anim.to_ascii_lowercase();
+        if a == "off" || a == "none" || a == "static" || a == "false" || a == "0" {
             return false;
         }
-        if let Some(anim) = &self.config.logo.animation {
-            let a = anim.to_ascii_lowercase();
-
-            if a == "off" || a == "none" || a == "static" || a == "false" || a == "0" {
-                return false;
-            }
-
-            if a.contains("spin") || a.contains("areo") || a.contains("rotate") || a == "on" || a == "true" || a == "1" {
-                return true;
-            }
-
-            if !a.trim().is_empty() {
-                return true;
-            }
-        }
-        anim_cfg.sharkvis != crate::sharkvis::SharkvisMode::Off
+        let (base, active, mode) = self.anim_configs();
+        let base_on = base.speed_set
+            && (a.contains("spin")
+                || a.contains("areo")
+                || a.contains("rotate")
+                || a == "on"
+                || a == "true"
+                || a == "1"
+                || !a.trim().is_empty());
+        base_on || (active.speed_set && mode != crate::sharkvis::SharkvisMode::Off)
     }
 
     fn build_entries(&self) -> Vec<ModuleEntry> {
@@ -234,12 +270,14 @@ impl App {
         let mut animated = start_animated && base_logo.is_some();
         let mut base_lines = self.render_modules(&entries);
 
-        let mut anim_cfg =
-            crate::anim::AnimConfig::from_animation_str(self.config.logo.animation.as_deref());
-        anim_cfg.apply_logo_overrides(&self.config.logo);
-        let mut cloud = base_logo
+        let (mut base_cfg, mut active_cfg, mut mode) = self.anim_configs();
+        let mut base_cloud = base_logo
             .as_ref()
-            .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
+            .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
+        let mut active_cloud = base_logo
+            .as_ref()
+            .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
+        let mut using_active = false;
         let mut shark_sync = crate::sharkvis::Sync::new();
         let mut shark_live: crate::sharkvis::LiveFrame;
         let mut shark_polled = std::time::Instant::now()
@@ -309,13 +347,17 @@ impl App {
                             self.pick_logo();
                             base_logo = self.logo.clone();
                             entries = self.build_entries();
-                            anim_cfg = crate::anim::AnimConfig::from_animation_str(
-                                self.config.logo.animation.as_deref(),
-                            );
-                            anim_cfg.apply_logo_overrides(&self.config.logo);
-                            cloud = base_logo
+                            let cfgs = self.anim_configs();
+                            base_cfg = cfgs.0;
+                            active_cfg = cfgs.1;
+                            mode = cfgs.2;
+                            base_cloud = base_logo
                                 .as_ref()
-                                .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
+                                .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
+                            active_cloud = base_logo
+                                .as_ref()
+                                .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
+                            using_active = false;
                             animated = self.should_animate() && base_logo.is_some();
                             refresh_gen = refresh_gen.wrapping_add(1);
                             refresh_busy = None;
@@ -359,11 +401,19 @@ impl App {
             if animated {
 
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
-                    shark_live = shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
+                    shark_live = shark_sync.poll(mode, active_cfg.beat_depth);
                     shark_polled = std::time::Instant::now();
                 } else {
                     shark_live = shark_sync.last();
                 }
+                if shark_live.active != using_active {
+                    using_active = shark_live.active;
+                }
+                let (cfg, cloud) = if using_active {
+                    (&active_cfg, &mut active_cloud)
+                } else {
+                    (&base_cfg, &mut base_cloud)
+                };
                 spin_phase += f64::from(shark_live.speed_mult);
                 let mut fx = crate::anim::RenderFx::none();
                 if shark_live.active {
@@ -372,7 +422,7 @@ impl App {
                     } else if let Some(c) = shark_live.flat {
                         fx.grad = Some((c, c));
                     }
-                    if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
+                    if !cfg.original_glyphs && !cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
                     let (yaw_step, pitch_step) =
@@ -383,13 +433,13 @@ impl App {
                         .as_secs_f32()
                         .clamp(0.001, 0.5);
                     last_fx = fx_now;
-                    if anim_cfg.motion == crate::anim::Motion::Revert {
-                        let tau = if anim_cfg.retract <= 0.0 {
+                    if cfg.motion == crate::anim::Motion::Revert {
+                        let tau = if cfg.retract <= 0.0 {
                             f32::INFINITY
                         } else {
-                            crate::anim::REVERT_TAU / anim_cfg.retract.clamp(0.1, 10.0)
+                            crate::anim::REVERT_TAU / cfg.retract.clamp(0.1, 10.0)
                         };
-                        let lim = anim_cfg.limit.unwrap_or(1.0).max(0.0) as f64
+                        let lim = cfg.limit.unwrap_or(1.0).max(0.0) as f64
                             * std::f64::consts::TAU;
                         yaw_phase = crate::anim::revert_step(
                             yaw_phase,
@@ -430,19 +480,15 @@ impl App {
                             roll_phase as f32,
                         ];
                     }
-                    let boom = anim_cfg.boom.unwrap_or(0.0);
+                    let boom = cfg.boom.unwrap_or(0.0);
                     fx.scale =
-                        1.0 + anim_cfg.grow * shark_live.beat + boom * shark_live.energy;
-                }
-                let mut render_cfg = anim_cfg.clone();
-                if shark_live.active {
-                    render_cfg.speed = 0.0;
+                        1.0 + cfg.grow * shark_live.beat + boom * shark_live.energy;
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(
                         c,
                         spin_phase,
-                        &render_cfg,
+                        cfg,
                         render_height,
                         info_count,
                         &fx,
@@ -522,7 +568,7 @@ impl App {
             }
 
             let mut quit = false;
-            let slices = (anim_cfg.frame_interval().as_millis() / 10).clamp(1, 200) as usize;
+            let slices = (base_cfg.frame_interval().as_millis() / 10).clamp(1, 200) as usize;
             for _ in 0..slices {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 match poll_key_action(tty_fd, is_tty, &mut pending) {
@@ -1281,6 +1327,38 @@ mod tests {
         assert!(animate_app(Some("spin xz flat"), Some("speed=0")).should_animate());
         assert!(!animate_app(Some("spin xz flat"), Some("off")).should_animate());
         assert!(!animate_app(Some("spin xz flat"), None).should_animate());
+        assert!(!animate_app(Some("off"), Some("speed=2")).should_animate());
+        assert!(animate_app(Some("spin y speed=2"), Some("off")).should_animate());
+    }
+
+    #[test]
+    fn anim_configs_separates_profiles() {
+        let app = animate_app(
+            Some("spin z speed=2 flat"),
+            Some("speed=0 boom=0.3 chars=ascii"),
+        );
+        let (base, active, mode) = app.anim_configs();
+        assert!((base.speed - 2.0).abs() < 1e-4);
+        assert!(base.spin_z && !base.spin_x && !base.spin_y);
+        assert!(base.flat);
+        assert!(!base.shading_explicit);
+        assert!((active.speed - 0.0).abs() < 1e-4);
+        assert!(active.spin_y && !active.spin_x && !active.spin_z);
+        assert!(!active.flat);
+        assert!((active.boom.unwrap() - 0.3).abs() < 1e-4);
+        assert!(active.original_glyphs);
+        assert_eq!(mode, crate::sharkvis::SharkvisMode::Auto);
+    }
+
+    #[test]
+    fn anim_configs_key_mode_wins() {
+        let app = animate_app(Some("spin y sharkvis=off"), Some("speed=0"));
+        let (_, _, mode) = app.anim_configs();
+        assert_eq!(mode, crate::sharkvis::SharkvisMode::Auto);
+        let app = animate_app(Some("spin y speed=2"), Some("off"));
+        let (base, _, mode) = app.anim_configs();
+        assert_eq!(mode, crate::sharkvis::SharkvisMode::Off);
+        assert!((base.speed - 2.0).abs() < 1e-4);
     }
 
     #[test]

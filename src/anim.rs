@@ -342,120 +342,7 @@ impl AnimConfig {
         }
     }
 
-    pub fn apply_sharkvis_str(&mut self, raw: &str) {
-        let low = raw.to_ascii_lowercase();        if let Some(first) = raw.split_whitespace().next() {
-            if let Some(m) = crate::sharkvis::SharkvisMode::parse_value(first) {
-                self.sharkvis = m;
-                self.sharkvis_set = true;
-            }
-        }
-        let ov = Self::from_animation_str(Some(raw));
-        if ov.sharkvis_set {
-            self.sharkvis = ov.sharkvis;
-            self.sharkvis_set = true;
-        }
-        if extract_number(&low, "speed_x").is_some() {
-            self.speed_x = ov.speed_x;
-            self.speed_set = true;
-        }
-        if extract_number(&low, "speed_y").is_some() {
-            self.speed_y = ov.speed_y;
-            self.speed_set = true;
-        }
-        if extract_number(&low, "speed_z").is_some() {
-            self.speed_z = ov.speed_z;
-            self.speed_set = true;
-        }
-        if extract_number(&low, "speed").is_some() {
-            self.speed = ov.speed;
-            self.speed_set = true;
-        }
-        if extract_number(&low, "beat").is_some() {
-            self.beat_depth = ov.beat_depth;
-        }
-        if extract_number(&low, "grow").is_some() {
-            self.grow = ov.grow;
-        }
-        if extract_number(&low, "boom").is_some() {
-            self.boom = ov.boom;
-        }
-        if extract_number(&low, "retract").is_some() {
-            self.retract = ov.retract;
-        }
-        if extract_number(&low, "limit").is_some() {
-            self.limit = ov.limit;
-        }
-        let mut motion_mentioned = false;
-        if let Some(v) = extract_word(&low, raw, "motion", true) {
-            if Motion::parse_value(&v).is_some() {
-                motion_mentioned = true;
-            }
-        }
-        if !motion_mentioned
-            && (has_word(&low, "revert")
-                || has_word(&low, "continuous")
-                || has_word(&low, "continues"))
-        {
-            motion_mentioned = true;
-        }
-        if motion_mentioned {
-            self.motion = ov.motion;
-        }
-        if extract_number(&low, "size").is_some() {
-            self.size = ov.size;
-        }
-        if extract_number(&low, "depth").is_some() {
-            self.depth = ov.depth;
-            self.depth_user_set = true;
-        }
-        if extract_number(&low, "height").is_some() {
-            self.height = ov.height;
-        }
-        if extract_word(&low, raw, "light", false).is_some() {
-            self.light_x = ov.light_x;
-            self.light_y = ov.light_y;
-            self.light_z = ov.light_z;
-        }
-        let mut style_mentioned = false;
-        for key in ["style", "mode"] {
-            if let Some(v) = extract_word(&low, raw, key, true) {
-                if Self::parse_style_value(&v).is_some() {
-                    style_mentioned = true;
-                }
-            }
-        }
-        if !style_mentioned && (has_word(&low, "flat") || has_word(&low, "3d")) {
-            style_mentioned = true;
-        }
-        if style_mentioned {
-            self.flat = ov.flat;
-        }
-        if ov.shading_explicit {
-            self.shading = ov.shading.clone();
-            self.original_glyphs = ov.original_glyphs;
-            self.shading_explicit = true;
-        }
-        let axis_src = blank_option_spans(&low, OPTION_KEYS);
-        let has_x = axis_src.contains('x');
-        let has_y = axis_src.contains('y');
-        let has_z = axis_src.contains('z');
-        if low.contains("spin") || has_x || has_y || has_z || low.contains("rotate") {
-            if has_x || has_y || has_z {
-                self.spin_x = has_x;
-                self.spin_y = has_y;
-                self.spin_z = has_z;
-            }
-        }
-        if !self.sharkvis_set
-            && !raw.trim().is_empty()
-            && crate::sharkvis::SharkvisMode::parse_value(raw.trim()).is_none()
-        {
-            self.sharkvis = crate::sharkvis::SharkvisMode::Auto;
-            self.sharkvis_set = true;
-        }
-    }
-
-    pub fn apply_logo_overrides(&mut self, logo: &crate::config::configfile::LogoConfig) {
+    pub fn apply_style_chars(&mut self, logo: &crate::config::configfile::LogoConfig) {
         if let Some(s) = &logo.style {
             if let Some(f) = Self::parse_style_value(s) {
                 self.flat = f;
@@ -464,17 +351,6 @@ impl AnimConfig {
         if let Some(c) = &logo.chars {
             self.apply_chars_value(c);
             self.shading_explicit = true;
-        }
-        if !self.sharkvis_set {
-            if let Some(s) = &logo.sharkvis {
-                if let Some(m) = crate::sharkvis::SharkvisMode::parse_value(s) {
-                    self.sharkvis = m;
-                    self.sharkvis_set = true;
-                }
-            }
-        }
-        if let Some(s) = &logo.sharkvis {
-            self.apply_sharkvis_str(s);
         }
     }
 }
@@ -2078,55 +1954,14 @@ mod tests {
     }
 
     #[test]
-    fn sharkvis_str_overlays_base_options() {
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        cfg.apply_sharkvis_str("speed=0 boom=0.3 chars=ascii");
-        assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z, "axes untouched");
+    fn sharkvis_profile_stands_alone() {
+        let cfg = AnimConfig::from_animation_str(Some("speed=0 boom=0.3 chars=ascii"));
         assert!((cfg.speed - 0.0).abs() < 1e-4);
         assert!((cfg.boom.unwrap() - 0.3).abs() < 1e-4);
         assert!(cfg.original_glyphs);
         assert!(cfg.shading_explicit);
-    }
-
-    #[test]
-    fn sharkvis_str_mode_words_still_work() {
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        cfg.apply_sharkvis_str("off");
         assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Off);
-        assert!((cfg.speed - 2.0).abs() < 1e-4, "nothing else touched");
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        cfg.apply_sharkvis_str("auto speed=0");
-        assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Auto);
-        assert!((cfg.speed - 0.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn sharkvis_key_options_imply_auto() {
-        let mut cfg = AnimConfig::from_animation_str(Some("spin xz speed=2.0 flat"));
-        assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Off);
-        let logo = crate::config::configfile::LogoConfig {
-            sharkvis: Some("speed=0 boom=0.3 chars=ascii".to_string()),
-            ..Default::default()
-        };
-        cfg.apply_logo_overrides(&logo);
-        assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Auto);
-        assert!((cfg.speed - 0.0).abs() < 1e-4);
-        assert!((cfg.boom.unwrap() - 0.3).abs() < 1e-4);
-        assert!(cfg.original_glyphs);
-        assert!(cfg.spin_x && cfg.spin_z && !cfg.spin_y, "base axes kept");
-        assert!(cfg.flat, "base style kept");
-    }
-
-    #[test]
-    fn sharkvis_key_respects_animation_kill_switch() {
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y sharkvis=off"));
-        let logo = crate::config::configfile::LogoConfig {
-            sharkvis: Some("speed=0".to_string()),
-            ..Default::default()
-        };
-        cfg.apply_logo_overrides(&logo);
-        assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Off);
-        assert!((cfg.speed - 0.0).abs() < 1e-4, "options still apply");
+        assert!(!cfg.sharkvis_set, "mode resolved by the app, not the parser");
     }
 
     #[test]
@@ -2139,10 +1974,6 @@ mod tests {
         assert_eq!(cfg.motion, Motion::Revert);
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0 continuous"));
         assert_eq!(cfg.motion, Motion::Continuous);
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        cfg.apply_sharkvis_str("motion=revert");
-        assert_eq!(cfg.motion, Motion::Revert);
-        assert!((cfg.speed - 2.0).abs() < 1e-4, "overlay keeps base speed");
     }
 
     #[test]
@@ -2202,9 +2033,6 @@ mod tests {
         assert!(AnimConfig::from_animation_str(Some("spin y")).limit.is_none());
         let cfg = AnimConfig::from_animation_str(Some("spin y limit=0.5"));
         assert!((cfg.limit.unwrap() - 0.5).abs() < 1e-4);
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        cfg.apply_sharkvis_str("limit=2");
-        assert!((cfg.limit.unwrap() - 2.0).abs() < 1e-4);
     }
 
     #[test]
@@ -2213,9 +2041,6 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin y motion=revert retract=2.5"));
         assert!((cfg.retract - 2.5).abs() < 1e-4);
         assert_eq!(cfg.motion, Motion::Revert);
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        cfg.apply_sharkvis_str("retract=4");
-        assert!((cfg.retract - 4.0).abs() < 1e-4);
     }
 
     #[test]
@@ -2225,11 +2050,6 @@ mod tests {
         assert!(AnimConfig::from_animation_str(Some("spin y speed=2")).speed_set);
         assert!(AnimConfig::from_animation_str(Some("spin y speed=0")).speed_set);
         assert!(AnimConfig::from_animation_str(Some("spin y speed_y=2")).speed_set);
-        let mut cfg = AnimConfig::from_animation_str(Some("spin y"));
-        cfg.apply_sharkvis_str("boom=0.3");
-        assert!(!cfg.speed_set);
-        cfg.apply_sharkvis_str("speed=0");
-        assert!(cfg.speed_set);
     }
 
     #[test]

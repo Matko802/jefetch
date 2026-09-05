@@ -95,7 +95,7 @@ jefetch --structure "os:kernel:uptime:break:colors"  # override order at runtime
 | `padding` | `4` or `{ top, left, right }` (`right` default `4`) |
 | `animation` | Needs an explicit `speed` or it stays static; `off` disables |
 | `style` / `chars` | `"flat"` or `"3d"`; `"ascii"`, `"blocks"`, or custom ramp — win over `animation` |
-| `sharkvis` | Mode word or options (`"speed=0 boom=0.3 chars=ascii"`), per-key over `animation` |
+| `sharkvis` | Standalone profile used while sharkvis runs (own speed/axes); base `animation` ignored then |
 
 `jefetch --logo arch` overrides the logo for one run.
 
@@ -117,9 +117,9 @@ Edits to `config.jsonc` apply live.
 ## sharkvis music mode
 
 Add `sharkvis` (or a `"sharkvis"` key) and, while `sharkvis` runs, the logo
-follows the music. Base `speed` steps aside while driving; audio steers only
-enabled axes (right-heavy yaws `y` right, left-heavy yaws left, matched
-stereo pitches `x`, energy rolls `z`); quiet holds still:
+follows the music using that profile alone — base `animation` is ignored.
+Audio steers only enabled axes (right-heavy yaws `y` right, left-heavy
+yaws left, matched stereo pitches `x`, energy rolls `z`); quiet holds still:
 
 - Gradient `gradient_low` → `gradient_high`, sharkvis charset unless yours wins.
 - Dips per kick, pulses bigger, never dims. `boom=N` sizes up with volume.
