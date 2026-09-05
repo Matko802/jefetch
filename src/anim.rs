@@ -59,7 +59,7 @@ impl Default for AnimConfig {
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
-    "symbols", "symbol", "ramp", "color",
+    "symbols", "symbol", "ramp", "color", "light",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -108,6 +108,13 @@ impl AnimConfig {
 
                 if let Some(v) = extract_word(&low, raw, key, false) {
                     chars_opt = Some(v);
+                }
+            }
+            if let Some(v) = extract_word(&low, raw, "light", false) {
+                if let Some((x, y, z)) = Self::parse_light_value(&v) {
+                    cfg.light_x = x;
+                    cfg.light_y = y;
+                    cfg.light_z = z;
                 }
             }
             if let Some(v) = chars_opt {
@@ -181,6 +188,37 @@ impl AnimConfig {
             None
         } else {
             Some(v.to_string())
+        }
+    }
+
+    fn parse_light_value(v: &str) -> Option<(f32, f32, f32)> {
+        let t: String = v
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| *c != ' ' && *c != '_' && *c != '-')
+            .collect();
+        match t.as_str() {
+            "topleft" => Some((0.41, 0.82, -0.41)),
+            "topright" => Some((-0.41, 0.82, -0.41)),
+            "top" => Some((0.0, 0.89, -0.45)),
+            "left" => Some((0.82, 0.41, -0.41)),
+            "right" => Some((-0.82, 0.41, -0.41)),
+            "front" => Some((0.0, 0.0, -1.0)),
+            "bottomleft" => Some((0.41, -0.82, -0.41)),
+            "bottomright" => Some((-0.41, -0.82, -0.41)),
+            _ => {
+                let p: Vec<&str> = v.split(',').collect();
+                if p.len() == 3 {
+                    if let (Ok(x), Ok(y), Ok(z)) = (
+                        p[0].trim().parse::<f32>(),
+                        p[1].trim().parse::<f32>(),
+                        p[2].trim().parse::<f32>(),
+                    ) {
+                        return Some((x, y, z));
+                    }
+                }
+                None
+            }
         }
     }
 
@@ -1120,8 +1158,10 @@ pub fn render_cloud(
             let mut bit = 0u32;
             let mut n = 0usize;
             let mut lsum = 0.0f32;
-            let mut best = 0.0f32;
-            let mut best_c = 0i32;
+            let mut vc = [-2i32; 4];
+            let mut vn = [0usize; 4];
+            let mut vz = [0.0f32; 4];
+            let mut vk = 0usize;
             for sr in 0..sub_rows {
                 for sc in 0..sub_cols {
                     let idx = (row * sub_rows + sr) * sw + (col * sub_cols + sc);
@@ -1130,12 +1170,38 @@ pub fn render_cloud(
                         mask |= 1 << bit;
                         lsum += lumbuf[idx];
                         n += 1;
-                        if z > best {
-                            best = z;
-                            best_c = colorbuf[idx];
+                        let cc = colorbuf[idx];
+                        let mut fi = vk;
+                        let mut k = 0;
+                        while k < vk {
+                            if vc[k] == cc {
+                                fi = k;
+                                break;
+                            }
+                            k += 1;
+                        }
+                        if fi == vk && vk < 4 {
+                            vc[vk] = cc;
+                            vk += 1;
+                        }
+                        if fi < 4 {
+                            vn[fi] += 1;
+                            if z > vz[fi] {
+                                vz[fi] = z;
+                            }
                         }
                     }
                     bit += 1;
+                }
+            }
+            let mut best_c = 0i32;
+            let mut vote_n = 0usize;
+            let mut vote_z = -1.0f32;
+            for k in 0..vk {
+                if vn[k] > vote_n || (vn[k] == vote_n && vz[k] > vote_z) {
+                    vote_n = vn[k];
+                    vote_z = vz[k];
+                    best_c = vc[k];
                 }
             }
             if n == 0 {
@@ -1296,6 +1362,48 @@ mod tests {
         assert_eq!(
             AnimConfig::animation_color(Some("spin x color=gray")).as_deref(),
             Some("gray")
+        );
+    }
+
+    #[test]
+    fn light_parses_presets_and_triples() {
+        assert_eq!(
+            AnimConfig::parse_light_value("top-right"),
+            Some((-0.41, 0.82, -0.41))
+        );
+        assert_eq!(
+            AnimConfig::parse_light_value("Top_Right"),
+            Some((-0.41, 0.82, -0.41))
+        );
+        assert_eq!(
+            AnimConfig::parse_light_value("front"),
+            Some((0.0, 0.0, -1.0))
+        );
+        assert_eq!(
+            AnimConfig::parse_light_value("0,0,-1"),
+            Some((0.0, 0.0, -1.0))
+        );
+        assert_eq!(AnimConfig::parse_light_value("bogus"), None);
+        let cfg = AnimConfig::from_animation_str(Some("spin z light=front"));
+        assert!((cfg.light_z - -1.0).abs() < 1e-4);
+        assert!((cfg.light_x - 0.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn front_light_brightens_flat_faces() {
+        let count_full = |anim: &str| -> usize {
+            let cfg = AnimConfig::from_animation_str(Some(anim));
+            let out = render_frame(&solid_test_logo(), 0, &cfg, 36, 4);
+            let text = crate::app::strip_ansi(&out.lines.join("\n"));
+            text.chars().filter(|&c| c == '█').count()
+        };
+        let top = count_full("spin");
+        let front = count_full("spin light=front");
+        assert!(
+            front > top,
+            "front light: {} vs top-right: {} full blocks",
+            front,
+            top
         );
     }
 

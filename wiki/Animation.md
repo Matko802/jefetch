@@ -40,6 +40,7 @@ it parses again).
 | Key | Effect |
 |-----|--------|
 | `speed=N` | Overall multiplier — refresh rate follows automatically so fast spins stay smooth |
+| `light=X` | Light direction: `top-left`, `top-right` (default), `top`, `left`, `right`, `front`, `bottom-left`, `bottom-right`, or `x,y,z` — `front` makes faces bright |
 
 ```jsonc
 "animation": "spin y speed=2.0"          // default, 30 fps
