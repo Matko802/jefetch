@@ -28,7 +28,6 @@ sudo make install
 
 ```sh
 cd jefetch && git pull && ./build.sh && sudo make install
-cd ../sharkvis && git pull && ./build.sh && sudo make install
 ```
 ## Usage
 
