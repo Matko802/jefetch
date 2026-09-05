@@ -79,13 +79,20 @@ pub fn truncate_to_width(s: &str, width: usize, _ellipsis: bool) -> String {
 }
 
 pub fn terminal_width() -> usize {
+    terminal_size().0
+}
+
+/// `(cols, rows)` of stdout; `(80, 0)` when unknown (`rows == 0` means
+/// "don't clamp on height").
+pub fn terminal_size() -> (usize, usize) {
     use std::os::unix::io::AsRawFd;
     let fd = std::io::stdout().as_raw_fd();
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 {
-            return ws.ws_col as usize;
+        if libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) == 0 {
+            let cols = if ws.ws_col > 0 { ws.ws_col as usize } else { 80 };
+            return (cols, ws.ws_row as usize);
         }
     }
-    80
+    (80, 0)
 }

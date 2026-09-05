@@ -279,7 +279,8 @@ impl App {
         let mut refresh_busy: Option<u64> = None;
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
-            print!("\x1b[?25h\x1b[0m");
+            // Leave no frames behind: show cursor, reset, clear screen, home.
+            print!("\x1b[?25h\x1b[0m\x1b[2J\x1b[H");
             let _ = std::io::Write::flush(&mut std::io::stdout());
             if is_tty && tty_fd != -1 {
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, orig_term); }
@@ -340,13 +341,19 @@ impl App {
             }
 
             let info_count = base_lines.len();
-            let render_height = (info_count + 2).max(36);
-            let cols = crate::common::terminal_width();
+            let mut render_height = (info_count + 2).max(36);
+            let (cols, rows) = crate::common::terminal_size();
+            // Fit the screen: drawing more rows than the terminal shows
+            // scrolls every frame, smearing old frames into scrollback and
+            // cutting the top off. Clamping keeps the top, cuts the bottom.
+            if rows > 0 {
+                render_height = render_height.min(rows.max(1));
+            }
             if animated {
 
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
                     shark_live =
-                        shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
+                        shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth, anim_cfg.sense);
                     shark_polled = std::time::Instant::now();
                 } else {
                     // Keep the cached frame; Sync throttles the /proc scan
@@ -368,8 +375,9 @@ impl App {
                     if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
-                    // Size grows with the volume.
-                    fx.scale = 1.0 + anim_cfg.grow * shark_live.energy;
+                    // Size grows and brightness breathes with the drive.
+                    fx.scale = 1.0 + anim_cfg.grow * shark_live.drive;
+                    fx.drive = shark_live.drive;
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(
@@ -1110,7 +1118,7 @@ static mut LIVE_SAVED_TERM: Option<libc::termios> = None;
 
 extern "C" fn live_signal_restore(sig: libc::c_int) {
     unsafe {
-        let seq = b"\x1b[?25h\x1b[0m";
+        let seq = b"\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
         let _ = libc::write(
             libc::STDOUT_FILENO,
             seq.as_ptr() as *const libc::c_void,
