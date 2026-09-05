@@ -22,8 +22,9 @@ the spin in place (pose is kept), `q` / `Esc` / `Ctrl-C` quits, and the
 system info refreshes every second (uptime, memory, swap, disk, ...).
 
 Edit and save `config.jsonc` while it runs — logo, modules, style and
-animation hot-reload within a second (a broken file is ignored until
-it parses again).
+animation hot-reload within ~250ms (a broken file is ignored until
+it parses again). sharkvis theme edits (colors, charset) apply within
+~500ms while it runs.
 
 ## Axis & Speed
 

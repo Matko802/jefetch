@@ -1105,7 +1105,9 @@ impl Sync {
             return self.last.clone();
         }
         let now = Instant::now();
-        if self.running_at.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1)) {
+        // Rechecked twice a second: process start/stop and theme edits
+        // (gradients/glyphs) apply promptly.
+        if self.running_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             self.running = is_running();
             self.running_at = Some(now);
         }
@@ -1114,7 +1116,7 @@ impl Sync {
             self.last = LiveFrame::inactive();
             return self.last.clone();
         }
-        if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(5)) {
+        if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             let (grad, glyphs) = visual_from_paths(&config_paths());
             self.gradients = grad;
             self.glyphs = glyphs;
@@ -1344,6 +1346,32 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sync_picks_up_theme_edits_promptly() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let cfg_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-reload-{}", std::process::id()));
+        std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = 111111\n").unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        assert_eq!(f.grad, Some(((0, 0, 0), (17, 17, 17))));
+        std::fs::write(&cfg_path, "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n").unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        assert_eq!(
+            f.grad,
+            Some(((255, 0, 0), (0, 0, 255))),
+            "theme edit applies without restart"
+        );
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&cfg_path);
     }
 
     #[test]

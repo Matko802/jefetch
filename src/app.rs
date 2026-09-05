@@ -272,6 +272,11 @@ impl App {
         let mut out = String::new();
         const GAP: usize = 2;
         let mut last_refresh = std::time::Instant::now();
+        // Config file watch ticks faster than info refresh: edits apply
+        // within ~250ms, while the heavier module re-render stays at 1s.
+        let mut last_config_check = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap_or_else(std::time::Instant::now);
         let mut needs_draw = true;
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
         let (info_tx, info_rx) = std::sync::mpsc::channel::<(u64, Vec<String>)>();
@@ -288,7 +293,8 @@ impl App {
         };
         loop {
 
-            if last_refresh.elapsed() >= std::time::Duration::from_secs(1) {
+            if last_config_check.elapsed() >= std::time::Duration::from_millis(250) {
+                last_config_check = std::time::Instant::now();
                 if let Some(path) = &watch_path {
                     let stamp = config_stamp(path);
                     if stamp != last_stamp {
