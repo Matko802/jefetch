@@ -26,7 +26,8 @@ Option blocks for a module go under its name (also settable as a top-level key):
 }
 ```
 
-`disk.folders` accepts one path or a list. 
+`disk.folders` accepts one path or a list. Without it, all physical
+disks are listed (pseudo, container and duplicate-pool mounts skipped).
 
 `packages` shows a per-manager breakdown by default; `combined` shows one total:
 
