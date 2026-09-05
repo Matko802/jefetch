@@ -61,7 +61,7 @@ nix flake update jefetch; nh os switch -H machine1
 Standalone:
 
 ```sh
-cd jefetch && git pull; ./build.sh && sudo make install
+cd /mnt/ssd/My-Files/Projects/jefetch && git pull; ./build.sh && sudo make install
 ```
 
 Restart running copies after updating (`q` to quit, relaunch).
