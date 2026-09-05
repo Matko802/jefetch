@@ -10,7 +10,9 @@ const SIOCETHTOOL: libc::Ioctl = 0x8946;
 pub struct IpInfo {
     pub name: String,
     pub ipv4: Vec<String>,
+    pub prefix4: Vec<u8>,
     pub ipv6: Vec<String>,
+    pub prefix6: Vec<u8>,
     pub mac: String,
     pub mtu: u64,
     pub speed: u64,
@@ -59,6 +61,7 @@ fn addrs_via_getifaddrs(map: &mut HashMap<String, IpInfo>) {
             let entry = map.entry(name.clone()).or_default();
             entry.name = name.clone();
             let addr = ifa.ifa_addr;
+            let mask = ifa.ifa_netmask;
             if !addr.is_null() {
                 match (*addr).sa_family as i32 {
                     libc::AF_INET => {
@@ -66,6 +69,7 @@ fn addrs_via_getifaddrs(map: &mut HashMap<String, IpInfo>) {
                         let ip = format_addr4(sa.sin_addr.s_addr);
                         if !ip.is_empty() && !entry.ipv4.contains(&ip) {
                             entry.ipv4.push(ip);
+                            entry.prefix4.push(prefix_len_v4(mask));
                         }
                     }
                     libc::AF_INET6 => {
@@ -73,6 +77,7 @@ fn addrs_via_getifaddrs(map: &mut HashMap<String, IpInfo>) {
                         let ip = format_addr6(&sa.sin6_addr);
                         if !ip.is_empty() && !entry.ipv6.contains(&ip) {
                             entry.ipv6.push(ip);
+                            entry.prefix6.push(prefix_len_v6(mask));
                         }
                     }
                     _ => {}
@@ -81,6 +86,32 @@ fn addrs_via_getifaddrs(map: &mut HashMap<String, IpInfo>) {
             p = ifa.ifa_next;
         }
         libc::freeifaddrs(ifap);
+    }
+}
+
+fn prefix_len_v4(mask: *const libc::sockaddr) -> u8 {
+    if mask.is_null() {
+        return 32;
+    }
+    unsafe {
+        if (*mask).sa_family as i32 != libc::AF_INET {
+            return 32;
+        }
+        let sa = &*(mask as *const libc::sockaddr_in);
+        sa.sin_addr.s_addr.count_ones() as u8
+    }
+}
+
+fn prefix_len_v6(mask: *const libc::sockaddr) -> u8 {
+    if mask.is_null() {
+        return 128;
+    }
+    unsafe {
+        if (*mask).sa_family as i32 != libc::AF_INET6 {
+            return 128;
+        }
+        let sa = &*(mask as *const libc::sockaddr_in6);
+        sa.sin6_addr.s6_addr.iter().map(|b| b.count_ones()).sum::<u32>() as u8
     }
 }
 
@@ -292,8 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn virtual_names_filtered() {
-        for n in ["proton0", "ipv6leakintrf0", "vboxnet0", "virbr0", "docker0", "wg0", "tun0"] {
+    fn virtual_names_filtered() {        for n in ["proton0", "ipv6leakintrf0", "vboxnet0", "virbr0", "docker0", "wg0", "tun0"] {
             assert!(is_virtual(n), "{n} is virtual");
         }
         for n in ["enp9s0", "eth0", "wlan0", "eno1"] {

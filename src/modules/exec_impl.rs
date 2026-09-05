@@ -792,17 +792,26 @@ fn render_localip(_cfg: &Config) -> Option<ModuleOutput> {
         }
     }
     let mut values = Vec::new();
-    for i in list {
-        let mut v = i.name.clone();
-        if !i.ipv4.is_empty() {
-            v.push_str(&format!(" ({})", i.ipv4.join(", ")));
+    if let Some(i) = list.into_iter().next() {
+        let (key, value) = localip_line(&i);
+        if value.is_empty() {
+            return None;
         }
-        if !i.ipv6.is_empty() {
-            v.push_str(&format!(" [{}]", i.ipv6[0]));
-        }
-        values.push(v);
+        values.push(value);
+        return Some(ModuleOutput::supported(&key, values));
     }
-    Some(ModuleOutput::supported("Local IP", values))
+    None
+}
+
+fn localip_line(i: &crate::detection::localip::IpInfo) -> (String, String) {
+    let key = format!("Local IP ({})", i.name);
+    if let (Some(ip), Some(prefix)) = (i.ipv4.first(), i.prefix4.first()) {
+        return (key, format!("{}/{}", ip, prefix));
+    }
+    if let (Some(ip), Some(prefix)) = (i.ipv6.first(), i.prefix6.first()) {
+        return (key, format!("{}/{}", ip, prefix));
+    }
+    (key, String::new())
 }
 
 #[allow(dead_code)]
@@ -1615,6 +1624,46 @@ mod tests {
         assert_eq!(
             format_packages(&one, false),
             vec!["2199 (nix-system)".to_string()]
+        );
+    }
+
+    #[test]
+    fn localip_line_matches_fastfetch() {
+        let vpn = crate::detection::localip::IpInfo {
+            name: "proton0".to_string(),
+            ipv4: vec!["10.2.0.2".to_string()],
+            prefix4: vec![32],
+            ..Default::default()
+        };
+        assert_eq!(
+            localip_line(&vpn),
+            (
+                "Local IP (proton0)".to_string(),
+                "10.2.0.2/32".to_string()
+            )
+        );
+        let lan = crate::detection::localip::IpInfo {
+            name: "enp9s0".to_string(),
+            ipv4: vec!["192.168.1.48".to_string()],
+            prefix4: vec![24],
+            ipv6: vec!["fe80::1".to_string()],
+            prefix6: vec![64],
+            ..Default::default()
+        };
+        assert_eq!(
+            localip_line(&lan),
+            (
+                "Local IP (enp9s0)".to_string(),
+                "192.168.1.48/24".to_string()
+            )
+        );
+        let empty = crate::detection::localip::IpInfo {
+            name: "eth0".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            localip_line(&empty),
+            ("Local IP (eth0)".to_string(), String::new())
         );
     }
 }
