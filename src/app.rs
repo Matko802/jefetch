@@ -233,15 +233,11 @@ impl App {
         let mut cloud = base_logo
             .as_ref()
             .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
-        // sharkvis sync: tint + beat slowdown while sharkvis runs.
         let mut shark_sync = crate::sharkvis::Sync::new();
         let mut shark_live: crate::sharkvis::LiveFrame;
         let mut shark_polled = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
-        // Fractional spin phase: advances 1.0 per drawn frame at full speed,
-        // slower on the beat (see beat_depth). Integer frames jump on sudden
-        // speed changes; an accumulator keeps the slowdown smooth.
         let mut spin_phase: f64 = 0.0;
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
@@ -272,8 +268,6 @@ impl App {
         let mut out = String::new();
         const GAP: usize = 2;
         let mut last_refresh = std::time::Instant::now();
-        // Config file watch ticks faster than info refresh: edits apply
-        // within ~250ms, while the heavier module re-render stays at 1s.
         let mut last_config_check = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
@@ -284,7 +278,6 @@ impl App {
         let mut refresh_busy: Option<u64> = None;
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
-            // Leave no frames behind: show cursor, reset, clear screen, home.
             print!("\x1b[?25h\x1b[0m\x1b[2J\x1b[H");
             let _ = std::io::Write::flush(&mut std::io::stdout());
             if is_tty && tty_fd != -1 {
@@ -349,9 +342,6 @@ impl App {
             let info_count = base_lines.len();
             let mut render_height = (info_count + 2).max(36);
             let (cols, rows) = crate::common::terminal_size();
-            // Fit the screen: drawing more rows than the terminal shows
-            // scrolls every frame, smearing old frames into scrollback and
-            // cutting the top off. Clamping keeps the top, cuts the bottom.
             if rows > 0 {
                 render_height = render_height.min(rows.max(1));
             }
@@ -361,13 +351,8 @@ impl App {
                     shark_live = shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
                     shark_polled = std::time::Instant::now();
                 } else {
-                    // Keep the cached frame; Sync throttles the /proc scan
-                    // internally, the 30ms gate here avoids state-file
-                    // re-reads on every drawn frame.
                     shark_live = shark_sync.last();
                 }
-                // Beat speed: `boom=N` moves toward N on a kick (below
-                // speed = dip, above = faster), else the `beat=` dip.
                 let beat_mult = match anim_cfg.boom {
                     Some(b) => crate::sharkvis::boom_mult(
                         b,
@@ -378,8 +363,6 @@ impl App {
                 };
                 spin_phase += f64::from(beat_mult);
                 let frame = spin_phase as usize;
-                // sharkvis look: vertical gradient (low → high), charset
-                // ramp unless the user picked one, beat zoom.
                 let mut fx = crate::anim::RenderFx::none();
                 if shark_live.active {
                     if let Some(g) = shark_live.grad {
@@ -390,7 +373,6 @@ impl App {
                     if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
-                    // Size pulses with the bass beat; brightness never dims.
                     fx.scale = 1.0 + anim_cfg.grow * shark_live.beat;
                 }
                 let anim_logo = match cloud.as_mut() {

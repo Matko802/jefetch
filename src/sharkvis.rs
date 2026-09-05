@@ -1,58 +1,12 @@
-//! sharkvis integration.
-//!
-//! When `sharkvis` (the terminal audio visualizer) is running, jefetch can
-//! borrow its look and groove:
-//!
-//! * the spinning logo is tinted with the sharkvis gradient colors
-//!   (`gradient_low` .. `gradient_high` from the sharkvis config, lerped by
-//!   the current audio energy), and
-//! * the spin slows down on the beat (`speed_mult = 1 - depth * beat`).
-//!
-//! Live data flows through a tiny state file when available, with a
-//! lightweight built-in PulseAudio monitor as fallback. Everything here is
-//! `std` + `libc` only — no new crates.
-//!
-//! ## Live state file protocol (written by sharkvis, read by jefetch)
-//!
-//! Plain `key=value` text, whitespace / newline / `;` / `,` separated,
-//! case-insensitive keys. Example:
-//!
-//! ```text
-//! color=#ff8800 energy=0.42 beat=1
-//! ```
-//!
-//! | Key | Meaning |
-//! |-----|---------|
-//! | `color` | `#rrggbb`, `rrggbb`, `r,g,b` or a basic color name |
-//! | `energy` / `level` / `bass` / `volume` | `0..1` audio energy (values `>1` are treated as percent) |
-//! | `beat` | `1`/`0`, `true`/`false` or a `0..1` beat envelope |
-//!
-//! Searched in order: `$XDG_RUNTIME_DIR/sharkvis/state`,
-//! `/run/user/$UID/sharkvis/state`, `$TMPDIR/sharkvis-$UID.state`,
-//! `/tmp/sharkvis-$UID.state`, `/tmp/sharkvis.state`.
-//! Files older than ~1s are treated as stale and ignored.
-
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub type Rgb = (u8, u8, u8);
 
-/// How sharkvis integration behaves. Parsed from the `animation` string
-/// (`sharkvis`, `sharkvis=on|off|auto`, `no-sharkvis`) and/or the
-/// `logo.sharkvis` config key. Default is `Off`: nothing happens unless
-/// the animation string (or logo key) explicitly enables it.
-///
-/// Integration is hard-gated on a running `sharkvis` process: enabled in
-/// config but sharkvis not running means fully inactive — no tint, no
-/// monitor, no beat thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SharkvisMode {
-    /// Enable while a `sharkvis` process is running.
     Auto,
-    /// Same as `Auto` (kept for compatibility): still requires the
-    /// process, but also consults the live state file first.
     On,
-    /// Never integrate.
     #[default]
     Off,
 }
@@ -75,38 +29,26 @@ impl SharkvisMode {
     }
 }
 
-/// Depth of the beat slowdown dip.
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
-/// Beat target speed from `boom=N`: on a full beat the spin moves toward
-/// `boom` as an absolute speed — below `speed` it dips (`speed=10
-/// boom=5`), above it accelerates (`speed=10 boom=100`). Off beat the
-/// multiplier is always 1; the beat envelope ramps between them.
 pub fn boom_mult(boom: f32, speed: f32, beat: f32) -> f32 {
     let target = (boom / speed.abs().max(1e-6)).max(0.0);
     1.0 + (target - 1.0) * beat.clamp(0.0, 1.0)
 }
 
-/// Speed reacts to bass beats only: full speed between kicks, dipping to
-/// `1 - depth` on a beat.
 pub fn beat_speed_mult(beat: f32, depth: f32) -> f32 {
     (1.0 - depth.clamp(0.0, MAX_BEAT_DEPTH) * beat.clamp(0.0, 1.0)).clamp(0.1, 1.0)
 }
 
-/// Depth of the beat zoom: `scale = 1 + grow * beat`.
 pub const DEFAULT_GROW: f32 = 0.12;
 pub const MAX_GROW: f32 = 0.3;
 
-/// Frame produced by [`Sync::poll`].
 #[derive(Debug, Clone)]
 pub struct LiveFrame {
     pub active: bool,
-    /// Vertical logo gradient, bottom → top (sharkvis `gradient_low/high`).
     pub grad: Option<(Rgb, Rgb)>,
-    /// Fallback single color (live state color when gradients are unknown).
     pub flat: Option<Rgb>,
-    /// sharkvis `[visualizer] glyphs` charset as a shading ramp.
     pub glyphs: Option<Vec<String>>,
     pub energy: f32,
     pub beat: f32,
@@ -133,12 +75,6 @@ pub fn lerp_rgb(lo: Rgb, hi: Rgb, t: f32) -> Rgb {
     (mix(lo.0, hi.0), mix(lo.1, hi.1), mix(lo.2, hi.2))
 }
 
-// ---------------------------------------------------------------------------
-// process detection
-// ---------------------------------------------------------------------------
-
-/// True when a `sharkvis` process is currently running (via `/proc` scan).
-/// `JEFETCH_SHARKVIS_RUNNING=1|0` overrides for tests / scripting.
 pub fn is_running() -> bool {
     if let Ok(v) = std::env::var("JEFETCH_SHARKVIS_RUNNING") {
         match v.trim().to_ascii_lowercase().as_str() {
@@ -171,11 +107,6 @@ fn scan_proc() -> bool {
     false
 }
 
-// ---------------------------------------------------------------------------
-// sharkvis config (gradient colors)
-// ---------------------------------------------------------------------------
-
-/// Candidate sharkvis config paths. `JEFETCH_SHARKVIS_CONFIG` wins (tests).
 pub fn config_paths() -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(p) = std::env::var("JEFETCH_SHARKVIS_CONFIG") {
@@ -196,12 +127,10 @@ pub fn config_paths() -> Vec<String> {
     out
 }
 
-/// `(gradient_low, gradient_high)` from the sharkvis config, if parseable.
 pub fn gradient_colors() -> Option<(Rgb, Rgb)> {
     gradient_colors_from_paths(&config_paths())
 }
 
-/// sharkvis `[visualizer] glyphs` charset as a shading ramp (dark → bright).
 pub fn glyph_ramp() -> Option<Vec<String>> {
     for p in config_paths() {
         if let Ok(text) = std::fs::read_to_string(&p) {
@@ -213,7 +142,6 @@ pub fn glyph_ramp() -> Option<Vec<String>> {
     None
 }
 
-/// Gradients + charset from the first config file that provides either.
 fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String>>) {
     let mut grad: Option<(Rgb, Rgb)> = None;
     let mut glyphs: Option<Vec<String>> = None;
@@ -286,9 +214,6 @@ fn parse_sharkvis_config(text: &str) -> Option<(Rgb, Rgb)> {
     }
 }
 
-/// Parse the `[visualizer] glyphs` value into single-char ramp steps.
-/// sharkvis keeps the raw value (no `;` comment stripping); each char —
-/// e.g. `1234567` or `▁▂▃▄▅▆▇█` — becomes one shading step.
 fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
     let mut section = String::from("general");
     for raw_line in text.lines() {
@@ -312,12 +237,10 @@ fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
         if line[..eq].trim().to_ascii_lowercase() != "glyphs" {
             continue;
         }
-        // sharkvis trims the value the same way.
         let ramp: Vec<String> = line[eq + 1..].trim().chars().map(|c| c.to_string()).collect();
         if ramp.is_empty() {
             return None;
         }
-        // Whitespace-only values carry no shading info.
         if ramp.iter().all(|s| s.trim().is_empty()) {
             return None;
         }
@@ -326,13 +249,11 @@ fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
     None
 }
 
-/// Parse `#rrggbb`, `rrggbb` or a basic color name.
 pub fn parse_color(s: &str) -> Option<Rgb> {
     let t = s.trim();
     if t.is_empty() {
         return None;
     }
-    // comma separated r,g,b
     if t.contains(',') {
         let parts: Vec<&str> = t.split(',').collect();
         if parts.len() == 3 {
@@ -374,10 +295,6 @@ fn named_color(name: &str) -> Option<Rgb> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// live state file
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LiveState {
     pub color: Option<Rgb>,
@@ -385,7 +302,6 @@ pub struct LiveState {
     pub beat: Option<f32>,
 }
 
-/// Fresh live state from sharkvis, if its state file exists and is recent.
 pub fn read_live_state() -> Option<LiveState> {
     let stale = stale_after();
     for p in state_paths() {
@@ -441,17 +357,12 @@ fn state_paths() -> Vec<String> {
     out
 }
 
-/// Parse state file text. Accepts `k=v` / `k:v` pairs separated by
-/// whitespace, newlines or `;`; pairs may also be comma-separated
-/// (`a=1,b=2`) and colors may be `color=R,G,B`.
 pub fn parse_state_text(text: &str) -> LiveState {
     let mut st = LiveState::default();
     let normalized: String = text
         .chars()
         .map(|c| if c == ';' || c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
-    // Split into comma-parts first so `color=255,0,136` and `a=1,b=2`
-    // both work, then re-join rgb triplets.
     let mut parts: Vec<String> = Vec::new();
     for chunk in normalized.split_whitespace() {
         for p in chunk.split(',') {
@@ -481,7 +392,6 @@ pub fn parse_state_text(text: &str) -> LiveState {
                 toks.push(p.to_string());
             }
             None => {
-                // Bare `color R G B` form.
                 if matches!(p.to_ascii_lowercase().as_str(), "color" | "colour" | "rgb")
                     && i + 3 < parts.len()
                     && is_bare_num(&parts[i + 1])
@@ -544,10 +454,6 @@ fn parse_beat(v: &str) -> Option<f32> {
     parse_level(v)
 }
 
-// ---------------------------------------------------------------------------
-// fallback beat monitor (tiny PulseAudio RMS sampler, std + libc only)
-// ---------------------------------------------------------------------------
-
 const BEAT_RATE: u32 = 8000;
 const BEAT_WINDOW: usize = 256;
 
@@ -565,9 +471,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Background PulseAudio monitor. Samples the default sink monitor at 8kHz
-/// mono and tracks RMS energy plus a simple onset (beat) envelope.
-/// Created lazily and only while sharkvis integration is active.
 pub struct BeatMonitor {
     sample: std::sync::Arc<BeatSample>,
     stop: std::sync::Arc<AtomicBool>,
@@ -593,7 +496,6 @@ impl BeatMonitor {
         }
     }
 
-    /// `(energy, beat)` in `0..1`, or `None` when no usable data (yet).
     pub fn sample(&self) -> Option<(f32, f32)> {
         if self.sample.dead.load(Ordering::Relaxed) {
             return None;
@@ -677,8 +579,6 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
         let rms = (sum / BEAT_WINDOW as f32).sqrt();
         let target = (rms * 4.0).clamp(0.0, 1.0);
         energy += (target - energy) * 0.4;
-        // Normalized onset, same as sharkvis: strength relative to the
-        // recent dynamic range, rising edge only.
         avg += (energy - avg) * 0.05;
         peak = energy.max(peak * 0.995);
         let range = (peak - avg).max(0.05);
@@ -694,8 +594,6 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
         sample.updated_ms.store(now_ms(), Ordering::Relaxed);
     }
 }
-
-// --- minimal PulseAudio native client (record-only) -------------------------
 
 struct BeatClient {
     sock: std::os::unix::net::UnixStream,
@@ -1090,12 +988,6 @@ impl BeatRecord {
     }
 }
 
-// ---------------------------------------------------------------------------
-// high-level sync used by the live view
-// ---------------------------------------------------------------------------
-
-/// Polls sharkvis state with cheap caching. Not shared between threads;
-/// construct one per live view.
 pub struct Sync {
     running: bool,
     running_at: Option<Instant>,
@@ -1126,8 +1018,6 @@ impl Sync {
             return self.last.clone();
         }
         let now = Instant::now();
-        // Rechecked twice a second: process start/stop and theme edits
-        // (gradients/glyphs) apply promptly.
         if self.running_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             self.running = is_running();
             self.running_at = Some(now);
@@ -1144,7 +1034,6 @@ impl Sync {
             self.visual_at = Some(now);
         }
 
-        // Live state file wins (exact colors + energy from sharkvis itself).
         let mut energy: Option<f32> = None;
         let mut beat: Option<f32> = None;
         let mut color: Option<Rgb> = None;
@@ -1153,7 +1042,6 @@ impl Sync {
             beat = live.beat;
             color = live.color;
         }
-        // Fallback: local monitor for the beat.
         if energy.is_none() || beat.is_none() {
             if self.monitor.is_none() {
                 self.monitor = Some(BeatMonitor::start());
@@ -1172,8 +1060,6 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        // Both gradient ends when known (vertical logo gradient mirroring
-        // the sharkvis bars); otherwise the single live color, if any.
         let grad = self.gradients;
         let flat = if grad.is_none() { color } else { None };
         let frame = LiveFrame {
@@ -1189,7 +1075,6 @@ impl Sync {
         self.last.clone()
     }
 
-    /// Last frame (used before the first poll or when throttling).
     pub fn last(&self) -> LiveFrame {
         self.last.clone()
     }
@@ -1205,7 +1090,6 @@ impl Default for Sync {
 mod tests {
     use super::*;
 
-    /// Tests below mutate process env; serialize them.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
@@ -1266,9 +1150,7 @@ mod tests {
         assert_eq!(lerp_rgb((0, 0, 0), (255, 255, 255), 0.5), (128, 128, 128));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 0.0), (0, 0, 0));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 1.0), (255, 0, 0));
-        // No beat: full speed, always.
         assert!((beat_speed_mult(0.0, 0.6) - 1.0).abs() < 1e-5);
-        // Full beat dips by depth.
         assert!((beat_speed_mult(1.0, 0.6) - 0.4).abs() < 1e-5);
         assert!((beat_speed_mult(1.0, 0.0) - 1.0).abs() < 1e-5);
         assert!((beat_speed_mult(1.0, 99.0) - 0.1).abs() < 1e-5);
@@ -1276,15 +1158,10 @@ mod tests {
 
     #[test]
     fn boom_mult_math() {
-        // speed=10 boom=5 dips to half on a full beat.
         assert!((boom_mult(5.0, 10.0, 1.0) - 0.5).abs() < 1e-5);
-        // Off beat always 1.
         assert!((boom_mult(5.0, 10.0, 0.0) - 1.0).abs() < 1e-5);
-        // Above speed accelerates: speed=2 boom=6 triples.
         assert!((boom_mult(6.0, 2.0, 1.0) - 3.0).abs() < 1e-5);
-        // Absolute value, no ceiling: speed=10 boom=100 goes 10x.
         assert!((boom_mult(100.0, 10.0, 1.0) - 10.0).abs() < 1e-4);
-        // boom=0 stops dead.
         assert!((boom_mult(0.0, 10.0, 1.0) - 0.0).abs() < 1e-5);
     }
 
@@ -1293,13 +1170,11 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1").unwrap();
-        // Make it look old.
         let old = std::time::SystemTime::now() - Duration::from_secs(30);
         let _ = filetime_set(&path, old);
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_STALE_MS", "1000");
         assert!(read_live_state().is_none(), "stale file must be ignored");
-        // Fresh file parses.
         std::fs::write(&path, "color=#00ff00 energy=0.5 beat=0").unwrap();
         let st = read_live_state().expect("fresh file reads");
         assert_eq!(st.color, Some((0, 255, 0)));
@@ -1339,8 +1214,6 @@ mod tests {
         assert!((f.speed_mult - 1.0).abs() < 1e-5);
     }    #[test]
     fn sync_on_requires_running_process() {
-        // Hard gate: enabled in config but sharkvis not running means
-        // fully inactive, even with a fresh state file on disk.
         let _guard = ENV_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1").unwrap();
@@ -1362,7 +1235,6 @@ mod tests {
     fn sync_auto_inactive_without_process() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
-        // Point state away so no live file interferes.
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
@@ -1378,7 +1250,7 @@ mod tests {
             parse_sharkvis_glyphs(cfg),
             Some(vec!["1", "2", "3", "4", "5", "6", "7"].into_iter().map(str::to_string).collect::<Vec<_>>())
         );
-        let blocks = "[visualizer]\nglyphs = \u{2581}\u{2582}\u{2583}\u{2584}\u{2585}\u{2586}\u{2587}\u{2588}\n";
+        let blocks = "[visualizer]\nglyphs = ▁▂▃▄▅▆▇█\n";
         assert_eq!(parse_sharkvis_glyphs(blocks).map(|v| v.len()), Some(8));
         assert_eq!(parse_sharkvis_glyphs("[general]\n"), None);
         assert_eq!(parse_sharkvis_glyphs("[visualizer]\nmode = bars\n"), None);

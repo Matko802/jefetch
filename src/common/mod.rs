@@ -82,8 +82,6 @@ pub fn terminal_width() -> usize {
     terminal_size().0
 }
 
-/// `(cols, rows)` of stdout; `(80, 0)` when unknown (`rows == 0` means
-/// "don't clamp on height").
 pub fn terminal_size() -> (usize, usize) {
     use std::os::unix::io::AsRawFd;
     let fd = std::io::stdout().as_raw_fd();

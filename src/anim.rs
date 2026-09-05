@@ -35,11 +35,7 @@ pub struct AnimConfig {
     pub sharkvis_set: bool,
     pub beat_depth: f32,
     pub grow: f32,
-    /// Beat target speed (`boom=5` with `speed=10` dips to half on a full
-    /// beat; above `speed` spins faster). Overrides `beat_depth`.
     pub boom: Option<f32>,
-    /// True when the animation string / logo config picked an explicit
-    /// charset (then sharkvis glyphs must not override it).
     pub shading_explicit: bool,
 }
 
@@ -158,8 +154,6 @@ impl AnimConfig {
                         cfg.sharkvis_set = true;
                     }
                     None => {
-                        // Unknown sub-option: enable if/when running,
-                        // stay forward compatible.
                         cfg.sharkvis = crate::sharkvis::SharkvisMode::Auto;
                         cfg.sharkvis_set = true;
                     }
@@ -1024,16 +1018,9 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     })
 }
 
-/// Per-frame live effects applied on top of the base animation.
-/// Built by the live view from the sharkvis sync state.
-#[derive(Debug, Clone)]
 pub struct RenderFx {
-    /// Vertical logo gradient, bottom → top. Equal ends = flat tint.
-    /// `None` keeps the logo's own colors.
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
-    /// Override shading ramp (dark → bright), e.g. the sharkvis charset.
     pub shading: Option<Vec<String>>,
-    /// Zoom multiplier around the logo center (`1.0` = none).
     pub scale: f32,
 }
 
@@ -1151,7 +1138,6 @@ pub fn render_cloud_with_fx(
 
     let render_height = render_height.max(1);
     let logo_height = render_height.min((ANIM_WIDTH * 3 / 5) as usize).max(1);
-    // Beat zoom: scale the projection about the logo center.
     let zoom = if fx.scale.is_finite() && fx.scale > 0.0 {
         fx.scale.clamp(0.5, 2.0)
     } else {
@@ -1266,16 +1252,12 @@ pub fn render_cloud_with_fx(
         Some(s) if !s.is_empty() => s,
         _ => &config.shading,
     };
-    // A custom ramp (e.g. the sharkvis charset) is used purely: quadrant
-    // partial-blocks would leak foreign glyphs like ▝▄▗▐ into it.
     let custom_ramp = fx.shading.as_deref().is_some_and(|s| !s.is_empty());
     let scount = shading.len().max(1);
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
     let full_mask = (1u32 << total_sub) - 1;
 
-    // Vertical gradient escapes, one per output row (bottom → top),
-    // mirroring the sharkvis bar gradient. Empty when ungraded.
     let tint_rows: Vec<String> = match fx.grad {
         Some(((lr, lg, lb), (hr, hg, hb))) => (0..h)
             .map(|y| {
@@ -1304,8 +1286,6 @@ pub fn render_cloud_with_fx(
         prev_color: &mut i32,
         tint_esc: Option<&str>,
     ) {
-        // TINT_ACTIVE is a dedicated prev_color state meaning "tint escape
-        // already emitted"; all filled cells on the row share one truecolor.
         const TINT_ACTIVE: i32 = -100;
         if let Some(esc) = tint_esc {
             if *prev_color != TINT_ACTIVE {
@@ -1830,7 +1810,6 @@ mod tests {
     #[test]
     fn sharkvis_mode_parses() {
         use crate::sharkvis::SharkvisMode;
-        // Off unless explicitly enabled.
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         assert_eq!(cfg.sharkvis, SharkvisMode::Off);
         assert!(!cfg.sharkvis_set);
@@ -1850,7 +1829,6 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin y nosharkvis"));
         assert_eq!(cfg.sharkvis, SharkvisMode::Off);
 
-        // Axes unaffected by the new keywords.
         let cfg = AnimConfig::from_animation_str(Some("spin y sharkvis beat=0.8"));
         assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z);
         assert!((cfg.beat_depth - 0.8).abs() < 1e-4);
@@ -1866,7 +1844,6 @@ mod tests {
             "tint escape present, got:\n{}",
             crate::app::strip_ansi(&raw)
         );
-        // Untinted output keeps the default palette escapes.
         let plain = render_frame(&solid_test_logo(), 5, &cfg, 36, 4);
         assert!(!plain.lines.join("\n").contains("38;2;255;136;0"));
     }
@@ -1940,7 +1917,6 @@ mod tests {
 
     #[test]
     fn gradient_stays_full_bright() {
-        // No dimming: the brightest row always reaches full brightness.
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let out = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &fx_grad());
         let raw = out.lines.join("\n");
@@ -2017,7 +1993,6 @@ mod tests {
                 text
             );
         }
-        // The default blocks ramp still uses quadrant partials.
         let plain = joined_text(&render_frame(&solid_test_logo(), 5, &cfg, 36, 4));
         assert!(
             plain.chars().any(|c| QUADRANT_CHARS.contains(&c)),
