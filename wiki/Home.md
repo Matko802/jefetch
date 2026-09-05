@@ -5,12 +5,7 @@ fastfetch clone in pure Rust — static `musl`, Linux-only, 1:1 output, 3D spinn
 | Page | What you'll find |
 |------|------------------|
 | [Installation](Installation.md) | Install & update |
-| [Configuration](Configuration.md) | `config.jsonc`, all sections |
-| [Animation](Animation.md) | Spin, speed, music mode |
-| [Logos](Logos.md) | Builtin / custom, colors, padding |
-| [Modules](Modules.md) | Module list & options |
-| [Development](Development.md) | Build, layout, contributing |
-| [FAQ](FAQ.md) | Quick answers |
+| [Configuration](Configuration.md) | Config, modules, logos, animation, music mode |
 
 ```sh
 nix run github:Matko802/jefetch
