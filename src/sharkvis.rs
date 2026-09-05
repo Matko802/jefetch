@@ -32,14 +32,6 @@ impl SharkvisMode {
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
-pub fn boom_mult(boom: f32, speed: f32, beat: f32) -> f32 {
-    if speed.abs() < 1e-6 {
-        return 1.0;
-    }
-    let target = (boom / speed.abs()).max(0.0);
-    1.0 + (target - 1.0) * beat.clamp(0.0, 1.0)
-}
-
 pub fn beat_speed_mult(beat: f32, depth: f32) -> f32 {
     (1.0 - depth.clamp(0.0, MAX_BEAT_DEPTH) * beat.clamp(0.0, 1.0)).clamp(0.1, 1.0)
 }
@@ -55,6 +47,9 @@ pub struct LiveFrame {
     pub glyphs: Option<Vec<String>>,
     pub energy: f32,
     pub beat: f32,
+    pub bass: f32,
+    pub left: f32,
+    pub right: f32,
     pub speed_mult: f32,
 }
 
@@ -67,6 +62,9 @@ impl LiveFrame {
             glyphs: None,
             energy: 0.0,
             beat: 0.0,
+            bass: 0.0,
+            left: 0.0,
+            right: 0.0,
             speed_mult: 1.0,
         }
     }
@@ -305,6 +303,9 @@ pub struct LiveState {
     pub beat: Option<f32>,
     pub glow: Option<Rgb>,
     pub ghigh: Option<Rgb>,
+    pub bass: Option<f32>,
+    pub left: Option<f32>,
+    pub right: Option<f32>,
 }
 
 pub fn read_live_state() -> Option<LiveState> {
@@ -329,6 +330,9 @@ pub fn read_live_state() -> Option<LiveState> {
                 || st.beat.is_some()
                 || st.glow.is_some()
                 || st.ghigh.is_some()
+                || st.bass.is_some()
+                || st.left.is_some()
+                || st.right.is_some()
             {
                 return Some(st);
             }
@@ -444,9 +448,24 @@ pub fn parse_state_text(text: &str) -> LiveState {
                     st.ghigh = Some(c);
                 }
             }
-            "energy" | "level" | "bass" | "volume" | "rms" => {
+            "energy" | "level" | "volume" | "rms" => {
                 if let Some(e) = parse_level(&v) {
                     st.energy = Some(e);
+                }
+            }
+            "bass" | "low" => {
+                if let Some(e) = parse_level(&v) {
+                    st.bass = Some(e);
+                }
+            }
+            "left" => {
+                if let Some(e) = parse_level(&v) {
+                    st.left = Some(e);
+                }
+            }
+            "right" => {
+                if let Some(e) = parse_level(&v) {
+                    st.right = Some(e);
                 }
             }
             "beat" | "kick" | "onset" => {
@@ -1197,12 +1216,18 @@ impl Sync {
         let mut beat: Option<f32> = None;
         let mut color: Option<Rgb> = None;
         let mut live_grad: Option<(Rgb, Rgb)> = None;
+        let mut bass: Option<f32> = None;
+        let mut left: Option<f32> = None;
+        let mut right: Option<f32> = None;
         let live = read_live_state();
         let have_state = live.is_some();
         if let Some(live) = live {
             energy = live.energy;
             beat = live.beat;
             color = live.color;
+            bass = live.bass;
+            left = live.left;
+            right = live.right;
             if let (Some(lo), Some(hi)) = (live.glow, live.ghigh) {
                 live_grad = Some((lo, hi));
             }
@@ -1244,6 +1269,9 @@ impl Sync {
             glyphs: self.glyphs.clone(),
             energy,
             beat,
+            bass: bass.unwrap_or(energy).clamp(0.0, 1.0),
+            left: left.unwrap_or(energy).clamp(0.0, 1.0),
+            right: right.unwrap_or(energy).clamp(0.0, 1.0),
             speed_mult: beat_speed_mult(beat, beat_depth),
         };
         self.last = frame;
@@ -1332,16 +1360,6 @@ mod tests {
         assert!((beat_speed_mult(1.0, 0.6) - 0.4).abs() < 1e-5);
         assert!((beat_speed_mult(1.0, 0.0) - 1.0).abs() < 1e-5);
         assert!((beat_speed_mult(1.0, 99.0) - 0.1).abs() < 1e-5);
-    }
-
-    #[test]
-    fn boom_mult_math() {
-        assert!((boom_mult(5.0, 10.0, 1.0) - 0.5).abs() < 1e-5);
-        assert!((boom_mult(5.0, 10.0, 0.0) - 1.0).abs() < 1e-5);
-        assert!((boom_mult(6.0, 2.0, 1.0) - 3.0).abs() < 1e-5);
-        assert!((boom_mult(100.0, 10.0, 1.0) - 10.0).abs() < 1e-4);
-        assert!((boom_mult(0.0, 10.0, 1.0) - 0.0).abs() < 1e-5);
-        assert!((boom_mult(5.0, 0.0, 1.0) - 1.0).abs() < 1e-5);
     }
 
     #[test]

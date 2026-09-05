@@ -239,7 +239,9 @@ impl App {
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
         let mut spin_phase: f64 = 0.0;
-        let mut boost_phase: f64 = 0.0;
+        let mut yaw_phase: f64 = 0.0;
+        let mut pitch_phase: f64 = 0.0;
+        let mut roll_phase: f64 = 0.0;
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
         print!("\x1b[0m\x1b[2J\x1b[3J\x1b[H\x1b[?25l");
@@ -354,29 +356,7 @@ impl App {
                 } else {
                     shark_live = shark_sync.last();
                 }
-                let frozen_base = anim_cfg.speed.abs() < 1e-6;
-                let beat_mult = if frozen_base {
-                    1.0
-                } else {
-                    match anim_cfg.boom {
-                        Some(b) => crate::sharkvis::boom_mult(
-                            b,
-                            anim_cfg.speed,
-                            shark_live.beat,
-                        ),
-                        None => shark_live.speed_mult,
-                    }
-                };
-                spin_phase += f64::from(beat_mult);
-                if frozen_base {
-                    if let Some(b) = anim_cfg.boom {
-                        if shark_live.active {
-                            boost_phase += f64::from(shark_live.beat)
-                                * f64::from(b)
-                                * f64::from(crate::anim::BEAT_BOOST_STEP);
-                        }
-                    }
-                }
+                spin_phase += f64::from(shark_live.speed_mult);
                 let mut fx = crate::anim::RenderFx::none();
                 if shark_live.active {
                     if let Some(g) = shark_live.grad {
@@ -387,8 +367,20 @@ impl App {
                     if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
-                    fx.scale = 1.0 + anim_cfg.grow * shark_live.beat;
-                    fx.spin_boost = boost_phase as f32;
+                    let (yaw_step, pitch_step) =
+                        crate::anim::stereo_spin(shark_live.left, shark_live.right);
+                    yaw_phase += f64::from(yaw_step);
+                    pitch_phase += f64::from(pitch_step);
+                    roll_phase += f64::from(shark_live.energy)
+                        * f64::from(crate::anim::AUDIO_ROLL);
+                    fx.audio = [
+                        pitch_phase as f32,
+                        yaw_phase as f32,
+                        roll_phase as f32,
+                    ];
+                    let boom = anim_cfg.boom.unwrap_or(0.0);
+                    fx.scale =
+                        1.0 + anim_cfg.grow * shark_live.beat + boom * shark_live.bass;
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(

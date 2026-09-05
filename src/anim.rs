@@ -197,7 +197,7 @@ impl AnimConfig {
                 cfg.grow = v.clamp(0.0, crate::sharkvis::MAX_GROW);
             }
             if let Some(v) = extract_number(&low, "boom") {
-                cfg.boom = Some(v.max(0.0));
+                cfg.boom = Some(v.clamp(0.0, 1.0));
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -1018,13 +1018,30 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     })
 }
 
-pub const BEAT_BOOST_STEP: f32 = 0.024;
+pub const AUDIO_YAW: f32 = 0.15;
+pub const AUDIO_PITCH: f32 = 0.10;
+pub const AUDIO_ROLL: f32 = 0.06;
+
+pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
+    let l = left.clamp(0.0, 1.0);
+    let r = right.clamp(0.0, 1.0);
+    let sum = l + r;
+    if sum < 1e-3 {
+        return (0.0, 0.0);
+    }
+    let bal = (r - l) / sum;
+    let mag = (sum * 0.5).clamp(0.0, 1.0);
+    (
+        bal * mag * AUDIO_YAW,
+        (1.0 - bal.abs()) * mag * AUDIO_PITCH,
+    )
+}
 
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
     pub shading: Option<Vec<String>>,
     pub scale: f32,
-    pub spin_boost: f32,
+    pub audio: [f32; 3],
 }
 
 impl Default for RenderFx {
@@ -1039,7 +1056,7 @@ impl RenderFx {
             grad: None,
             shading: None,
             scale: 1.0,
-            spin_boost: 0.0,
+            audio: [0.0, 0.0, 0.0],
         }
     }
 
@@ -1047,7 +1064,7 @@ impl RenderFx {
         self.grad.is_none()
             && self.shading.is_none()
             && (self.scale - 1.0).abs() < 1e-6
-            && self.spin_boost.abs() < 1e-6
+            && self.audio.iter().all(|a| a.abs() < 1e-6)
     }
 }
 
@@ -1073,7 +1090,7 @@ pub fn render_frame_with_tint(
         grad: tint.map(|c| (c, c)),
         shading: None,
         scale: 1.0,
-        spin_boost: 0.0,
+        audio: [0.0, 0.0, 0.0],
     };
     render_frame_with_fx(logo, frame, config, render_height, info_line_count, &fx)
 }
@@ -1116,7 +1133,7 @@ pub fn render_cloud_with_tint(
         grad: tint.map(|c| (c, c)),
         shading: None,
         scale: 1.0,
-        spin_boost: 0.0,
+        audio: [0.0, 0.0, 0.0],
     };
     render_cloud_with_fx(cloud, frame, config, render_height, info_line_count, &fx)
 }
@@ -1175,10 +1192,11 @@ pub fn render_cloud_with_fx(
     let (zbuf, lumbuf, colorbuf, glyphbuf) = (&mut **buf_z, &mut **buf_lum, &mut **buf_col, &mut **buf_glyph);
 
     let mul = frame as f32 * BASE_FPS / config.auto_fps();
-    let boost = fx.spin_boost;
-    let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x + boost } else { 0.0 };
-    let b = if config.spin_y { mul * 0.06 * config.speed * config.speed_y + boost } else { 0.0 };
-    let c_ang = if config.spin_z { mul * 0.05 * config.speed * config.speed_z + boost } else { 0.0 };
+    let boost = fx.audio;
+    let ax = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
+    let ay = if config.spin_y { mul * 0.06 * config.speed * config.speed_y } else { 0.0 };
+    let az = if config.spin_z { mul * 0.05 * config.speed * config.speed_z } else { 0.0 };
+    let (a, b, c_ang) = (ax + boost[0], ay + boost[1], az + boost[2]);
     let (ca, sa) = (a.cos(), a.sin());
     let (cb, sb) = (b.cos(), b.sin());
     let (cc, sc) = (c_ang.cos(), c_ang.sin());
@@ -1883,10 +1901,10 @@ mod tests {
         assert!((cfg.grow - crate::sharkvis::MAX_GROW).abs() < 1e-5);
         assert!(cfg.boom.is_none());
 
-        let cfg = AnimConfig::from_animation_str(Some("spin z speed=10.0 boom=5"));
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=10.0 boom=0.5"));
         assert!(cfg.spin_z && !cfg.spin_x && !cfg.spin_y);
         assert!((cfg.speed - 10.0).abs() < 1e-4);
-        assert!((cfg.boom.unwrap() - 5.0).abs() < 1e-4);
+        assert!((cfg.boom.unwrap() - 0.5).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
         assert!(cfg.shading_explicit);
@@ -1899,8 +1917,21 @@ mod tests {
             grad: Some(((255, 0, 0), (0, 0, 255))),
             shading: None,
             scale: 1.0,
-            spin_boost: 0.0,
+            audio: [0.0, 0.0, 0.0],
         }
+    }
+
+    #[test]
+    fn stereo_spin_follows_channels() {
+        let (yaw, pitch) = stereo_spin(0.0, 0.8);
+        assert!(yaw > 0.0, "right-heavy yaws right, got {}", yaw);
+        assert!(pitch.abs() < 1e-6, "hard pan kills pitch, got {}", pitch);
+        let (yaw, _pitch) = stereo_spin(0.8, 0.0);
+        assert!(yaw < 0.0, "left-heavy yaws left, got {}", yaw);
+        let (yaw, pitch) = stereo_spin(0.5, 0.5);
+        assert!(yaw.abs() < 1e-6, "mono holds yaw, got {}", yaw);
+        assert!(pitch > 0.0, "mono pitches, got {}", pitch);
+        assert_eq!(stereo_spin(0.0, 0.0), (0.0, 0.0));
     }
 
     #[test]
@@ -1959,7 +1990,7 @@ mod tests {
     }
 
     #[test]
-    fn spin_boost_rotates_frozen_logo() {
+    fn audio_phases_rotate_frozen_logo() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=0"));
         let still = render_frame_with_fx(
             &solid_test_logo(),
@@ -1979,9 +2010,9 @@ mod tests {
         );
         assert_eq!(still.lines, still2.lines, "speed=0 base stays frozen");
         let mut kicked = RenderFx::none();
-        kicked.spin_boost = 0.5;
+        kicked.audio = [0.0, 0.5, 0.0];
         let moved = render_frame_with_fx(&solid_test_logo(), 7.0, &cfg, 36, 4, &kicked);
-        assert_ne!(still.lines, moved.lines, "beat boost rotates the frozen logo");
+        assert_ne!(still.lines, moved.lines, "audio yaw rotates the frozen logo");
     }
 
     #[test]
@@ -2012,7 +2043,7 @@ mod tests {
                 grad: None,
                 shading: None,
                 scale: 1.2,
-                spin_boost: 0.0,
+                audio: [0.0, 0.0, 0.0],
             },
         );
         assert_ne!(plain.lines, zoomed.lines, "zoom rescales the projection");
@@ -2036,7 +2067,7 @@ mod tests {
                     grad: None,
                     shading: Some(vec!["0".to_string()]),
                     scale: 1.0,
-                    spin_boost: 0.0,
+                    audio: [0.0, 0.0, 0.0],
                 },
             );
             let text = joined_text(&out);
@@ -2069,7 +2100,7 @@ mod tests {
                 grad: None,
                 shading: Some(vec!["@".to_string()]),
                 scale: 1.0,
-                spin_boost: 0.0,
+                audio: [0.0, 0.0, 0.0],
             },
         );
         assert_ne!(plain.lines, custom.lines, "custom ramp redraws the logo");

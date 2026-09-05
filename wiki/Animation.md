@@ -115,9 +115,15 @@ jefetch borrows its look and groove:
   are configured).
 - **Charset**: the logo is shaded with sharkvis's `[visualizer] glyphs`
   ramp, unless your animation picks its own (`chars=...` always wins).
-- **Beat**: the spin dips on each bass kick (`speed × (1 − depth × beat)`)
+- **Beat**: the spin dips on each kick (`speed × (1 − depth × beat)`)
   and the logo pulses bigger (`scale = 1 + grow × beat`). Brightness
   never dims — quiet still shows full color.
+- **Direction**: the music steers the logo across all axes — right-heavy
+  sound yaws right, left-heavy yaws left, matched stereo pitches up and
+  down, overall energy rolls. Audio motion applies on top of the idle
+  spin, so even `speed=0` dances.
+- **Expand**: `boom=N` sizes the logo up with the bass
+  (`scale = 1 + boom × bass`, `0`–`1`).
 
 ```jsonc
 "animation": "spin y speed=2.0 sharkvis"                 // the trigger: nothing without it
@@ -134,7 +140,7 @@ jefetch borrows its look and groove:
 | `sharkvis=on` | Same as `auto`: still needs the running process, no exceptions |
 | `sharkvis=off` / `no-sharkvis` | Never integrate (default) |
 | `beat=N` | Slowdown dip on the beat, `0`–`0.9` (default `0.6`) |
-| `boom=N` | Beat target speed as an absolute number — below `speed` dips (e.g. `speed=10 boom=5`), above accelerates (e.g. `speed=10 boom=100`); `speed=0 boom=5` keeps a frozen logo that only turns on kicks; wins over `beat=` |
+| `boom=N` | Bass size-up `0`–`1` (e.g. `boom=0.3` grows to 1.3x on full bass) |
 | `grow=N` | Pulse-bigger depth on the beat, `0`–`0.3` (default `0.12`, `0` disables) |
 
 Or as a separate logo key (the animation string wins when both are set):
@@ -147,9 +153,8 @@ How it works:
 
 - **Color**: `gradient_low` → `gradient_high` from the sharkvis config
   (`$SHARKVIS_CONFIG`, `~/.config/sharkvis/config`) as a vertical logo
-  gradient. A fresh `$XDG_RUNTIME_DIR/sharkvis/state` file
-  (`color=#rrggbb energy=0..1 beat=0..1`) supplies live energy/beat and
-  its color when no gradients are configured.
+  gradient. A fresh `$XDG_RUNTIME_DIR/sharkvis/state` file supplies live
+  energy, beat, bass, stereo levels and colors (see sharkvis README).
 - **Beat**: from the state file when present (tempo grid locked from
   kicks, snares and other onsets across the spectrum — fills soft hits,
   recalibrates on tempo changes, drops in silence), otherwise from a
