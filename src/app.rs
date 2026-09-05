@@ -377,7 +377,6 @@ impl App {
                         }
                     }
                 }
-                let frame = spin_phase as usize;
                 let mut fx = crate::anim::RenderFx::none();
                 if shark_live.active {
                     if let Some(g) = shark_live.grad {
@@ -394,7 +393,7 @@ impl App {
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(
                         c,
-                        frame,
+                        spin_phase,
                         &anim_cfg,
                         render_height,
                         info_count,
@@ -420,7 +419,10 @@ impl App {
                         line.trim_end(),
                         cols,
                     ));
-                    out.push_str("\x1b[K\n");
+                    out.push_str("\x1b[K");
+                    if row + 1 < n {
+                        out.push('\n');
+                    }
                 }
                 out.push_str("\x1b[J");
                 print!("{}", out);
@@ -460,7 +462,10 @@ impl App {
                         line.trim_end(),
                         cols,
                     ));
-                    out.push_str("\x1b[K\n");
+                    out.push_str("\x1b[K");
+                    if row + 1 < render_height {
+                        out.push('\n');
+                    }
                 }
                 out.push_str("\x1b[J");
                 print!("{}", out);

@@ -1053,7 +1053,7 @@ impl RenderFx {
 
 pub fn render_frame(
     logo: &ResolvedLogo,
-    frame: usize,
+    frame: f64,
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
@@ -1063,7 +1063,7 @@ pub fn render_frame(
 
 pub fn render_frame_with_tint(
     logo: &ResolvedLogo,
-    frame: usize,
+    frame: f64,
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
@@ -1080,7 +1080,7 @@ pub fn render_frame_with_tint(
 
 pub fn render_frame_with_fx(
     logo: &ResolvedLogo,
-    frame: usize,
+    frame: f64,
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
@@ -1096,7 +1096,7 @@ pub fn render_frame_with_fx(
 
 pub fn render_cloud(
     cloud: &mut LogoCloud,
-    frame: usize,
+    frame: f64,
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
@@ -1106,7 +1106,7 @@ pub fn render_cloud(
 
 pub fn render_cloud_with_tint(
     cloud: &mut LogoCloud,
-    frame: usize,
+    frame: f64,
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
@@ -1123,7 +1123,7 @@ pub fn render_cloud_with_tint(
 
 pub fn render_cloud_with_fx(
     cloud: &mut LogoCloud,
-    frame: usize,
+    frame: f64,
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
@@ -1584,7 +1584,7 @@ mod tests {
     fn front_light_brightens_flat_faces() {
         let count_full = |anim: &str| -> usize {
             let cfg = AnimConfig::from_animation_str(Some(anim));
-            let out = render_frame(&solid_test_logo(), 0, &cfg, 36, 4);
+            let out = render_frame(&solid_test_logo(), 0.0, &cfg, 36, 4);
             let text = crate::app::strip_ansi(&out.lines.join("\n"));
             text.chars().filter(|&c| c == '█').count()
         };
@@ -1636,7 +1636,7 @@ mod tests {
         cfg.spin_x = false;
         cfg.spin_y = false;
         cfg.spin_z = false;
-        let out = render_frame(&ext_color_logo(), 0, &cfg, 36, 4);
+        let out = render_frame(&ext_color_logo(), 0.0, &cfg, 36, 4);
         let text = out.lines.join("\n");
         assert!(
             text.contains("38;5;225"),
@@ -1657,7 +1657,7 @@ mod tests {
             width: 2,
             padding_right: 2,
         };
-        let out = render_frame(&logo, 0, &cfg, 36, 4);
+        let out = render_frame(&logo, 0.0, &cfg, 36, 4);
         let text = out.lines.join("\n");
         assert!(text.contains("\x1b[1;31m"), "still emits 1;31, got:\n{}", text);
     }
@@ -1682,7 +1682,7 @@ mod tests {
         cfg.spin_y = false;
         cfg.spin_z = false;
         cfg.original_glyphs = true;
-        let out = render_frame(&test_logo(), 0, &cfg, 36, 4);
+        let out = render_frame(&test_logo(), 0.0, &cfg, 36, 4);
         let text = joined_text(&out);
         assert!(text.contains('A'), "keeps logo chars, got:\n{}", text);
     }
@@ -1693,7 +1693,7 @@ mod tests {
         cfg.spin_x = false;
         cfg.spin_y = false;
         cfg.spin_z = false;
-        let out = render_frame(&test_logo(), 0, &cfg, 36, 4);
+        let out = render_frame(&test_logo(), 0.0, &cfg, 36, 4);
         let text = joined_text(&out);
         assert!(
             text.contains('█') || text.contains('▓') || text.contains('▒') || text.contains('░'),
@@ -1703,7 +1703,7 @@ mod tests {
         assert!(!text.contains('A'), "no logo chars in block mode");
     }
 
-    fn bbox_hole_ratio(logo: &ResolvedLogo, frame: usize) -> f32 {
+    fn bbox_hole_ratio(logo: &ResolvedLogo, frame: f64) -> f32 {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let out = render_frame(logo, frame, &cfg, 36, 4);
         let text = joined_text(&out);
@@ -1750,7 +1750,7 @@ mod tests {
 
     #[test]
     fn rotated_frames_stay_solid() {
-        for frame in [0usize, 5, 13, 27] {
+        for frame in [0.0, 5.0, 13.0, 27.0] {
             let ratio = bbox_hole_ratio(&solid_test_logo(), frame);
             assert!(
                 ratio < 0.25,
@@ -1769,8 +1769,8 @@ mod tests {
         let mut fast = AnimConfig::from_animation_str(Some("spin y speed=4.0"));
         fast.spin_x = false;
         fast.spin_z = false;
-        let a = render_frame(&solid_test_logo(), 24, &slow, 36, 4);
-        let b = render_frame(&solid_test_logo(), 24, &fast, 36, 4);
+        let a = render_frame(&solid_test_logo(), 24.0, &slow, 36, 4);
+        let b = render_frame(&solid_test_logo(), 24.0, &fast, 36, 4);
         assert_ne!(a.lines, b.lines, "speed changes the pose at the same frame");
         assert!(
             fast.auto_fps() > slow.auto_fps(),
@@ -1794,7 +1794,7 @@ mod tests {
     fn cloud_renders_identical_to_frame() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
-        for frame in [0usize, 7, 25] {
+        for frame in [0.0, 7.0, 25.0] {
             let a = render_cloud(&mut cloud, frame, &cfg, 36, 4);
             let b = render_frame(&solid_test_logo(), frame, &cfg, 36, 4);
             assert_eq!(a.lines, b.lines, "cloud == frame at {}", frame);
@@ -1807,7 +1807,7 @@ mod tests {
         cfg.spin_x = false;
         cfg.spin_y = false;
         cfg.spin_z = false;
-        let out = render_frame(&test_logo(), 0, &cfg, 36, 4);
+        let out = render_frame(&test_logo(), 0.0, &cfg, 36, 4);
         assert_eq!(out.lines.len(), 36);
         let text = joined_text(&out);
         assert!(
@@ -1847,14 +1847,14 @@ mod tests {
     #[test]
     fn sharkvis_tint_paints_truecolor() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let out = render_frame_with_tint(&solid_test_logo(), 5, &cfg, 36, 4, Some((255, 136, 0)));
+        let out = render_frame_with_tint(&solid_test_logo(), 5.0, &cfg, 36, 4, Some((255, 136, 0)));
         let raw = out.lines.join("\n");
         assert!(
             raw.contains("\x1b[38;2;255;136;0m"),
             "tint escape present, got:\n{}",
             crate::app::strip_ansi(&raw)
         );
-        let plain = render_frame(&solid_test_logo(), 5, &cfg, 36, 4);
+        let plain = render_frame(&solid_test_logo(), 5.0, &cfg, 36, 4);
         assert!(!plain.lines.join("\n").contains("38;2;255;136;0"));
     }
 
@@ -1862,7 +1862,7 @@ mod tests {
     fn tinted_cloud_matches_tinted_frame() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
-        for frame in [0usize, 7, 25] {
+        for frame in [0.0, 7.0, 25.0] {
             let a = render_cloud_with_tint(&mut cloud, frame, &cfg, 36, 4, Some((1, 2, 3)));
             let b = render_frame_with_tint(&solid_test_logo(), frame, &cfg, 36, 4, Some((1, 2, 3)));
             assert_eq!(a.lines, b.lines, "tinted cloud == frame at {}", frame);
@@ -1907,7 +1907,7 @@ mod tests {
     fn gradient_fx_paints_rows_differently() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let fx = fx_grad();
-        let out = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &fx);
+        let out = render_frame_with_fx(&solid_test_logo(), 5.0, &cfg, 36, 4, &fx);
         let raw = out.lines.join("\n");
         let mut distinct: Vec<&str> = Vec::new();
         let mut rest = raw.as_str();
@@ -1930,7 +1930,7 @@ mod tests {
     #[test]
     fn gradient_stays_full_bright() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let out = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &fx_grad());
+        let out = render_frame_with_fx(&solid_test_logo(), 5.0, &cfg, 36, 4, &fx_grad());
         let raw = out.lines.join("\n");
         let mut top = 0u32;
         let mut rest = raw.as_str();
@@ -1951,8 +1951,8 @@ mod tests {
     #[test]
     fn default_fx_matches_plain_render() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let a = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
-        let b = render_frame_with_fx(&solid_test_logo(), 9, &cfg, 36, 4, &RenderFx::none());
+        let a = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
+        let b = render_frame_with_fx(&solid_test_logo(), 9.0, &cfg, 36, 4, &RenderFx::none());
         assert_eq!(a.lines, b.lines);
         assert!(RenderFx::none().is_none());
         assert!(!fx_grad().is_none());
@@ -1963,7 +1963,7 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=0"));
         let still = render_frame_with_fx(
             &solid_test_logo(),
-            7,
+            7.0,
             &cfg,
             36,
             4,
@@ -1971,7 +1971,7 @@ mod tests {
         );
         let still2 = render_frame_with_fx(
             &solid_test_logo(),
-            42,
+            42.0,
             &cfg,
             36,
             4,
@@ -1980,17 +1980,31 @@ mod tests {
         assert_eq!(still.lines, still2.lines, "speed=0 base stays frozen");
         let mut kicked = RenderFx::none();
         kicked.spin_boost = 0.5;
-        let moved = render_frame_with_fx(&solid_test_logo(), 7, &cfg, 36, 4, &kicked);
+        let moved = render_frame_with_fx(&solid_test_logo(), 7.0, &cfg, 36, 4, &kicked);
         assert_ne!(still.lines, moved.lines, "beat boost rotates the frozen logo");
+    }
+
+    #[test]
+    fn fractional_phase_renders() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        for phase in [9.0, 9.4, 9.5, 10.0, 11.0] {
+            let out = render_frame(&solid_test_logo(), phase, &cfg, 36, 4);
+            assert_eq!(out.lines.len(), 36);
+            let text = joined_text(&out);
+            assert!(text.trim().len() > 4, "frame renders ink at {}", phase);
+        }
+        let a = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
+        let b = render_frame(&solid_test_logo(), 11.0, &cfg, 36, 4);
+        assert_ne!(a.lines, b.lines, "phase advances the pose");
     }
 
     #[test]
     fn beat_zoom_changes_pose() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let plain = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
+        let plain = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
         let zoomed = render_frame_with_fx(
             &solid_test_logo(),
-            9,
+            9.0,
             &cfg,
             36,
             4,
@@ -2011,7 +2025,7 @@ mod tests {
     #[test]
     fn custom_ramp_never_uses_quadrant_glyphs() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        for frame in [0usize, 5, 13, 27] {
+        for frame in [0.0, 5.0, 13.0, 27.0] {
             let out = render_frame_with_fx(
                 &solid_test_logo(),
                 frame,
@@ -2033,7 +2047,7 @@ mod tests {
                 text
             );
         }
-        let plain = joined_text(&render_frame(&solid_test_logo(), 5, &cfg, 36, 4));
+        let plain = joined_text(&render_frame(&solid_test_logo(), 5.0, &cfg, 36, 4));
         assert!(
             plain.chars().any(|c| QUADRANT_CHARS.contains(&c)),
             "default ramp keeps quadrant partials, got:\n{}",
@@ -2044,10 +2058,10 @@ mod tests {
     #[test]
     fn shading_override_uses_custom_ramp() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let plain = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
+        let plain = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
         let custom = render_frame_with_fx(
             &solid_test_logo(),
-            9,
+            9.0,
             &cfg,
             36,
             4,
