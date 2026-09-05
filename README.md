@@ -6,7 +6,7 @@
 
 Rust Based Cli System Stat fetcher
 
-Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
+Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub> and <sub>[fastfetch](https://github.com/areofyl/fetch)</sub>
 
 </div>
 
