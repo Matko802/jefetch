@@ -1203,11 +1203,13 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
 }
 
 pub fn revert_step(acc: f64, step: f64, dt: f32, tau: f32) -> f64 {
-    let wound = (acc + step).clamp(-REVERT_LIMIT, REVERT_LIMIT);
-    if tau <= 0.0 {
-        return wound;
+    if step == 0.0 {
+        if tau <= 0.0 {
+            return acc;
+        }
+        return acc * (-dt.max(0.0) / tau).exp() as f64;
     }
-    wound * (-dt.max(0.0) / tau).exp() as f64
+    (acc + step).clamp(-REVERT_LIMIT, REVERT_LIMIT)
 }
 
 pub struct RenderFx {
@@ -2156,6 +2158,22 @@ mod tests {
             neg = revert_step(neg, -0.15, 0.033, REVERT_TAU);
         }
         assert!(neg < -5.0 && neg >= -REVERT_LIMIT - 1e-6, "winds negative, got {}", neg);
+        let mut slow_max = 0.0f64;
+        let mut fast_max = 0.0f64;
+        let mut a = 0.0;
+        let mut b = 0.0;
+        for _ in 0..400 {
+            a = revert_step(a, 0.15, 0.033, REVERT_TAU / 0.5);
+            b = revert_step(b, 0.15, 0.033, REVERT_TAU / 4.0);
+            slow_max = slow_max.max(a);
+            fast_max = fast_max.max(b);
+        }
+        assert!(
+            (slow_max - fast_max).abs() < 0.05,
+            "retract must not change max offset: {} vs {}",
+            slow_max,
+            fast_max
+        );
         let mut slow = 5.0;
         let mut fast = 5.0;
         for _ in 0..60 {
