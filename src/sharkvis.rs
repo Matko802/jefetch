@@ -320,6 +320,9 @@ pub fn read_live_state() -> Option<LiveState> {
             continue;
         }
         if let Ok(text) = std::fs::read_to_string(&p) {
+            if text.trim().is_empty() {
+                continue;
+            }
             let st = parse_state_text(&text);
             if st.color.is_some()
                 || st.energy.is_some()
