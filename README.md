@@ -15,17 +15,11 @@ Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](
 - Musl lib
 - integrated with [sharkvis](https://github.com/Matko802/sharkvis)
 
-## Install (any Linux distro)
-
-Static binary, no dependencies:
+## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Matko802/jefetch/main/install.sh | sh
 ```
-
-Or download `jefetch-linux-x86_64.tar.gz` / `jefetch-linux-aarch64.tar.gz`
-from [Releases](https://github.com/Matko802/jefetch/releases) and copy
-`jefetch` to `/usr/local/bin`.
 
 ## Building
 
