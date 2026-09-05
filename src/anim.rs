@@ -40,6 +40,7 @@ pub struct AnimConfig {
     pub shading_explicit: bool,
     pub motion: Motion,
     pub retract: f32,
+    pub limit: Option<f32>,
 }
 
 impl Default for AnimConfig {
@@ -71,6 +72,7 @@ impl Default for AnimConfig {
             shading_explicit: false,
             motion: Motion::default(),
             retract: 1.0,
+            limit: None,
         }
     }
 }
@@ -79,7 +81,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat", "grow", "boom", "motion", "retract",
+    "no-sharkvis", "beat", "grow", "boom", "motion", "retract", "limit",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -212,8 +214,8 @@ impl AnimConfig {
             if let Some(v) = extract_number(&low, "retract") {
                 cfg.retract = v.max(0.0);
             }
-            if let Some(v) = extract_number(&low, "retract") {
-                cfg.retract = v.max(0.0);
+            if let Some(v) = extract_number(&low, "limit") {
+                cfg.limit = Some(v.max(0.0));
             }
             if let Some(v) = extract_word(&low, raw, "motion", true) {
                 if let Some(m) = Motion::parse_value(&v) {
@@ -380,8 +382,8 @@ impl AnimConfig {
         if extract_number(&low, "retract").is_some() {
             self.retract = ov.retract;
         }
-        if extract_number(&low, "retract").is_some() {
-            self.retract = ov.retract;
+        if extract_number(&low, "limit").is_some() {
+            self.limit = ov.limit;
         }
         let mut motion_mentioned = false;
         if let Some(v) = extract_word(&low, raw, "motion", true) {
@@ -1202,14 +1204,15 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     )
 }
 
-pub fn revert_step(acc: f64, step: f64, dt: f32, tau: f32) -> f64 {
+pub fn revert_step(acc: f64, step: f64, dt: f32, tau: f32, limit: f64) -> f64 {
+    let lim = limit.max(0.0);
     if step == 0.0 {
         if tau <= 0.0 {
             return acc;
         }
         return acc * (-dt.max(0.0) / tau).exp() as f64;
     }
-    (acc + step).clamp(-REVERT_LIMIT, REVERT_LIMIT)
+    (acc + step).clamp(-lim, lim)
 }
 
 pub struct RenderFx {
@@ -2146,16 +2149,16 @@ mod tests {
     fn revert_winds_to_limit_then_retracts() {
         let mut acc = 0.0;
         for _ in 0..400 {
-            acc = revert_step(acc, 0.15, 0.033, REVERT_TAU);
+            acc = revert_step(acc, 0.15, 0.033, REVERT_TAU, REVERT_LIMIT);
         }
         assert!(acc > 5.0 && acc <= REVERT_LIMIT + 1e-6, "winds near limit, got {}", acc);
         for _ in 0..400 {
-            acc = revert_step(acc, 0.0, 0.033, REVERT_TAU);
+            acc = revert_step(acc, 0.0, 0.033, REVERT_TAU, REVERT_LIMIT);
         }
         assert!(acc.abs() < 0.05, "retracts to rest, got {}", acc);
         let mut neg = 0.0;
         for _ in 0..400 {
-            neg = revert_step(neg, -0.15, 0.033, REVERT_TAU);
+            neg = revert_step(neg, -0.15, 0.033, REVERT_TAU, REVERT_LIMIT);
         }
         assert!(neg < -5.0 && neg >= -REVERT_LIMIT - 1e-6, "winds negative, got {}", neg);
         let mut slow_max = 0.0f64;
@@ -2163,8 +2166,8 @@ mod tests {
         let mut a = 0.0;
         let mut b = 0.0;
         for _ in 0..400 {
-            a = revert_step(a, 0.15, 0.033, REVERT_TAU / 0.5);
-            b = revert_step(b, 0.15, 0.033, REVERT_TAU / 4.0);
+            a = revert_step(a, 0.15, 0.033, REVERT_TAU / 0.5, REVERT_LIMIT);
+            b = revert_step(b, 0.15, 0.033, REVERT_TAU / 4.0, REVERT_LIMIT);
             slow_max = slow_max.max(a);
             fast_max = fast_max.max(b);
         }
@@ -2177,12 +2180,31 @@ mod tests {
         let mut slow = 5.0;
         let mut fast = 5.0;
         for _ in 0..60 {
-            slow = revert_step(slow, 0.0, 0.033, REVERT_TAU / 0.5);
-            fast = revert_step(fast, 0.0, 0.033, REVERT_TAU / 4.0);
+            slow = revert_step(slow, 0.0, 0.033, REVERT_TAU / 0.5, REVERT_LIMIT);
+            fast = revert_step(fast, 0.0, 0.033, REVERT_TAU / 4.0, REVERT_LIMIT);
         }
         assert!(fast < slow, "higher retract snaps back sooner");
-        let held = revert_step(5.0, 0.0, 1.0, f32::INFINITY);
+        let held = revert_step(5.0, 0.0, 1.0, f32::INFINITY, REVERT_LIMIT);
         assert!((held - 5.0).abs() < 1e-6, "retract=0 holds");
+        let mut half = 0.0;
+        for _ in 0..400 {
+            half = revert_step(half, 0.15, 0.033, REVERT_TAU, 0.5 * std::f64::consts::TAU);
+        }
+        assert!(
+            half <= 0.5 * std::f64::consts::TAU + 1e-6 && half > 2.0,
+            "limit caps wind-up, got {}",
+            half
+        );
+    }
+
+    #[test]
+    fn limit_parses() {
+        assert!(AnimConfig::from_animation_str(Some("spin y")).limit.is_none());
+        let cfg = AnimConfig::from_animation_str(Some("spin y limit=0.5"));
+        assert!((cfg.limit.unwrap() - 0.5).abs() < 1e-4);
+        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        cfg.apply_sharkvis_str("limit=2");
+        assert!((cfg.limit.unwrap() - 2.0).abs() < 1e-4);
     }
 
     #[test]

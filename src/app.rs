@@ -389,17 +389,29 @@ impl App {
                         } else {
                             crate::anim::REVERT_TAU / anim_cfg.retract.clamp(0.1, 10.0)
                         };
-                        yaw_phase =
-                            crate::anim::revert_step(yaw_phase, f64::from(yaw_step), dt, tau);
-                        pitch_phase =
-                            crate::anim::revert_step(pitch_phase, f64::from(pitch_step), dt, tau);
+                        let lim = anim_cfg.limit.unwrap_or(1.0).max(0.0) as f64
+                            * std::f64::consts::TAU;
+                        yaw_phase = crate::anim::revert_step(
+                            yaw_phase,
+                            f64::from(yaw_step),
+                            dt,
+                            tau,
+                            lim,
+                        );
+                        pitch_phase = crate::anim::revert_step(
+                            pitch_phase,
+                            f64::from(pitch_step),
+                            dt,
+                            tau,
+                            lim,
+                        );
                         let roll_step = if shark_live.energy > crate::anim::AUDIO_FLOOR {
                             f64::from(shark_live.energy) * f64::from(crate::anim::AUDIO_ROLL)
                         } else {
                             0.0
                         };
                         roll_phase =
-                            crate::anim::revert_step(roll_phase, roll_step, dt, tau);
+                            crate::anim::revert_step(roll_phase, roll_step, dt, tau, lim);
                         fx.audio = [
                             pitch_phase as f32,
                             yaw_phase as f32,

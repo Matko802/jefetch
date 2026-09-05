@@ -137,7 +137,7 @@ stereo pitches `x`, energy rolls `z`); quiet holds still:
 | `beat=N` | Dip depth, `0`–`0.9` (default `0.6`) |
 | `boom=N` | Size-up with volume, `0`–`1` |
 | `grow=N` | Pulse depth, `0`–`0.3` (default `0.12`, `0` disables) |
-| `motion` / `retract` | `continuous` (default) or `revert`; `retract=N` snap-back speed (`0` holds, default `1`) |
+| `motion` / `retract` / `limit` | `continuous` (default) or `revert`; `retract=N` snap-back speed (`0` holds, default `1`); `limit=N` max wind-up in turns, revert only (default `1`) |
 
 ## CLI Overrides
 
