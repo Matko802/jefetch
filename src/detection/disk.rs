@@ -13,94 +13,80 @@ pub struct DiskInfo {
 }
 
 pub fn detect(folders: &[String]) -> Vec<DiskInfo> {
-    let mountpoints: Vec<String> = if folders.is_empty() {
-        physical_mountpoints()
-    } else {
-        folders.to_vec()
-    };
-    let mut out = Vec::new();
-    let mut seen_dev: Vec<u64> = Vec::new();
-    let mut seen_pool: Vec<(u64, u64, String, String)> = Vec::new();
-    for mp in mountpoints {
-        let dev = device_id(&mp);
-        if let Some(d) = dev {
-            if seen_dev.contains(&d) {
-                continue;
+    if !folders.is_empty() {
+        let mut out = Vec::new();
+        for mp in folders {
+            if let Some(info) = stat_one(mp) {
+                out.push(info);
             }
-            seen_dev.push(d);
+        }
+        return out;
+    }
+    let mut out = Vec::new();
+    let mut seen_from: Vec<String> = Vec::new();
+    for (from, mp, _) in physical_mounts() {
+        if seen_from.iter().any(|s| s == &from) {
+            continue;
         }
         if let Some(info) = stat_one(&mp) {
-            if info.total == 0 {
-                continue;
-            }
-            let pool = (
-                info.total,
-                info.used,
-                info.filesystem.clone(),
-                info.mount_from.clone(),
-            );
-            if seen_pool.contains(&pool) {
-                continue;
-            }
-            seen_pool.push(pool);
+            seen_from.push(from);
             out.push(info);
         }
     }
     out
 }
 
-fn device_id(mp: &str) -> Option<u64> {
-    let c = std::ffi::CString::new(mp).ok()?;
-    let mut st: libc::stat = unsafe { std::mem::zeroed() };
-    if unsafe { libc::stat(c.as_ptr(), &mut st) } != 0 {
-        return None;
-    }
-    Some(st.st_dev as u64)
-}
-
-fn physical_mountpoints() -> Vec<String> {
-    let text = read_file("/proc/self/mounts").unwrap_or_default();
-    parse_physical_mounts(&text)
-}
-
-fn parse_physical_mounts(text: &str) -> Vec<String> {
-    const HIDE_FS: &[&str] = &[
-        "proc", "sysfs", "devpts", "devtmpfs", "cgroup", "cgroup2", "mqueue", "debugfs",
-        "tracefs", "securityfs", "configfs", "fusectl", "nsfs", "binfmt_misc", "autofs",
-        "hugetlbfs", "rpc_pipefs", "efivarfs", "ramfs", "overlay", "squashfs", "fuse.portal",
-        "fuse.gvfsd-fuse",
-    ];
+fn physical_mounts() -> Vec<(String, String, String)> {
     let mut out = Vec::new();
+    let text = read_file("/proc/self/mounts").unwrap_or_default();
     for line in text.lines() {
         let parts: Vec<&str> = line.split(' ').collect();
         if parts.len() < 3 {
             continue;
         }
-        let fs = parts[2];
+        let from = parts[0].to_string();
         let mp = parts[1].replace("\\040", " ");
-        if HIDE_FS.contains(&fs) {
-            continue;
-        }
-        if fs == "tmpfs" && mp != "/tmp" {
-            continue;
-        }
-        if mp == "/proc" || mp == "/sys" || mp == "/dev" {
-            continue;
-        }
-        if mp.starts_with("/proc/") || mp.starts_with("/sys/") || mp.starts_with("/dev/") {
-            continue;
-        }
-        if mp.starts_with("/run/") && !mp.starts_with("/run/media/") {
-            continue;
-        }
-        if mp == "/boot" || mp == "/boot/efi" || mp == "/efi" {
-            continue;
-        }
-        if !out.iter().any(|m| m == &mp) {
-            out.push(mp);
+        let fs = parts[2].to_string();
+        if wants_mount(&from, &mp, &fs, is_block_device(&from)) {
+            out.push((from, mp, fs));
         }
     }
     out
+}
+
+fn wants_mount(from: &str, mp: &str, fs: &str, is_block: bool) -> bool {
+    if mp == "/" {
+        return true;
+    }
+    if from == "none" {
+        return false;
+    }
+    if fs == "zfs" || fs == "fuse.sshfs" {
+        return true;
+    }
+    if !from.starts_with("/dev/") {
+        return false;
+    }
+    let base = &from[5..];
+    if base.starts_with("loop") || base.starts_with("ram") || base.starts_with("fd") {
+        return false;
+    }
+    if mp == "/boot" || mp == "/boot/efi" || mp == "/efi" {
+        return false;
+    }
+    is_block
+}
+
+fn is_block_device(path: &str) -> bool {
+    let c = match std::ffi::CString::new(path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::stat(c.as_ptr(), &mut st) } != 0 {
+        return false;
+    }
+    (st.st_mode as u32 & libc::S_IFMT as u32) == libc::S_IFBLK as u32
 }
 
 fn stat_one(mp: &str) -> Option<DiskInfo> {
@@ -180,39 +166,28 @@ fn label_for(mount_from: &str) -> String {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "dev /dev devtmpfs rw 0 0\n\
-        /dev/nvme0n1p2 / btrfs rw 0 0\n\
-        /dev/nvme0n1p2 /home btrfs rw 0 0\n\
-        /dev/nvme0n1p1 /boot vfat rw 0 0\n\
-        /dev/sda1 /mnt/ssd ext4 rw 0 0\n\
-        tmpfs /tmp tmpfs rw 0 0\n\
-        /dev/loop0 /snap/core squashfs ro 0 0\n\
-        overlay /var/lib/docker/overlay2 overlay rw 0 0\n\
-        proc /proc proc rw 0 0\n";
-
     #[test]
-    fn physical_mounts_skip_pseudo() {
-        assert_eq!(
-            parse_physical_mounts(SAMPLE),
-            vec![
-                "/".to_string(),
-                "/home".to_string(),
-                "/mnt/ssd".to_string(),
-                "/tmp".to_string(),
-            ]
-        );
+    fn physical_mounts_follow_fastfetch_rules() {
+        assert!(wants_mount("/dev/nvme0n1p2", "/", "btrfs", false));
+        assert!(wants_mount("/dev/sda1", "/mnt/ssd", "ext4", true));
+        assert!(wants_mount("/dev/sdb1", "/run/media/matko/USB", "vfat", true));
+        assert!(wants_mount("tank", "/tank", "zfs", false));
+        assert!(wants_mount("sshfs#host:/x", "/mnt/x", "fuse.sshfs", false));
+        assert!(!wants_mount("tmpfs", "/tmp", "tmpfs", false));
+        assert!(!wants_mount("overlay", "/var/lib/docker/overlay2", "overlay", false));
+        assert!(!wants_mount("/dev/loop0", "/snap/core", "squashfs", true));
+        assert!(!wants_mount("proc", "/proc", "proc", false));
+        assert!(!wants_mount("none", "/mnt/x", "ext4", true));
+        assert!(!wants_mount("gvfsd-fuse", "/run/user/1000/gvfs", "fuse.gvfsd-fuse", false));
+        assert!(!wants_mount("/dev/nvme0n1p1", "/boot", "vfat", true));
+        assert!(!wants_mount("/dev/nvme0n1p1", "/boot/efi", "vfat", true));
+        assert!(!wants_mount("/dev/sda1", "/mnt/ssd", "ext4", false));
     }
 
     #[test]
-    fn physical_mounts_skip_run_noise() {
-        let text = "tmpfs /run tmpfs rw 0 0\n\
-            tmpfs /run/user/1000 tmpfs rw 0 0\n\
-            gvfsd-fuse /run/user/1000/gvfs fuse.gvfsd-fuse rw 0 0\n\
-            /dev/sdb1 /run/media/matko/USB vfat rw 0 0\n\
-            /dev/nvme0n1p2 / btrfs rw 0 0\n";
-        assert_eq!(
-            parse_physical_mounts(text),
-            vec!["/run/media/matko/USB".to_string(), "/".to_string()]
-        );
+    fn block_check_matches_reality() {
+        assert!(is_block_device("/dev/nvme0n1") || !std::path::Path::new("/dev/nvme0n1").exists());
+        assert!(!is_block_device("/tmp"));
+        assert!(!is_block_device("/nonexistent-jefetch-disk"));
     }
 }
