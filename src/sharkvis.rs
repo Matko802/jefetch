@@ -1311,7 +1311,7 @@ mod tests {
     fn filetime_set(path: &std::path::Path, t: std::time::SystemTime) -> std::io::Result<()> {
         use std::os::unix::io::AsRawFd;
         let f = std::fs::File::options().write(true).open(path)?;
-        let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as libc::time_t;
+        let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         let times = [
             libc::timespec { tv_sec: secs, tv_nsec: 0 },
             libc::timespec { tv_sec: secs, tv_nsec: 0 },
