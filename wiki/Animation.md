@@ -115,12 +115,16 @@ jefetch borrows its look and groove:
 - **Charset**: the logo is shaded with sharkvis's `[visualizer] glyphs`
   ramp, unless your animation picks its own (`chars=...` always wins).
 - **Volume**: the spin follows the volume (silence crawls at 0.5x, loud
-  plays at 1.5x) with an extra dip on each beat, and the logo grows
-  (`scale = 1 + grow × volume`).
+  plays at 1.5x) with an extra dip on each beat; the logo grows
+  (`scale = 1 + grow × drive`) and its brightness breathes (dim when
+  quiet, full when loud). Raw monitor energy lives in a small band, so
+  jefetch normalizes it into a `0..1` drive — quiet still moves, loud
+  pegs. `sense=N` (default `4`, max `12`) turns the sensitivity up/down.
 
 ```jsonc
 "animation": "spin y speed=2.0 sharkvis"                 // the trigger: nothing without it
 "animation": "spin y sharkvis beat=0.8 grow=0.2"         // deeper dip + bigger pulse
+"animation": "spin y sharkvis sense=8"                   // hotter reaction at low volume
 "animation": "spin y sharkvis=off"                       // explicitly off (the default)
 "animation": "spin y sharkvis chars=blocks"              // keep jefetch's own ramp
 "animation": "spin y sharkvis grow=0"                    // volume speed only, no zoom
@@ -134,6 +138,7 @@ jefetch borrows its look and groove:
 | `sharkvis=off` / `no-sharkvis` | Never integrate (default) |
 | `beat=N` | Extra slowdown dip on the beat, `0`–`0.9` (default `0.6`) |
 | `grow=N` | Zoom-with-volume depth, `0`–`0.3` (default `0.12`, `0` disables) |
+| `sense=N` | Music sensitivity, `0.5`–`12` (default `4`) |
 
 Or as a separate logo key (the animation string wins when both are set):
 
