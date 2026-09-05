@@ -25,6 +25,9 @@ clean:
 	cargo clean
 	rm -rf result result-*
 
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/jefetch
+
 # Install the build dependencies for the detected distro.
 deps:
 	@if command -v apt-get >/dev/null 2>&1; then \
@@ -55,4 +58,4 @@ deps:
 		echo "Using system cargo (no rustup) — will build dynamic binary if musl target missing"; \
 	fi
 
-.PHONY: all install clean deps
+.PHONY: all install uninstall clean deps
