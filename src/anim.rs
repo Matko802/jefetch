@@ -34,6 +34,10 @@ pub struct AnimConfig {
     pub sharkvis: crate::sharkvis::SharkvisMode,
     pub sharkvis_set: bool,
     pub beat_depth: f32,
+    pub grow: f32,
+    /// True when the animation string / logo config picked an explicit
+    /// charset (then sharkvis glyphs must not override it).
+    pub shading_explicit: bool,
 }
 
 impl Default for AnimConfig {
@@ -59,6 +63,8 @@ impl Default for AnimConfig {
             sharkvis: crate::sharkvis::SharkvisMode::default(),
             sharkvis_set: false,
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
+            grow: crate::sharkvis::DEFAULT_GROW,
+            shading_explicit: false,
         }
     }
 }
@@ -67,7 +73,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat",
+    "no-sharkvis", "beat", "grow",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -127,11 +133,14 @@ impl AnimConfig {
             }
             if let Some(v) = chars_opt {
                 cfg.apply_chars_value(&v);
+                cfg.shading_explicit = true;
             } else if has_word(&low, "ascii") || has_word(&low, "original") {
                 cfg.original_glyphs = true;
+                cfg.shading_explicit = true;
             } else if has_word(&low, "blocks") || has_word(&low, "block") {
                 cfg.original_glyphs = false;
                 cfg.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
+                cfg.shading_explicit = true;
             }
 
             if has_word(&low, "no-sharkvis") || has_word(&low, "nosharkvis") {
@@ -184,6 +193,9 @@ impl AnimConfig {
             }
             if let Some(v) = extract_number(&low, "beat") {
                 cfg.beat_depth = v.clamp(0.0, crate::sharkvis::MAX_BEAT_DEPTH);
+            }
+            if let Some(v) = extract_number(&low, "grow") {
+                cfg.grow = v.clamp(0.0, crate::sharkvis::MAX_GROW);
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -309,6 +321,7 @@ impl AnimConfig {
         }
         if let Some(c) = &logo.chars {
             self.apply_chars_value(c);
+            self.shading_explicit = true;
         }
         if !self.sharkvis_set {
             if let Some(s) = &logo.sharkvis {
@@ -1003,6 +1016,33 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     })
 }
 
+/// Per-frame live effects applied on top of the base animation.
+/// Built by the live view from the sharkvis sync state; default = no-op.
+#[derive(Debug, Clone, Default)]
+pub struct RenderFx {
+    /// Vertical logo gradient, bottom → top. Equal ends = flat tint.
+    /// `None` keeps the logo's own colors.
+    pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
+    /// Override shading ramp (dark → bright), e.g. the sharkvis charset.
+    pub shading: Option<Vec<String>>,
+    /// Zoom multiplier around the logo center (`1.0` = none).
+    pub scale: f32,
+}
+
+impl RenderFx {
+    pub fn none() -> RenderFx {
+        RenderFx {
+            grad: None,
+            shading: None,
+            scale: 1.0,
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.grad.is_none() && self.shading.is_none() && (self.scale - 1.0).abs() < 1e-6
+    }
+}
+
 pub fn render_frame(
     logo: &ResolvedLogo,
     frame: usize,
@@ -1021,9 +1061,25 @@ pub fn render_frame_with_tint(
     info_line_count: usize,
     tint: Option<(u8, u8, u8)>,
 ) -> ResolvedLogo {
+    let fx = RenderFx {
+        grad: tint.map(|c| (c, c)),
+        shading: None,
+        scale: 1.0,
+    };
+    render_frame_with_fx(logo, frame, config, render_height, info_line_count, &fx)
+}
+
+pub fn render_frame_with_fx(
+    logo: &ResolvedLogo,
+    frame: usize,
+    config: &AnimConfig,
+    render_height: usize,
+    info_line_count: usize,
+    fx: &RenderFx,
+) -> ResolvedLogo {
     match build_cloud(logo, config) {
         Some(mut cloud) => {
-            render_cloud_with_tint(&mut cloud, frame, config, render_height, info_line_count, tint)
+            render_cloud_with_fx(&mut cloud, frame, config, render_height, info_line_count, fx)
         }
         None => logo.clone(),
     }
@@ -1047,6 +1103,22 @@ pub fn render_cloud_with_tint(
     info_line_count: usize,
     tint: Option<(u8, u8, u8)>,
 ) -> ResolvedLogo {
+    let fx = RenderFx {
+        grad: tint.map(|c| (c, c)),
+        shading: None,
+        scale: 1.0,
+    };
+    render_cloud_with_fx(cloud, frame, config, render_height, info_line_count, &fx)
+}
+
+pub fn render_cloud_with_fx(
+    cloud: &mut LogoCloud,
+    frame: usize,
+    config: &AnimConfig,
+    render_height: usize,
+    info_line_count: usize,
+    fx: &RenderFx,
+) -> ResolvedLogo {
     let LogoCloud {
         points,
         palette_ansi,
@@ -1065,7 +1137,13 @@ pub fn render_cloud_with_tint(
 
     let render_height = render_height.max(1);
     let logo_height = render_height.min((ANIM_WIDTH * 3 / 5) as usize).max(1);
-    let k1 = 37.0 * logo_height as f32 / 36.0;
+    // Beat zoom: scale the projection about the logo center.
+    let zoom = if fx.scale.is_finite() && fx.scale > 0.0 {
+        fx.scale.clamp(0.5, 2.0)
+    } else {
+        1.0
+    };
+    let k1 = 37.0 * logo_height as f32 / 36.0 * zoom;
     let half_aw = ANIM_WIDTH as f32 * 0.5;
     let w = ANIM_WIDTH as usize;
     let h = render_height;
@@ -1170,10 +1248,36 @@ pub fn render_cloud_with_tint(
         }
     }
 
-    let scount = config.shading.len();
+    let shading: &[String] = match fx.shading.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => &config.shading,
+    };
+    let scount = shading.len().max(1);
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
     let full_mask = (1u32 << total_sub) - 1;
+
+    // Vertical gradient escapes, one per output row (bottom → top),
+    // mirroring the sharkvis bar gradient. Empty when ungraded.
+    let tint_rows: Vec<String> = match fx.grad {
+        Some(((lr, lg, lb), (hr, hg, hb))) => (0..h)
+            .map(|y| {
+                let t = if h > 1 {
+                    (h - 1 - y) as f32 / (h - 1) as f32
+                } else {
+                    0.0
+                };
+                let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
+                format!(
+                    "\x1b[38;2;{};{};{}m",
+                    mix(lr, hr),
+                    mix(lg, hg),
+                    mix(lb, hb)
+                )
+            })
+            .collect(),
+        None => Vec::new(),
+    };
 
     fn push_color(
         line: &mut String,
@@ -1181,17 +1285,17 @@ pub fn render_cloud_with_tint(
         has_ansi: bool,
         c: i32,
         prev_color: &mut i32,
-        tint: Option<(u8, u8, u8)>,
+        tint_esc: Option<&str>,
     ) {
         // TINT_ACTIVE is a dedicated prev_color state meaning "tint escape
-        // already emitted"; all filled cells share one truecolor.
+        // already emitted"; all filled cells on the row share one truecolor.
         const TINT_ACTIVE: i32 = -100;
-        if let Some((r, g, b)) = tint {
+        if let Some(esc) = tint_esc {
             if *prev_color != TINT_ACTIVE {
                 if *prev_color != -2 && *prev_color != -1 {
                     line.push_str("\x1b[0m");
                 }
-                line.push_str(&format!("\x1b[38;2;{};{};{}m", r, g, b));
+                line.push_str(esc);
                 *prev_color = TINT_ACTIVE;
             }
             return;
@@ -1228,7 +1332,7 @@ pub fn render_cloud_with_tint(
                     line.push(' ');
                     continue;
                 }
-                push_color(&mut line, palette_ansi, has_ansi, colorbuf[idx], &mut prev_color, tint);
+                push_color(&mut line, palette_ansi, has_ansi, colorbuf[idx], &mut prev_color, tint_rows.get(row).map(|s| s.as_str()));
                 line.push(glyphbuf[idx]);
                 continue;
             }
@@ -1303,9 +1407,10 @@ pub fn render_cloud_with_tint(
             {
                 QUADRANT_GLYPHS[mask as usize]
             } else {
-                &config.shading[ci]
+                &shading[ci]
             };
-            push_color(&mut line, palette_ansi, has_ansi, best_c, &mut prev_color, tint);
+            let row_esc = tint_rows.get(row).map(|s| s.as_str());
+            push_color(&mut line, palette_ansi, has_ansi, best_c, &mut prev_color, row_esc);
             line.push_str(glyph);
         }
         if prev_color != -2 && prev_color != -1 {
@@ -1756,5 +1861,110 @@ mod tests {
             let b = render_frame_with_tint(&solid_test_logo(), frame, &cfg, 36, 4, Some((1, 2, 3)));
             assert_eq!(a.lines, b.lines, "tinted cloud == frame at {}", frame);
         }
+    }
+
+    #[test]
+    fn grow_and_explicit_chars_parse() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y"));
+        assert!((cfg.grow - crate::sharkvis::DEFAULT_GROW).abs() < 1e-5);
+        assert!(!cfg.shading_explicit);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y grow=0.2"));
+        assert!((cfg.grow - 0.2).abs() < 1e-4);
+        assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y grow=99"));
+        assert!((cfg.grow - crate::sharkvis::MAX_GROW).abs() < 1e-5);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
+        assert!(cfg.shading_explicit);
+        let cfg = AnimConfig::from_animation_str(Some("spin y chars=.,-~"));
+        assert!(cfg.shading_explicit);
+    }
+
+    fn fx_grad() -> RenderFx {
+        RenderFx {
+            grad: Some(((255, 0, 0), (0, 0, 255))),
+            shading: None,
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn gradient_fx_paints_rows_differently() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let fx = fx_grad();
+        let out = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &fx);
+        let raw = out.lines.join("\n");
+        let mut distinct: Vec<&str> = Vec::new();
+        let mut rest = raw.as_str();
+        while let Some(p) = rest.find("\x1b[38;2;") {
+            let esc = &rest[p..];
+            let end = esc.find('m').map(|i| i + 1).unwrap_or(esc.len());
+            let esc = &esc[..end];
+            if !distinct.contains(&esc) {
+                distinct.push(esc);
+            }
+            rest = &rest[p + 1..];
+        }
+        assert!(
+            distinct.len() >= 2,
+            "gradient varies by row, got {:?}",
+            distinct
+        );
+    }
+
+    #[test]
+    fn default_fx_matches_plain_render() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let a = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
+        let b = render_frame_with_fx(&solid_test_logo(), 9, &cfg, 36, 4, &RenderFx::none());
+        assert_eq!(a.lines, b.lines);
+        assert!(RenderFx::none().is_none());
+        assert!(!fx_grad().is_none());
+    }
+
+    #[test]
+    fn beat_zoom_changes_pose() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let plain = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
+        let zoomed = render_frame_with_fx(
+            &solid_test_logo(),
+            9,
+            &cfg,
+            36,
+            4,
+            &RenderFx {
+                grad: None,
+                shading: None,
+                scale: 1.2,
+            },
+        );
+        assert_ne!(plain.lines, zoomed.lines, "zoom rescales the projection");
+    }
+
+    #[test]
+    fn shading_override_uses_custom_ramp() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let plain = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
+        let custom = render_frame_with_fx(
+            &solid_test_logo(),
+            9,
+            &cfg,
+            36,
+            4,
+            &RenderFx {
+                grad: None,
+                shading: Some(vec!["@".to_string()]),
+                scale: 1.0,
+            },
+        );
+        assert_ne!(plain.lines, custom.lines, "custom ramp redraws the logo");
+        let raw = custom.lines.join("\n");
+        assert!(
+            crate::app::strip_ansi(&raw).contains('@'),
+            "custom ramp glyph shows, got:\n{}",
+            crate::app::strip_ansi(&raw)
+        );
     }
 }

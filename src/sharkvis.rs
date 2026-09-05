@@ -74,11 +74,20 @@ impl SharkvisMode {
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
+/// Depth of the beat zoom: `scale = 1 + grow * beat`.
+pub const DEFAULT_GROW: f32 = 0.12;
+pub const MAX_GROW: f32 = 0.3;
+
 /// Frame produced by [`Sync::poll`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct LiveFrame {
     pub active: bool,
-    pub tint: Option<Rgb>,
+    /// Vertical logo gradient, bottom → top (sharkvis `gradient_low/high`).
+    pub grad: Option<(Rgb, Rgb)>,
+    /// Fallback single color (live state color when gradients are unknown).
+    pub flat: Option<Rgb>,
+    /// sharkvis `[visualizer] glyphs` charset as a shading ramp.
+    pub glyphs: Option<Vec<String>>,
     pub energy: f32,
     pub beat: f32,
     pub speed_mult: f32,
@@ -88,7 +97,9 @@ impl LiveFrame {
     pub fn inactive() -> LiveFrame {
         LiveFrame {
             active: false,
-            tint: None,
+            grad: None,
+            flat: None,
+            glyphs: None,
             energy: 0.0,
             beat: 0.0,
             speed_mult: 1.0,
@@ -175,6 +186,39 @@ pub fn gradient_colors() -> Option<(Rgb, Rgb)> {
     gradient_colors_from_paths(&config_paths())
 }
 
+/// sharkvis `[visualizer] glyphs` charset as a shading ramp (dark → bright).
+pub fn glyph_ramp() -> Option<Vec<String>> {
+    for p in config_paths() {
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            if let Some(g) = parse_sharkvis_glyphs(&text) {
+                return Some(g);
+            }
+        }
+    }
+    None
+}
+
+/// Gradients + charset from the first config file that provides either.
+fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String>>) {
+    let mut grad: Option<(Rgb, Rgb)> = None;
+    let mut glyphs: Option<Vec<String>> = None;
+    for p in paths {
+        let Ok(text) = std::fs::read_to_string(p) else {
+            continue;
+        };
+        if grad.is_none() {
+            grad = parse_sharkvis_config(&text);
+        }
+        if glyphs.is_none() {
+            glyphs = parse_sharkvis_glyphs(&text);
+        }
+        if grad.is_some() && glyphs.is_some() {
+            break;
+        }
+    }
+    (grad, glyphs)
+}
+
 fn gradient_colors_from_paths(paths: &[String]) -> Option<(Rgb, Rgb)> {
     for p in paths {
         if let Ok(text) = std::fs::read_to_string(p) {
@@ -225,6 +269,46 @@ fn parse_sharkvis_config(text: &str) -> Option<(Rgb, Rgb)> {
         (None, Some(h)) => Some((h, h)),
         (None, None) => None,
     }
+}
+
+/// Parse the `[visualizer] glyphs` value into single-char ramp steps.
+/// sharkvis keeps the raw value (no `;` comment stripping); each char —
+/// e.g. `1234567` or `▁▂▃▄▅▆▇█` — becomes one shading step.
+fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
+    let mut section = String::from("general");
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            if let Some(end) = line.find(']') {
+                section = line[1..end].trim().to_ascii_lowercase();
+            }
+            continue;
+        }
+        if section != "visualizer" {
+            continue;
+        }
+        let eq = match line.find('=') {
+            Some(i) => i,
+            None => continue,
+        };
+        if line[..eq].trim().to_ascii_lowercase() != "glyphs" {
+            continue;
+        }
+        // sharkvis trims the value the same way.
+        let ramp: Vec<String> = line[eq + 1..].trim().chars().map(|c| c.to_string()).collect();
+        if ramp.is_empty() {
+            return None;
+        }
+        // Whitespace-only values carry no shading info.
+        if ramp.iter().all(|s| s.trim().is_empty()) {
+            return None;
+        }
+        return Some(if ramp.len() > 64 { ramp[..64].to_vec() } else { ramp });
+    }
+    None
 }
 
 /// Parse `#rrggbb`, `rrggbb` or a basic color name.
@@ -993,7 +1077,8 @@ pub struct Sync {
     running: bool,
     running_at: Option<Instant>,
     gradients: Option<(Rgb, Rgb)>,
-    gradients_at: Option<Instant>,
+    glyphs: Option<Vec<String>>,
+    visual_at: Option<Instant>,
     monitor: Option<BeatMonitor>,
     last: LiveFrame,
 }
@@ -1004,7 +1089,8 @@ impl Sync {
             running: false,
             running_at: None,
             gradients: None,
-            gradients_at: None,
+            glyphs: None,
+            visual_at: None,
             monitor: None,
             last: LiveFrame::inactive(),
         }
@@ -1014,7 +1100,7 @@ impl Sync {
         if mode == SharkvisMode::Off {
             self.monitor = None;
             self.last = LiveFrame::inactive();
-            return self.last;
+            return self.last.clone();
         }
         let now = Instant::now();
         if self.running_at.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1)) {
@@ -1024,11 +1110,13 @@ impl Sync {
         if !mode.enabled(self.running) {
             self.monitor = None;
             self.last = LiveFrame::inactive();
-            return self.last;
+            return self.last.clone();
         }
-        if self.gradients_at.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(5)) {
-            self.gradients = gradient_colors();
-            self.gradients_at = Some(now);
+        if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(5)) {
+            let (grad, glyphs) = visual_from_paths(&config_paths());
+            self.gradients = grad;
+            self.glyphs = glyphs;
+            self.visual_at = Some(now);
         }
 
         // Live state file wins (exact colors + energy from sharkvis itself).
@@ -1059,24 +1147,26 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        let tint = color.or_else(|| {
-            self.gradients
-                .map(|(lo, hi)| if lo == hi { hi } else { lerp_rgb(lo, hi, energy) })
-        });
+        // Both gradient ends when known (vertical logo gradient mirroring
+        // the sharkvis bars); otherwise the single live color, if any.
+        let grad = self.gradients;
+        let flat = if grad.is_none() { color } else { None };
         let frame = LiveFrame {
             active: true,
-            tint,
+            grad,
+            flat,
+            glyphs: self.glyphs.clone(),
             energy,
             beat,
             speed_mult: beat_speed_mult(beat, beat_depth),
         };
         self.last = frame;
-        frame
+        self.last.clone()
     }
 
     /// Last frame (used before the first poll or when throttling).
     pub fn last(&self) -> LiveFrame {
-        self.last
+        self.last.clone()
     }
 }
 
@@ -1116,8 +1206,7 @@ mod tests {
     }
 
     #[test]
-    fn sharkvis_config_parses_gradients() {
-        let cfg = "[general]\nbars = 0\n[color]\ngradient_low = ffff00\ngradient_high = ff0000\n";
+    fn sharkvis_config_parses_gradients() {        let cfg = "[general]\nbars = 0\n[color]\ngradient_low = ffff00\ngradient_high = ff0000\n";
         assert_eq!(
             parse_sharkvis_config(cfg),
             Some(((255, 255, 0), (255, 0, 0)))
@@ -1219,29 +1308,49 @@ mod tests {
     }
 
     #[test]
+    fn glyphs_parse_from_config() {
+        let cfg = "[general]\nbars = 0\n[visualizer]\nmode = bars\nglyphs = 1234567\n";
+        assert_eq!(
+            parse_sharkvis_glyphs(cfg),
+            Some(vec!["1", "2", "3", "4", "5", "6", "7"].into_iter().map(str::to_string).collect::<Vec<_>>())
+        );
+        let blocks = "[visualizer]\nglyphs = \u{2581}\u{2582}\u{2583}\u{2584}\u{2585}\u{2586}\u{2587}\u{2588}\n";
+        assert_eq!(parse_sharkvis_glyphs(blocks).map(|v| v.len()), Some(8));
+        assert_eq!(parse_sharkvis_glyphs("[general]\n"), None);
+        assert_eq!(parse_sharkvis_glyphs("[visualizer]\nmode = bars\n"), None);
+    }
+
+    #[test]
     fn sync_poll_uses_state_file_when_running() {
         let _guard = ENV_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-live-{}", std::process::id()));
         std::fs::write(&path, "color=#ff8800 energy=0.6 beat=1").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
         assert!(f.active);
-        assert_eq!(f.tint, Some((255, 136, 0)));
+        assert_eq!(f.grad, None);
+        assert_eq!(f.flat, Some((255, 136, 0)), "single live color without gradients");
         assert!((f.beat - 1.0).abs() < 1e-5);
         assert!((f.speed_mult - 0.4).abs() < 1e-5, "beat=1 dips to 1-depth");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
-    fn sync_poll_tints_from_gradients_without_live_color() {
+    fn sync_poll_reports_gradient_and_glyphs() {
         let _guard = ENV_LOCK.lock().unwrap();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-cfg-{}", std::process::id()));
-        std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = ff0000\n").unwrap();
+        std::fs::write(
+            &cfg_path,
+            "[color]\ngradient_low = 000000\ngradient_high = ff0000\n[visualizer]\nglyphs = 123\n",
+        )
+        .unwrap();
         let state_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-nocolor-{}", std::process::id()));
         std::fs::write(&state_path, "energy=0.5 beat=0").unwrap();
@@ -1251,7 +1360,12 @@ mod tests {
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
         assert!(f.active);
-        assert_eq!(f.tint, Some((128, 0, 0)), "lerp black->red at energy 0.5");
+        assert_eq!(f.grad, Some(((0, 0, 0), (255, 0, 0))), "both gradient ends");
+        assert_eq!(f.flat, None);
+        assert_eq!(
+            f.glyphs,
+            Some(vec!["1".to_string(), "2".to_string(), "3".to_string()])
+        );
         assert!((f.speed_mult - 1.0).abs() < 1e-5);
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");

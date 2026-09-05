@@ -356,15 +356,28 @@ impl App {
                 }
                 spin_phase += f64::from(shark_live.speed_mult);
                 let frame = spin_phase as usize;
-                let tint = if shark_live.active { shark_live.tint } else { None };
+                // sharkvis look: vertical gradient (low → high), charset
+                // ramp unless the user picked one, beat zoom.
+                let mut fx = crate::anim::RenderFx::none();
+                if shark_live.active {
+                    if let Some(g) = shark_live.grad {
+                        fx.grad = Some(g);
+                    } else if let Some(c) = shark_live.flat {
+                        fx.grad = Some((c, c));
+                    }
+                    if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
+                        fx.shading = shark_live.glyphs.clone();
+                    }
+                    fx.scale = 1.0 + anim_cfg.grow * shark_live.beat;
+                }
                 let anim_logo = match cloud.as_mut() {
-                    Some(c) => crate::anim::render_cloud_with_tint(
+                    Some(c) => crate::anim::render_cloud_with_fx(
                         c,
                         frame,
                         &anim_cfg,
                         render_height,
                         info_count,
-                        tint,
+                        &fx,
                     ),
                     None => base_logo.clone().expect("animated needs a logo"),
                 };

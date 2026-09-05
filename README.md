@@ -15,7 +15,7 @@ Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 - Drop-in `fastfetch` replacement
 - 530 ASCII logos (all `fastfetch` logos)
 - Areofyl-style 3D spinning logo
-- sharkvis integration: logo takes sharkvis colors, slows down on the beat
+- sharkvis integration: logo takes sharkvis gradient + charset, slows down and grows on the beat
 - Pure Rust, zero crates except `libc`
 - Fully static `musl`
 
