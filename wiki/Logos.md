@@ -1,10 +1,10 @@
 # Logos
 
-sharkfetch ships **530 logos** — every `fastfetch` logo, matching `fastfetch --list-logos` names.
+jefetch ships **530 logos** — every `fastfetch` logo, matching `fastfetch --list-logos` names.
 
 ## Use a Builtin
 
-In `~/.config/sharkfetch/config.jsonc`:
+In `~/.config/jefetch/config.jsonc`:
 
 ```jsonc
 { "logo": { "source": "arch" } }
@@ -12,12 +12,12 @@ In `~/.config/sharkfetch/config.jsonc`:
 
 `source`: `""` auto-detects your OS; any other value looks up a builtin (aliases included); unknown falls back to `linux`.
 
-List all: `sharkfetch --list-logos`
+List all: `jefetch --list-logos`
 
 ## Override at runtime
 
 ```sh
-sharkfetch --logo arch
+jefetch --logo arch
 ```
 
 `--logo <name>` temporarily overrides the config without editing it.

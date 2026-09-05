@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build sharkfetch as a static musl binary using the rustup toolchain.
+# Build jefetch as a static musl binary using the rustup toolchain.
 # On this NixOS box the system `cargo`/`rustc` is a Nix build that lacks the
 # musl target, so we route through rustup and pin the toolchain rustc.
 set -euo pipefail
@@ -30,7 +30,7 @@ if [ -x "${HOME:-$HOME}/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/c
     if "$TC/bin/cargo" --version >/dev/null 2>&1 && "$TC/bin/rustc" --print target-list 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then
         # shellcheck disable=SC2086
         RUSTC="$TC/bin/rustc" "$TC/bin/cargo" build $TFLAG --target x86_64-unknown-linux-musl
-        BIN="target/x86_64-unknown-linux-musl/${MODE}/sharkfetch"
+        BIN="target/x86_64-unknown-linux-musl/${MODE}/jefetch"
         echo
         echo "Built (static musl): $BIN"
         echo "To verify it is static:  ldd $BIN  (should say 'not a dynamic executable')"
@@ -44,7 +44,7 @@ if cargo --version >/dev/null 2>&1; then
        (cargo --print target-list 2>/dev/null | grep -q "x86_64-unknown-linux-musl" && rustc --print sysroot 2>/dev/null | xargs -I{} sh -c 'ls {}/lib/rustlib/x86_64-unknown-linux-musl/lib/libcore.rlib 2>/dev/null | grep -q .'); then
         echo "Building static musl with system cargo..."
         if cargo build $TFLAG --target x86_64-unknown-linux-musl 2>&1; then
-            BIN="target/x86_64-unknown-linux-musl/${MODE}/sharkfetch"
+            BIN="target/x86_64-unknown-linux-musl/${MODE}/jefetch"
             echo
             echo "Built (static musl): $BIN"
             echo "To verify it is static:  ldd $BIN  (should say 'not a dynamic executable')"
@@ -58,6 +58,6 @@ fi
 echo "Building with system cargo (dynamic)..."
 # shellcheck disable=SC2086
 cargo build $TFLAG
-BIN="target/${MODE}/sharkfetch"
+BIN="target/${MODE}/jefetch"
 echo
 echo "Built: $BIN"

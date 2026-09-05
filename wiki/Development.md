@@ -28,7 +28,7 @@ Zero-crate (only `libc`), hand-rolled JSONC parser. Build with `./build.sh` or `
     make
     ```
 
-Verify static: `ldd target/x86_64-unknown-linux-musl/release/sharkfetch` → `not a dynamic executable`.
+Verify static: `ldd target/x86_64-unknown-linux-musl/release/jefetch` → `not a dynamic executable`.
 
 ## Layout
 

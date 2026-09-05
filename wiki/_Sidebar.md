@@ -1,4 +1,4 @@
-# sharkfetch Wiki
+# jefetch Wiki
 
 - **Home**
   - [Home](Home.md)

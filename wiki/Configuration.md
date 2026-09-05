@@ -1,14 +1,14 @@
 # Configuration
 
-sharkfetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */` comments, trailing commas).
+jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */` comments, trailing commas).
 
 ## File Lookup (in order)
 
 1. `-c /path/to/config.jsonc`
-2. `~/.config/sharkfetch/config.jsonc`
+2. `~/.config/jefetch/config.jsonc`
 3. Compiled defaults
 
-`config.jsonc` is auto-created on first run. To start fresh: `rm ~/.config/sharkfetch/config.jsonc && sharkfetch`.
+`config.jsonc` is auto-created on first run. To start fresh: `rm ~/.config/jefetch/config.jsonc && jefetch`.
 
 ## Example
 

@@ -31,7 +31,7 @@ Option blocks for a module go under its name (also settable as a top-level key):
 ## CLI Structure Override
 
 ```sh
-sharkfetch --structure "os:kernel:uptime:break:colors"
+jefetch --structure "os:kernel:uptime:break:colors"
 ```
 
 `--structure` overrides `modules` at runtime.

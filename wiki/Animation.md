@@ -1,10 +1,10 @@
 # Animation
 
-sharkfetch embeds a faithful Rust port of areofyl/fetch's 3D engine — the logo truly spins in 3D. Static and animated share the same text output; only the logo moves.
+jefetch embeds a faithful Rust port of areofyl/fetch's 3D engine — the logo truly spins in 3D. Static and animated share the same text output; only the logo moves.
 
 ## Enable
 
-Add `animation` to `~/.config/sharkfetch/config.jsonc`:
+Add `animation` to `~/.config/jefetch/config.jsonc`:
 
 ```jsonc
 { "logo": { "source": "nixos", "animation": "spin y speed=2.0" } }

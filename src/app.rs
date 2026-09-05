@@ -47,10 +47,20 @@ impl App {
             }
 
             for dir in config_search_dirs() {
-                let candidate_jsonc = format!("{}/sharkfetch/config.jsonc", dir);
+                let candidate_jsonc = format!("{}/jefetch/config.jsonc", dir);
                 if let Some(cfg) = load_config_file(&candidate_jsonc) {
                     self.config = cfg;
                     return;
+                }
+                let legacy = format!("{}/sharkfetch/config.jsonc", dir);
+                if std::path::Path::new(&legacy).exists() {
+                    let _ = std::fs::create_dir_all(format!("{}/jefetch", dir));
+                    if std::fs::copy(&legacy, &candidate_jsonc).is_ok() {
+                        if let Some(cfg) = load_config_file(&candidate_jsonc) {
+                            self.config = cfg;
+                            return;
+                        }
+                    }
                 }
             }
 
@@ -59,11 +69,11 @@ impl App {
 
     pub fn ensure_default_config(&self) -> Option<String> {
         let dir = config_search_dirs().first()?.to_string();
-        let path_jsonc = format!("{}/sharkfetch/config.jsonc", dir);
+        let path_jsonc = format!("{}/jefetch/config.jsonc", dir);
         if let Ok(content) = std::fs::read_to_string(&path_jsonc) {
             if content.trim().is_empty() {
 
-                if let Ok(_) = std::fs::create_dir_all(format!("{}/sharkfetch", dir)) {
+                if let Ok(_) = std::fs::create_dir_all(format!("{}/jefetch", dir)) {
                     if let Ok(_) = std::fs::write(&path_jsonc, crate::config::defaults::DEFAULT_JSONC_CONFIG) {
                         return Some(path_jsonc);
                     }
@@ -71,7 +81,7 @@ impl App {
             }
             return None;
         }
-        if let Ok(_) = std::fs::create_dir_all(format!("{}/sharkfetch", dir)) {
+        if let Ok(_) = std::fs::create_dir_all(format!("{}/jefetch", dir)) {
             if let Ok(_) = std::fs::write(&path_jsonc, crate::config::defaults::DEFAULT_JSONC_CONFIG) {
                 return Some(path_jsonc);
             }
@@ -149,7 +159,7 @@ impl App {
         }
         config_search_dirs()
             .first()
-            .map(|d| format!("{}/sharkfetch/config.jsonc", d))
+            .map(|d| format!("{}/jefetch/config.jsonc", d))
     }
 
     pub fn run(&mut self) -> i32 {
@@ -1014,7 +1024,7 @@ fn poll_key_action(
 }
 
 fn debug_log_keys(src: &str, buf: &[u8]) {
-    if let Ok(p) = std::env::var("SHARKFETCH_DEBUG_KEYS") {
+    if let Ok(p) = std::env::var("JEFETCH_DEBUG_KEYS") {
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
             use std::io::Write;
             let hex: Vec<String> = buf.iter().map(|b| format!("{:02x}", b)).collect();
@@ -1198,7 +1208,7 @@ mod tests {
 
     #[test]
     fn config_stamp_tracks_changes() {
-        let path = std::env::temp_dir().join(format!("sharkfetch-stamp-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("jefetch-stamp-{}.json", std::process::id()));
         let s = path.to_string_lossy().into_owned();
         let _ = std::fs::remove_file(&path);
         assert_eq!(config_stamp(&s), None);

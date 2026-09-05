@@ -1,4 +1,4 @@
-use sharkfetch::config::parse;
+use jefetch::config::parse;
 
 #[test]
 fn parse_basic_object() {

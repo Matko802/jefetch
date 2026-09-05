@@ -5,7 +5,7 @@ pub const TARGET: &str = "x86_64-unknown-linux-musl";
 pub const SYSTEM_LIB: &str = "musl";
 
 pub fn print_full() {
-    println!("sharkfetch {}", RAW);
+    println!("jefetch {}", RAW);
     println!("Compiled on: {}", COMPILED_ON);
     println!("Build type: {}", BUILD_TYPE);
     println!("Compile target: {}", TARGET);

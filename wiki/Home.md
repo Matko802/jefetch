@@ -1,4 +1,4 @@
-# sharkfetch Wiki
+# jefetch Wiki
 
 A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output and an areofyl-style 3D spin animation.
 
@@ -17,13 +17,13 @@ A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output
 === "Nix flake"
 
     ```sh
-    nix run github:Matko802/sharkfetch
+    nix run github:Matko802/jefetch
     ```
 
 === "Cargo / Make"
 
     ```sh
-    git clone https://github.com/Matko802/sharkfetch && cd sharkfetch
+    git clone https://github.com/Matko802/jefetch && cd jefetch
     make deps && make
     sudo make install
     ```
@@ -32,9 +32,9 @@ A fastfetch clone in pure Rust — static `musl`, Linux-only — with 1:1 output
 
     ```sh
     ./build.sh
-    ./target/x86_64-unknown-linux-musl/release/sharkfetch
+    ./target/x86_64-unknown-linux-musl/release/jefetch
     ```
 
-First run auto-creates `~/.config/sharkfetch/config.jsonc`.
+First run auto-creates `~/.config/jefetch/config.jsonc`.
 
 Continue to [Installation](Installation.md) →

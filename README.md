@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="Logo/sharkfetch.png" width="120" alt="sharkfetch logo :3" />
+<img src="Logo/jefetch.png" width="120" alt="jefetch logo :3" />
 
-# sharkfetch
+# jefetch
 
 Rust Based Cli System Stat fetcher
 
@@ -21,8 +21,8 @@ Inspired by <sub>[fastfetch](https://github.com/fastfetch-cli/fastfetch)</sub>
 ## Building
 
 ```sh
-git clone https://github.com/Matko802/sharkfetch.git
-cd sharkfetch
+git clone https://github.com/Matko802/jefetch.git
+cd jefetch
 make deps
 make
 sudo make install
@@ -31,11 +31,11 @@ sudo make install
 ## Usage
 
 ```sh
-sharkfetch
-sharkfetch --static
-sharkfetch --logo arch
-sharkfetch --list-logos
-sharkfetch --help
+jefetch
+jefetch --static
+jefetch --logo arch
+jefetch --list-logos
+jefetch --help
 ```
 
 | Option | Description |
@@ -46,7 +46,7 @@ sharkfetch --help
 | `--list-logos` | show all logos |
 | `--list-modules` | list of available modules |
 
-The config file is located in `~/.config/sharkfetch/config.jsonc`
+The config file is located in `~/.config/jefetch/config.jsonc`
 
 ## Any distro with Nix:
 
@@ -56,7 +56,7 @@ make          # build inside the dev shell
 ```
 Or
 ```sh
-nix run github:Matko802/sharkfetch
+nix run github:Matko802/jefetch
 ```
 
 ## As a flake input
@@ -65,14 +65,14 @@ nix run github:Matko802/sharkfetch
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    sharkfetch = {
-      url = "github:Matko802/sharkfetch";
+    jefetch = {
+      url = "github:Matko802/jefetch";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { nixpkgs, sharkfetch, ... }: {
-    packages.x86_64-linux.default = sharkfetch.packages.x86_64-linux.default;
+  outputs = { nixpkgs, jefetch, ... }: {
+    packages.x86_64-linux.default = jefetch.packages.x86_64-linux.default;
   };
 }
 ```
@@ -83,14 +83,14 @@ nix run github:Matko802/sharkfetch
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    sharkfetch = {
-      url = "github:Matko802/sharkfetch";
+    jefetch = {
+      url = "github:Matko802/jefetch";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
   outputs =
-    { nixpkgs, sharkfetch, ... }:
+    { nixpkgs, jefetch, ... }:
     let
       system = "x86_64-linux";
     in
@@ -99,8 +99,8 @@ nix run github:Matko802/sharkfetch
         inherit system;
         modules = [
           {
-            nixpkgs.overlays = [ sharkfetch.overlays.default ];
-            environment.systemPackages = [ sharkfetch.packages.${system}.default ];
+            nixpkgs.overlays = [ jefetch.overlays.default ];
+            environment.systemPackages = [ jefetch.packages.${system}.default ];
           }
         ];
       };
@@ -111,16 +111,16 @@ nix run github:Matko802/sharkfetch
 ## Standalone build from source
 
 ```sh
-nix build github:Matko802/sharkfetch
-nix run github:Matko802/sharkfetch
+nix build github:Matko802/jefetch
+nix run github:Matko802/jefetch
 ```
 
 ## Develop
 
 ```sh
-nix develop github:Matko802/sharkfetch
+nix develop github:Matko802/jefetch
 ```
 
 ## License
 
-This project is released under the MIT License. See [LICENSE](https://github.com/Matko802/sharkfetch/blob/main/LICENSE).
+This project is released under the MIT License. See [LICENSE](https://github.com/Matko802/jefetch/blob/main/LICENSE).

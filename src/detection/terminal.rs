@@ -250,11 +250,11 @@ fn generic_version(name: &str) -> Option<String> {
 
 fn terminal_version_cache_path(bin: &str) -> String {
     if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
-        format!("{}/sharkfetch/terminal-{}.version", dir.to_string_lossy(), bin)
+        format!("{}/jefetch/terminal-{}.version", dir.to_string_lossy(), bin)
     } else if let Some(home) = std::env::var_os("HOME") {
-        format!("{}/.cache/sharkfetch/terminal-{}.version", home.to_string_lossy(), bin)
+        format!("{}/.cache/jefetch/terminal-{}.version", home.to_string_lossy(), bin)
     } else {
-        format!("/tmp/sharkfetch-terminal-{}.version", bin)
+        format!("/tmp/jefetch-terminal-{}.version", bin)
     }
 }
 

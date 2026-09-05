@@ -1,5 +1,5 @@
 [package]
-name = "sharkfetch"
+name = "jefetch"
 version = "0.1.0"
 edition = "2021"
 description = "A fastfetch clone written in pure Rust, statically linked against musl"

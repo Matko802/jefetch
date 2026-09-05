@@ -2,24 +2,24 @@
 
 ## General
 
-**sharkfetch vs fastfetch?**
+**jefetch vs fastfetch?**
 Drop-in 1:1. Same modules order, same logo colors, same display/general.
 
 **Why static musl?**
 Instant start, no glibc mismatch. `ldd` → `not a dynamic executable`.
 
 **Config file not found?**
-Search order: `-c <path>` → `~/.config/sharkfetch/config.jsonc` → compiled defaults. An empty `config.jsonc` is auto-populated.
+Search order: `-c <path>` → `~/.config/jefetch/config.jsonc` → compiled defaults. An empty `config.jsonc` is auto-populated.
 
 ## Configuration
 
 **What format is the config?**
-JSONC only — `~/.config/sharkfetch/config.jsonc` (supports `//` and `/* */` comments, trailing commas).
+JSONC only — `~/.config/jefetch/config.jsonc` (supports `//` and `/* */` comments, trailing commas).
 
 **How to start fresh?**
 ```sh
-rm ~/.config/sharkfetch/config.jsonc
-sharkfetch   # recreates config.jsonc
+rm ~/.config/jefetch/config.jsonc
+jefetch   # recreates config.jsonc
 ```
 
 **`"animation": "spin"` does nothing?**
@@ -41,7 +41,7 @@ Nope — spinning and static share the same text output; only the logo moves.
 ## Logos
 
 **Logo not found?**
-`sharkfetch --list-logos | grep -i nixos`. Use `"source": ""` to auto-detect.
+`jefetch --list-logos | grep -i nixos`. Use `"source": ""` to auto-detect.
 
 **Custom logo?**
 `"type": "file"` + `"source": "~/logo.txt"`. Supports `$N` colors and `color: {"1": "red"}`.

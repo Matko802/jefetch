@@ -1,6 +1,6 @@
-site_name: sharkfetch Wiki
-site_url: https://github.com/Matko802/sharkfetch
-repo_url: https://github.com/Matko802/sharkfetch
+site_name: jefetch Wiki
+site_url: https://github.com/Matko802/jefetch
+repo_url: https://github.com/Matko802/jefetch
 theme:
   name: material
   features:

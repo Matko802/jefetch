@@ -38,7 +38,7 @@ fn find_shell_via_proc() -> Option<String> {
         "pwsh", "yash", "busybox", "nu", "xonsh", "elvish", "oil.ovm",
     ];
     const SKIP: &[&str] = &[
-        "sudo", "su", "doas", "strace", "gdb", "lldb", "login", "ltrace", "perf", "time", "script", "proot", "fastfetch", "sharkfetch", "flatpak",
+        "sudo", "su", "doas", "strace", "gdb", "lldb", "login", "ltrace", "perf", "time", "script", "proot", "fastfetch", "jefetch", "flatpak",
     ];
     let mut pid: u32 = unsafe { libc::getppid() as u32 };
     for _ in 0..20 {

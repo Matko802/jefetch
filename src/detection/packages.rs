@@ -138,14 +138,14 @@ fn count_nix() -> Option<usize> {
     let uid = unsafe { libc::getuid() };
     let cache_path = {
         if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
-            format!("{}/sharkfetch/packages.count", dir.to_string_lossy())
+            format!("{}/jefetch/packages.count", dir.to_string_lossy())
         } else if let Some(home) = std::env::var_os("HOME") {
-            format!("{}/.cache/sharkfetch/packages.count", home.to_string_lossy())
+            format!("{}/.cache/jefetch/packages.count", home.to_string_lossy())
         } else {
-            format!("/tmp/sharkfetch-packages.{}.cache", uid)
+            format!("/tmp/jefetch-packages.{}.cache", uid)
         }
     };
-    let tmp_cache = format!("/tmp/sharkfetch-packages.{}.cache", uid);
+    let tmp_cache = format!("/tmp/jefetch-packages.{}.cache", uid);
 
     let read_cached = |p: &str| -> Option<(usize, std::time::SystemTime)> {
         let txt = std::fs::read_to_string(p).ok()?;

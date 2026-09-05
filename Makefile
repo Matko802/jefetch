@@ -8,10 +8,10 @@ all:
 	./build.sh
 
 install: all
-	@if [ -f target/x86_64-unknown-linux-musl/release/sharkfetch ]; then \
-		install -Dm755 target/x86_64-unknown-linux-musl/release/sharkfetch $(DESTDIR)$(PREFIX)/bin/sharkfetch; \
-	elif [ -f target/release/sharkfetch ]; then \
-		install -Dm755 target/release/sharkfetch $(DESTDIR)$(PREFIX)/bin/sharkfetch; \
+	@if [ -f target/x86_64-unknown-linux-musl/release/jefetch ]; then \
+		install -Dm755 target/x86_64-unknown-linux-musl/release/jefetch $(DESTDIR)$(PREFIX)/bin/jefetch; \
+	elif [ -f target/release/jefetch ]; then \
+		install -Dm755 target/release/jefetch $(DESTDIR)$(PREFIX)/bin/jefetch; \
 	else \
 		echo "No binary found. Run 'make' first." >&2; exit 1; \
 	fi

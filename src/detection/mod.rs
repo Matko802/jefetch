@@ -72,11 +72,11 @@ pub fn fastfetch_json() -> Option<String> {
     CACHE.get_or_init(|| {
         let cache_path = {
             if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
-                format!("{}/sharkfetch/cache.json", dir.to_string_lossy())
+                format!("{}/jefetch/cache.json", dir.to_string_lossy())
             } else if let Some(home) = std::env::var_os("HOME") {
-                format!("{}/.cache/sharkfetch/cache.json", home.to_string_lossy())
+                format!("{}/.cache/jefetch/cache.json", home.to_string_lossy())
             } else {
-                "/tmp/sharkfetch-cache.json".to_string()
+                "/tmp/jefetch-cache.json".to_string()
             }
         };
 

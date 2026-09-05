@@ -1,9 +1,9 @@
-use sharkfetch::app::{App, CliOptions};
-use sharkfetch::modules;
+use jefetch::app::{App, CliOptions};
+use jefetch::modules;
 
-const USAGE: &str = r#"sharkfetch - A fastfetch-like system information tool (Rust + musl)
+const USAGE: &str = r#"jefetch - A fastfetch-like system information tool (Rust + musl)
 
-Usage: sharkfetch [options]
+Usage: jefetch [options]
 
 Options:
   -h, --help                  Show this help message
@@ -66,11 +66,11 @@ fn main() {
                 return;
             }
             "-v" | "--version" => {
-                sharkfetch::version::print_full();
+                jefetch::version::print_full();
                 return;
             }
             "--version-raw" => {
-                println!("{}", sharkfetch::version::RAW);
+                println!("{}", jefetch::version::RAW);
                 return;
             }
             "--list-modules" => {
@@ -78,13 +78,13 @@ fn main() {
                 return;
             }
             "--list-logos" => {
-                for name in sharkfetch::logo::list_names() {
+                for name in jefetch::logo::list_names() {
                     println!("{}", name);
                 }
                 return;
             }
             "--list-config-paths" => {
-                for d in sharkfetch::app::config_search_dirs_pub() {
+                for d in jefetch::app::config_search_dirs_pub() {
                     println!("{}", d);
                 }
                 return;

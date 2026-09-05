@@ -26,7 +26,7 @@ fn http_get(host: &str, port: u16) -> Option<String> {
     use std::io::{Read, Write};
     let mut s = stream;
     let req = format!(
-        "GET / HTTP/1.0\r\nHost: {}\r\nUser-Agent: sharkfetch/0.1\r\nAccept: text/plain\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.0\r\nHost: {}\r\nUser-Agent: jefetch/0.1\r\nAccept: text/plain\r\nConnection: close\r\n\r\n",
         host
     );
     s.write_all(req.as_bytes()).ok()?;
