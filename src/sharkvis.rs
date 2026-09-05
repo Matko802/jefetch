@@ -550,6 +550,8 @@ struct BeatTracker {
     period: f32,
     next: f32,
     misses: f32,
+    cand: f32,
+    cstr: u32,
 }
 
 impl BeatTracker {
@@ -565,6 +567,8 @@ impl BeatTracker {
             period: 0.0,
             next: 0.0,
             misses: 0.0,
+            cand: 0.0,
+            cstr: 0,
         }
     }
 
@@ -622,18 +626,29 @@ impl BeatTracker {
         if self.n < 5 {
             return;
         }
-        if let Some(p) = estimate_period(&self.onsets[..self.n]) {
-            if self.period <= 0.0 || (p - self.period).abs() / self.period > 0.15 {
-                self.period = p;
-                self.next = t + p;
+        if self.period > 0.0 {
+            let window = 0.12 * self.period;
+            if (self.next - t).abs() <= window {
+                self.next = t + self.period;
                 self.misses = 0.0;
-            } else {
-                let window = 0.12 * self.period;
-                if (self.next - t).abs() <= window {
-                    self.next = t + self.period;
-                    self.misses = 0.0;
-                }
             }
+        }
+        let Some(p) = estimate_period(&self.onsets[..self.n]) else {
+            return;
+        };
+        if (p - self.cand).abs() / self.cand.max(1e-6) <= 0.12 {
+            self.cstr += 1;
+        } else {
+            self.cand = p;
+            self.cstr = 1;
+        }
+        if self.cstr < 2 {
+            return;
+        }
+        if self.period <= 0.0 || self.misses >= 3.0 {
+            self.period = self.cand;
+            self.next = t + self.cand;
+            self.misses = 0.0;
         }
     }
 }
@@ -665,7 +680,8 @@ fn estimate_period(times: &[f32]) -> Option<f32> {
     while p < 0.30 {
         p *= 2.0;
     }
-    Some(p)
+    let bpm = (60.0 / p).round().clamp(60.0, 200.0);
+    Some(60.0 / bpm)
 }
 
 fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBool>) {
@@ -1424,8 +1440,7 @@ mod tests {
     }
 
     #[test]
-    fn tracker_locks_and_unlocks() {
-        let dt = 1.0 / 60.0;
+    fn tracker_locks_and_unlocks() {        let dt = 1.0 / 60.0;
         let mut tr = BeatTracker::new();
         for _ in 0..60 {
             tr.step(0.15, dt);
@@ -1451,6 +1466,15 @@ mod tests {
             tr.step(0.12, dt);
         }
         assert_eq!(tr.period(), 0.0, "lock drops without support");
+    }
+
+    #[test]
+    fn estimate_rounds_to_integer_bpm() {
+        let steady: Vec<f32> = (0..6).map(|i| i as f32 * 0.5).collect();
+        assert_eq!(estimate_period(&steady), Some(0.5));
+        let jittered: Vec<f32> = (0..6).map(|i| i as f32 * 0.5 + (i as f32 % 2.0) * 0.01).collect();
+        let p = estimate_period(&jittered).unwrap();
+        assert!(((60.0 / p).round() - 60.0 / p).abs() < 1e-5, "whole bpm, got {}", p);
     }
 
     #[test]
