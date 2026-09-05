@@ -242,7 +242,7 @@ impl App {
         let mut boost_phase: f64 = 0.0;
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
-        print!("\x1b[0m\x1b[2J\x1b[H\x1b[?25l");
+        print!("\x1b[0m\x1b[2J\x1b[3J\x1b[H\x1b[?25l");
         let _ = std::io::Write::flush(&mut std::io::stdout());
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
         let mut tty_fd: i32 = -1;
