@@ -13,7 +13,7 @@ Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](
 
 - Uses Fastfetch logos
 - Musl lib
-- integration with [sharkvis](https://github.com/Matko802/sharkvis)
+- integrated with [sharkvis](https://github.com/Matko802/sharkvis)
 
 ## Building
 
