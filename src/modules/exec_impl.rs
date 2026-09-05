@@ -368,6 +368,9 @@ fn render_packages(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> 
 fn format_packages(amounts: &[(String, usize)], combined: bool) -> Vec<String> {
     if combined {
         let total: usize = amounts.iter().map(|(_, n)| n).sum();
+        if amounts.len() < 2 {
+            return vec![total.to_string()];
+        }
         let mut out = vec![total.to_string()];
         for (name, n) in amounts {
             out.push(format!("{} ({})", n, name.to_lowercase()));
@@ -1598,5 +1601,15 @@ mod tests {
             ]
         );
         assert_eq!(format_packages(&[], true), vec!["0".to_string()]);
+    }
+
+    #[test]
+    fn packages_combined_single_manager_shows_bare_number() {
+        let one = vec![("nix-system".to_string(), 2199)];
+        assert_eq!(format_packages(&one, true), vec!["2199".to_string()]);
+        assert_eq!(
+            format_packages(&one, false),
+            vec!["2199 (nix-system)".to_string()]
+        );
     }
 }
