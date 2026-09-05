@@ -1,7 +1,4 @@
 <div align="center">
-
-<img src="Logo/jefetch.png" width="120" alt="Its pronounced as ye fetch" />
-
 # jefetch
 <sub>Its pronounced as ye fetch<sub>
 
