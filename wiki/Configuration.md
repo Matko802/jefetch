@@ -63,6 +63,7 @@ Ordered list of modules. Each is a bare name or an object with options:
 | `animation` | `off` = static; see [Animation](Animation.md) |
 | `style` | `"flat"` or `"3d"` (animation logo style) |
 | `chars` | `"ascii"` keeps logo chars, `"blocks"` default, or custom ramp |
+| `sharkvis` | `"auto"` (default) / `"on"` / `"off"` — tint + beat slowdown while sharkvis runs; see [Animation](Animation.md) |
 
 ## CLI Overrides
 

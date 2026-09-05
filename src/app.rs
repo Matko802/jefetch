@@ -233,6 +233,16 @@ impl App {
         let mut cloud = base_logo
             .as_ref()
             .and_then(|l| crate::anim::build_cloud(l, &anim_cfg));
+        // sharkvis sync: tint + beat slowdown while sharkvis runs.
+        let mut shark_sync = crate::sharkvis::Sync::new();
+        let mut shark_live: crate::sharkvis::LiveFrame;
+        let mut shark_polled = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap_or_else(std::time::Instant::now);
+        // Fractional spin phase: advances 1.0 per drawn frame at full speed,
+        // slower on the beat (see beat_depth). Integer frames jump on sudden
+        // speed changes; an accumulator keeps the slowdown smooth.
+        let mut spin_phase: f64 = 0.0;
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
         print!("\x1b[0m\x1b[2J\x1b[H\x1b[?25l");
@@ -259,7 +269,6 @@ impl App {
         }
         let is_tty = tty_fd != -1;
         let _tty_guard = tty_file;
-        let mut frame: usize = 0;
         let mut out = String::new();
         const GAP: usize = 2;
         let mut last_refresh = std::time::Instant::now();
@@ -335,13 +344,27 @@ impl App {
             let cols = crate::common::terminal_width();
             if animated {
 
+                if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
+                    shark_live =
+                        shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
+                    shark_polled = std::time::Instant::now();
+                } else {
+                    // Keep the cached frame; Sync throttles the /proc scan
+                    // internally, the 30ms gate here avoids state-file
+                    // re-reads on every drawn frame.
+                    shark_live = shark_sync.last();
+                }
+                spin_phase += f64::from(shark_live.speed_mult);
+                let frame = spin_phase as usize;
+                let tint = if shark_live.active { shark_live.tint } else { None };
                 let anim_logo = match cloud.as_mut() {
-                    Some(c) => crate::anim::render_cloud(
+                    Some(c) => crate::anim::render_cloud_with_tint(
                         c,
                         frame,
                         &anim_cfg,
                         render_height,
                         info_count,
+                        tint,
                     ),
                     None => base_logo.clone().expect("animated needs a logo"),
                 };
@@ -368,7 +391,6 @@ impl App {
                 out.push_str("\x1b[J");
                 print!("{}", out);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
-                frame = frame.wrapping_add(1);
             } else if needs_draw {
 
                 out.clear();

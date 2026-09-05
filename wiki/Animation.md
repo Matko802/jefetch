@@ -102,4 +102,40 @@ Or as a separate logo key:
 "animation": "spin xyz speed=2.0 flat chars=ascii"  // everything in one line (add color=red to force one color)
 ```
 
+## sharkvis: same color, slow down on the beat
+
+While [`sharkvis`](https://github.com/Matko802/sharkvis) is running,
+jefetch can borrow its look and groove: the spinning logo is tinted with
+the sharkvis gradient colors and the spin slows down on the beat
+(`speed × (1 − depth × beat)`).
+
+```jsonc
+"animation": "spin y speed=2.0 sharkvis"          // auto: active while sharkvis runs
+"animation": "spin y speed=2.0 sharkvis beat=0.8" // deeper slowdown (default 0.6, max 0.9)
+"animation": "spin y sharkvis=off"                // opt out (also: "no-sharkvis")
+```
+
+| Value | Effect |
+|-------|--------|
+| `sharkvis` / `sharkvis=auto` | Integrate when a `sharkvis` process is detected (default) |
+| `sharkvis=on` | Always try (state file + monitor, even without a process match) |
+| `sharkvis=off` / `no-sharkvis` | Never integrate |
+| `beat=N` | Slowdown depth on the beat, `0`–`0.9` (default `0.6`) |
+
+Or as a separate logo key (the animation string wins when both are set):
+
+```jsonc
+{ "logo": { "source": "nixos", "animation": "spin y", "sharkvis": "off" } }
+```
+
+How it works:
+
+- **Color**: `gradient_low` → `gradient_high` from the sharkvis config
+  (`$SHARKVIS_CONFIG`, `~/.config/sharkvis/config`), lerped by the live
+  audio energy. A fresh `$XDG_RUNTIME_DIR/sharkvis/state` file
+  (`color=#rrggbb energy=0..1 beat=0..1`) wins when present.
+- **Beat**: from the state file when present, otherwise from a tiny
+  built-in PulseAudio monitor (8 kHz mono RMS + onset envelope) that only
+  runs while the integration is active — no new dependencies.
+
 Next: [Logos](Logos.md) →

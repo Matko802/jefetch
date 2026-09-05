@@ -24,6 +24,8 @@ pub struct LogoConfig {
     pub style: Option<String>,
 
     pub chars: Option<String>,
+
+    pub sharkvis: Option<String>,
 }
 
 impl LogoConfig {
@@ -93,6 +95,13 @@ impl LogoConfig {
                     "chars" | "characters" => {
                         if let Some(s) = v.as_str() {
                             l.chars = Some(s.to_string());
+                        }
+                    }
+                    "sharkvis" => {
+                        if let Some(s) = v.as_str() {
+                            l.sharkvis = Some(s.to_string());
+                        } else {
+                            l.sharkvis = Some(v.to_json_string());
                         }
                     }
                     _ => {}

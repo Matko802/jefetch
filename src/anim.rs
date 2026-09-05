@@ -30,6 +30,10 @@ pub struct AnimConfig {
     pub flat: bool,
 
     pub original_glyphs: bool,
+
+    pub sharkvis: crate::sharkvis::SharkvisMode,
+    pub sharkvis_set: bool,
+    pub beat_depth: f32,
 }
 
 impl Default for AnimConfig {
@@ -52,6 +56,9 @@ impl Default for AnimConfig {
             shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
             flat: false,
             original_glyphs: false,
+            sharkvis: crate::sharkvis::SharkvisMode::default(),
+            sharkvis_set: false,
+            beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
         }
     }
 }
@@ -59,7 +66,8 @@ impl Default for AnimConfig {
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
-    "symbols", "symbol", "ramp", "color", "light",
+    "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
+    "no-sharkvis", "beat",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -126,6 +134,27 @@ impl AnimConfig {
                 cfg.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
             }
 
+            if has_word(&low, "no-sharkvis") || has_word(&low, "nosharkvis") {
+                cfg.sharkvis = crate::sharkvis::SharkvisMode::Off;
+                cfg.sharkvis_set = true;
+            } else if let Some(v) = extract_word(&low, raw, "sharkvis", true) {
+                let v = v.trim();
+                match crate::sharkvis::SharkvisMode::parse_value(v) {
+                    Some(m) => {
+                        cfg.sharkvis = m;
+                        cfg.sharkvis_set = true;
+                    }
+                    None => {
+                        // Unknown sub-option: still enable, stay forward compatible.
+                        cfg.sharkvis = crate::sharkvis::SharkvisMode::On;
+                        cfg.sharkvis_set = true;
+                    }
+                }
+            } else if has_word(&low, "sharkvis") {
+                cfg.sharkvis = crate::sharkvis::SharkvisMode::On;
+                cfg.sharkvis_set = true;
+            }
+
             let axis_src = blank_option_spans(&low, OPTION_KEYS);
             let has_x = axis_src.contains('x');
             let has_y = axis_src.contains('y');
@@ -152,6 +181,9 @@ impl AnimConfig {
             if let Some(v) = extract_number(&low, "speed") {
 
                 cfg.speed = v;
+            }
+            if let Some(v) = extract_number(&low, "beat") {
+                cfg.beat_depth = v.clamp(0.0, crate::sharkvis::MAX_BEAT_DEPTH);
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -277,6 +309,14 @@ impl AnimConfig {
         }
         if let Some(c) = &logo.chars {
             self.apply_chars_value(c);
+        }
+        if !self.sharkvis_set {
+            if let Some(s) = &logo.sharkvis {
+                if let Some(m) = crate::sharkvis::SharkvisMode::parse_value(s) {
+                    self.sharkvis = m;
+                    self.sharkvis_set = true;
+                }
+            }
         }
     }
 }
@@ -970,8 +1010,21 @@ pub fn render_frame(
     render_height: usize,
     info_line_count: usize,
 ) -> ResolvedLogo {
+    render_frame_with_tint(logo, frame, config, render_height, info_line_count, None)
+}
+
+pub fn render_frame_with_tint(
+    logo: &ResolvedLogo,
+    frame: usize,
+    config: &AnimConfig,
+    render_height: usize,
+    info_line_count: usize,
+    tint: Option<(u8, u8, u8)>,
+) -> ResolvedLogo {
     match build_cloud(logo, config) {
-        Some(mut cloud) => render_cloud(&mut cloud, frame, config, render_height, info_line_count),
+        Some(mut cloud) => {
+            render_cloud_with_tint(&mut cloud, frame, config, render_height, info_line_count, tint)
+        }
         None => logo.clone(),
     }
 }
@@ -982,6 +1035,17 @@ pub fn render_cloud(
     config: &AnimConfig,
     render_height: usize,
     info_line_count: usize,
+) -> ResolvedLogo {
+    render_cloud_with_tint(cloud, frame, config, render_height, info_line_count, None)
+}
+
+pub fn render_cloud_with_tint(
+    cloud: &mut LogoCloud,
+    frame: usize,
+    config: &AnimConfig,
+    render_height: usize,
+    info_line_count: usize,
+    tint: Option<(u8, u8, u8)>,
 ) -> ResolvedLogo {
     let LogoCloud {
         points,
@@ -1117,7 +1181,21 @@ pub fn render_cloud(
         has_ansi: bool,
         c: i32,
         prev_color: &mut i32,
+        tint: Option<(u8, u8, u8)>,
     ) {
+        // TINT_ACTIVE is a dedicated prev_color state meaning "tint escape
+        // already emitted"; all filled cells share one truecolor.
+        const TINT_ACTIVE: i32 = -100;
+        if let Some((r, g, b)) = tint {
+            if *prev_color != TINT_ACTIVE {
+                if *prev_color != -2 && *prev_color != -1 {
+                    line.push_str("\x1b[0m");
+                }
+                line.push_str(&format!("\x1b[38;2;{};{};{}m", r, g, b));
+                *prev_color = TINT_ACTIVE;
+            }
+            return;
+        }
         if c != *prev_color {
             if *prev_color != -2 && *prev_color != -1 {
                 line.push_str("\x1b[0m");
@@ -1150,7 +1228,7 @@ pub fn render_cloud(
                     line.push(' ');
                     continue;
                 }
-                push_color(&mut line, palette_ansi, has_ansi, colorbuf[idx], &mut prev_color);
+                push_color(&mut line, palette_ansi, has_ansi, colorbuf[idx], &mut prev_color, tint);
                 line.push(glyphbuf[idx]);
                 continue;
             }
@@ -1227,7 +1305,7 @@ pub fn render_cloud(
             } else {
                 &config.shading[ci]
             };
-            push_color(&mut line, palette_ansi, has_ansi, best_c, &mut prev_color);
+            push_color(&mut line, palette_ansi, has_ansi, best_c, &mut prev_color, tint);
             line.push_str(glyph);
         }
         if prev_color != -2 && prev_color != -1 {
@@ -1624,5 +1702,59 @@ mod tests {
             "flat plane renders something, got:\n{}",
             text
         );
+    }
+
+    #[test]
+    fn sharkvis_mode_parses() {
+        use crate::sharkvis::SharkvisMode;
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        assert_eq!(cfg.sharkvis, SharkvisMode::Auto);
+        assert!(!cfg.sharkvis_set);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y sharkvis"));
+        assert_eq!(cfg.sharkvis, SharkvisMode::On);
+        assert!(cfg.sharkvis_set);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y sharkvis=off"));
+        assert_eq!(cfg.sharkvis, SharkvisMode::Off);
+        assert!(cfg.sharkvis_set);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y no-sharkvis"));
+        assert_eq!(cfg.sharkvis, SharkvisMode::Off);
+        assert!(cfg.sharkvis_set);
+
+        let cfg = AnimConfig::from_animation_str(Some("spin y nosharkvis"));
+        assert_eq!(cfg.sharkvis, SharkvisMode::Off);
+
+        // Axes unaffected by the new keywords.
+        let cfg = AnimConfig::from_animation_str(Some("spin y sharkvis beat=0.8"));
+        assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z);
+        assert!((cfg.beat_depth - 0.8).abs() < 1e-4);
+    }
+
+    #[test]
+    fn sharkvis_tint_paints_truecolor() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let out = render_frame_with_tint(&solid_test_logo(), 5, &cfg, 36, 4, Some((255, 136, 0)));
+        let raw = out.lines.join("\n");
+        assert!(
+            raw.contains("\x1b[38;2;255;136;0m"),
+            "tint escape present, got:\n{}",
+            crate::app::strip_ansi(&raw)
+        );
+        // Untinted output keeps the default palette escapes.
+        let plain = render_frame(&solid_test_logo(), 5, &cfg, 36, 4);
+        assert!(!plain.lines.join("\n").contains("38;2;255;136;0"));
+    }
+
+    #[test]
+    fn tinted_cloud_matches_tinted_frame() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
+        for frame in [0usize, 7, 25] {
+            let a = render_cloud_with_tint(&mut cloud, frame, &cfg, 36, 4, Some((1, 2, 3)));
+            let b = render_frame_with_tint(&solid_test_logo(), frame, &cfg, 36, 4, Some((1, 2, 3)));
+            assert_eq!(a.lines, b.lines, "tinted cloud == frame at {}", frame);
+        }
     }
 }

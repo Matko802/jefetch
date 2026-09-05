@@ -6,4 +6,5 @@ pub mod detection;
 pub mod logo;
 pub mod modules;
 pub mod print;
+pub mod sharkvis;
 pub mod version;
