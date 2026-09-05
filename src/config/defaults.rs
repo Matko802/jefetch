@@ -35,7 +35,8 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     },
     "logo": {
         "source": "",
-        "animation": "spin xz speed=0 boom=10 flat chars=ascii sharkvis",
+        "animation": "spin xz flat",
+        "sharkvis": "speed=0 boom=10 chars=ascii",
         "padding": {
             "top": 0,
             "left": 0,

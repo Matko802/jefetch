@@ -131,7 +131,18 @@ jefetch borrows its look and groove:
 "animation": "spin y sharkvis beat=0.8 grow=0.2"         // deeper dip + bigger pulse
 "animation": "spin y sharkvis=off"                       // explicitly off (the default)
 "animation": "spin y sharkvis chars=blocks"              // keep jefetch's own ramp
-"animation": "spin y sharkvis grow=0"                    // volume speed only, no zoom
+"animation": "spin y sharkvis grow=0"                    // dips only, no zoom
+```
+
+Or split it into its own key — options there fine-tune the base
+animation while sharkvis runs, per-key over `animation` (explicit
+`style`/`chars` keys still win over both):
+
+```jsonc
+{ "logo": {
+    "animation": "spin xz flat",
+    "sharkvis": "speed=0 boom=0.3 chars=ascii"
+} }
 ```
 
 | Value | Effect |

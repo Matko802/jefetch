@@ -48,7 +48,8 @@ jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */
     },
     "logo": {
         "source": "",  // "" = auto-detect
-        "animation": "spin xz speed=0 boom=10 flat chars=ascii sharkvis"
+        "animation": "spin xz flat",
+        "sharkvis": "speed=0 boom=10 chars=ascii"
     }
 }
 ```
@@ -83,7 +84,7 @@ Ordered list of modules. Each is a bare name or an object with options:
 | `animation` | `off` = static; see [Animation](Animation.md) |
 | `style` | `"flat"` or `"3d"` (animation logo style) |
 | `chars` | `"ascii"` keeps logo chars, `"blocks"` default, or custom ramp |
-| `sharkvis` | `"off"` (default) / `"on"` / `"auto"` — tint + beat reaction while sharkvis runs; the `animation` string must also enable it, see [Animation](Animation.md) |
+| `sharkvis` | Separate sharkvis profile: mode word (`on`/`off`/`auto`) or animation options (`"speed=0 boom=0.3 chars=ascii"`) applied while sharkvis runs, per-key over `animation`; explicit `style`/`chars` keys win over both |
 
 ## CLI Overrides
 
