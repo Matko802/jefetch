@@ -51,12 +51,11 @@ The config file is located in `~/.config/jefetch/config.jsonc`
 
 ## Update
 
-Nix flake (updates both `jefetch` and
-[sharkvis](https://github.com/Matko802/sharkvis)):
+Nix flake:
 
 ```sh
 cd ~/fish-flake
-nix flake update jefetch sharkvis
+nix flake update jefetch
 nh os switch -H machine1
 ```
 
@@ -64,7 +63,6 @@ Standalone:
 
 ```sh
 cd jefetch && git pull && ./build.sh && sudo make install
-cd ../sharkvis && git pull && make && sudo make install
 ```
 
 Restart running copies after updating (`q` to quit, relaunch).
