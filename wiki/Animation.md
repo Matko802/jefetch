@@ -67,5 +67,6 @@ while sharkvis runs (`style`/`chars` keys still win over both):
 | `grow=N` | Pulse depth, `0`–`0.3` (default `0.12`, `0` disables) |
 | `motion=continuous` | Spin accumulates forever (default) |
 | `motion=revert` | Winds toward a full turn, eases back when quiet |
+| `retract=N` | Revert snap-back speed, higher is faster (`0` holds, default `1`) |
 
 Next: [Logos](Logos.md) →

@@ -39,6 +39,7 @@ pub struct AnimConfig {
     pub boom: Option<f32>,
     pub shading_explicit: bool,
     pub motion: Motion,
+    pub retract: f32,
 }
 
 impl Default for AnimConfig {
@@ -69,6 +70,7 @@ impl Default for AnimConfig {
             boom: None,
             shading_explicit: false,
             motion: Motion::default(),
+            retract: 1.0,
         }
     }
 }
@@ -77,7 +79,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat", "grow", "boom", "motion",
+    "no-sharkvis", "beat", "grow", "boom", "motion", "retract",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -206,6 +208,12 @@ impl AnimConfig {
             }
             if let Some(v) = extract_number(&low, "boom") {
                 cfg.boom = Some(v.clamp(0.0, 1.0));
+            }
+            if let Some(v) = extract_number(&low, "retract") {
+                cfg.retract = v.max(0.0);
+            }
+            if let Some(v) = extract_number(&low, "retract") {
+                cfg.retract = v.max(0.0);
             }
             if let Some(v) = extract_word(&low, raw, "motion", true) {
                 if let Some(m) = Motion::parse_value(&v) {
@@ -368,6 +376,12 @@ impl AnimConfig {
         }
         if extract_number(&low, "boom").is_some() {
             self.boom = ov.boom;
+        }
+        if extract_number(&low, "retract").is_some() {
+            self.retract = ov.retract;
+        }
+        if extract_number(&low, "retract").is_some() {
+            self.retract = ov.retract;
         }
         let mut motion_mentioned = false;
         if let Some(v) = extract_word(&low, raw, "motion", true) {
@@ -1162,10 +1176,10 @@ impl Motion {
     }
 }
 
-pub const AUDIO_YAW: f32 = 0.15;
-pub const AUDIO_PITCH: f32 = 0.10;
-pub const AUDIO_ROLL: f32 = 0.06;
-pub const AUDIO_FLOOR: f32 = 0.05;
+pub const AUDIO_YAW: f32 = 0.20;
+pub const AUDIO_PITCH: f32 = 0.14;
+pub const AUDIO_ROLL: f32 = 0.09;
+pub const AUDIO_FLOOR: f32 = 0.04;
 
 pub const REVERT_LIMIT: f64 = 6.2832;
 pub const REVERT_TAU: f32 = 1.2;
@@ -1188,9 +1202,12 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     )
 }
 
-pub fn revert_step(acc: f64, step: f64, dt: f32) -> f64 {
+pub fn revert_step(acc: f64, step: f64, dt: f32, tau: f32) -> f64 {
     let wound = (acc + step).clamp(-REVERT_LIMIT, REVERT_LIMIT);
-    wound * (-dt.max(0.0) / REVERT_TAU).exp() as f64
+    if tau <= 0.0 {
+        return wound;
+    }
+    wound * (-dt.max(0.0) / tau).exp() as f64
 }
 
 pub struct RenderFx {
@@ -2127,18 +2144,38 @@ mod tests {
     fn revert_winds_to_limit_then_retracts() {
         let mut acc = 0.0;
         for _ in 0..400 {
-            acc = revert_step(acc, 0.15, 0.033);
+            acc = revert_step(acc, 0.15, 0.033, REVERT_TAU);
         }
         assert!(acc > 5.0 && acc <= REVERT_LIMIT + 1e-6, "winds near limit, got {}", acc);
         for _ in 0..400 {
-            acc = revert_step(acc, 0.0, 0.033);
+            acc = revert_step(acc, 0.0, 0.033, REVERT_TAU);
         }
         assert!(acc.abs() < 0.05, "retracts to rest, got {}", acc);
         let mut neg = 0.0;
         for _ in 0..400 {
-            neg = revert_step(neg, -0.15, 0.033);
+            neg = revert_step(neg, -0.15, 0.033, REVERT_TAU);
         }
         assert!(neg < -5.0 && neg >= -REVERT_LIMIT - 1e-6, "winds negative, got {}", neg);
+        let mut slow = 5.0;
+        let mut fast = 5.0;
+        for _ in 0..60 {
+            slow = revert_step(slow, 0.0, 0.033, REVERT_TAU / 0.5);
+            fast = revert_step(fast, 0.0, 0.033, REVERT_TAU / 4.0);
+        }
+        assert!(fast < slow, "higher retract snaps back sooner");
+        let held = revert_step(5.0, 0.0, 1.0, f32::INFINITY);
+        assert!((held - 5.0).abs() < 1e-6, "retract=0 holds");
+    }
+
+    #[test]
+    fn retract_parses() {
+        assert!((AnimConfig::from_animation_str(Some("spin y")).retract - 1.0).abs() < 1e-6);
+        let cfg = AnimConfig::from_animation_str(Some("spin y motion=revert retract=2.5"));
+        assert!((cfg.retract - 2.5).abs() < 1e-4);
+        assert_eq!(cfg.motion, Motion::Revert);
+        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        cfg.apply_sharkvis_str("retract=4");
+        assert!((cfg.retract - 4.0).abs() < 1e-4);
     }
 
     #[test]

@@ -27,20 +27,20 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     ],
     "display": {
         "separator": "->",
-        "separatorColor": "",
-        "keyColor": "bold_cyan",
-        "titleColor": "bold_blue",
+        "separatorColor": "red",
+        "keyColor": "",
+        "titleColor": "",
         "padding": 1,
         "brightColor": true
     },
     "logo": {
-        "source": "",
-        "animation": "spin xz flat",
-        "sharkvis": "speed=0 boom=10 chars=ascii",
+        "source": "cachyos",
+        "animation": "spin speed=0 xyz",
+        "sharkvis": "motion=revert retract=1 boom=10 chars=blocks",
         "padding": {
             "top": 0,
             "left": 0,
-            "right": 4
+            "right": 0
         }
     }
 }

@@ -384,15 +384,22 @@ impl App {
                         .clamp(0.001, 0.5);
                     last_fx = fx_now;
                     if anim_cfg.motion == crate::anim::Motion::Revert {
-                        yaw_phase = crate::anim::revert_step(yaw_phase, f64::from(yaw_step), dt);
+                        let tau = if anim_cfg.retract <= 0.0 {
+                            f32::INFINITY
+                        } else {
+                            crate::anim::REVERT_TAU / anim_cfg.retract.clamp(0.1, 10.0)
+                        };
+                        yaw_phase =
+                            crate::anim::revert_step(yaw_phase, f64::from(yaw_step), dt, tau);
                         pitch_phase =
-                            crate::anim::revert_step(pitch_phase, f64::from(pitch_step), dt);
+                            crate::anim::revert_step(pitch_phase, f64::from(pitch_step), dt, tau);
                         let roll_step = if shark_live.energy > crate::anim::AUDIO_FLOOR {
                             f64::from(shark_live.energy) * f64::from(crate::anim::AUDIO_ROLL)
                         } else {
                             0.0
                         };
-                        roll_phase = crate::anim::revert_step(roll_phase, roll_step, dt);
+                        roll_phase =
+                            crate::anim::revert_step(roll_phase, roll_step, dt, tau);
                         fx.audio = [
                             pitch_phase as f32,
                             yaw_phase as f32,
