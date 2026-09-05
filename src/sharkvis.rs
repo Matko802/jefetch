@@ -1153,6 +1153,7 @@ pub struct Sync {
     visual_at: Option<Instant>,
     monitor: Option<BeatMonitor>,
     last: LiveFrame,
+    last_ok: Option<Instant>,
 }
 
 impl Sync {
@@ -1165,6 +1166,7 @@ impl Sync {
             visual_at: None,
             monitor: None,
             last: LiveFrame::inactive(),
+            last_ok: None,
         }
     }
 
@@ -1195,12 +1197,24 @@ impl Sync {
         let mut beat: Option<f32> = None;
         let mut color: Option<Rgb> = None;
         let mut live_grad: Option<(Rgb, Rgb)> = None;
-        if let Some(live) = read_live_state() {
+        let live = read_live_state();
+        let have_state = live.is_some();
+        if let Some(live) = live {
             energy = live.energy;
             beat = live.beat;
             color = live.color;
             if let (Some(lo), Some(hi)) = (live.glow, live.ghigh) {
                 live_grad = Some((lo, hi));
+            }
+        }
+        if have_state {
+            self.last_ok = Some(now);
+        } else if self.last.active {
+            let fresh = self
+                .last_ok
+                .is_some_and(|t| now.duration_since(t) < Duration::from_millis(750));
+            if fresh {
+                return self.last.clone();
             }
         }
         if energy.is_none() || beat.is_none() {
@@ -1505,6 +1519,31 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&cfg_path);
         let _ = std::fs::remove_file(&state_path);
+    }
+
+    #[test]
+    fn sync_holds_last_frame_across_gaps() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gap-{}", std::process::id()));
+        std::fs::write(&path, "color=#00ff00 energy=0.5 beat=0").unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        assert!(f.active);
+        assert_eq!(f.flat, Some((0, 255, 0)));
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        assert!(f.active);
+        assert_eq!(f.flat, Some((0, 255, 0)), "gap holds last colors");
+        std::thread::sleep(Duration::from_millis(800));
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
+        assert!(f.flat.is_none(), "holdover expires");
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
