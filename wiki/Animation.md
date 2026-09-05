@@ -12,9 +12,10 @@ Add `animation` to `~/.config/jefetch/config.jsonc`:
 
 | Value | Effect |
 |-------|--------|
-| `spin` / `spin y` | Animate (default == `spin y`, speed 2) |
+| `spin` / `spin y` | Animate only with an explicit `speed` (e.g. `spin y speed=2.0`) |
 | `off` / `static` / `none` | Static |
 | unset | Static |
+| set but no `speed` value anywhere | Static — motion needs an explicit `speed` |
 
 `--static` prints one static frame and exits (also used for piped output).
 In a terminal you always get the live view instead: `t` pauses/resumes
@@ -121,8 +122,10 @@ jefetch borrows its look and groove:
 - **Direction**: the music steers the enabled spin axes — right-heavy
   sound yaws a `y` spin right, left-heavy yaws it left, matched stereo
   pitches an `x` spin up and down, overall energy rolls a `z` spin.
-  Axes without spin stay still. Audio motion applies on top of the idle
-  spin, so even `speed=0` dances.
+  Axes without spin stay still, and near-silence holds still too.
+  While sharkvis drives, the base `speed` steps aside completely.
+  Audio motion applies on top of the idle spin, so even `speed=0`
+  dances.
 - **Expand**: `boom=N` sizes the logo up with the volume
   (`scale = 1 + boom × energy`, `0`–`1`).
 

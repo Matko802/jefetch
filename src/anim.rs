@@ -14,6 +14,7 @@ pub struct AnimConfig {
     pub spin_y: bool,
     pub spin_z: bool,
     pub speed: f32,
+    pub speed_set: bool,
 
     pub speed_x: f32,
     pub speed_y: f32,
@@ -47,6 +48,7 @@ impl Default for AnimConfig {
             spin_y: true,
             spin_z: false,
             speed: 2.0,
+            speed_set: false,
             speed_x: 1.0,
             speed_y: 1.0,
             speed_z: 1.0,
@@ -181,16 +183,20 @@ impl AnimConfig {
             }
             if let Some(v) = extract_number(&low, "speed_x") {
                 cfg.speed_x = v;
+                cfg.speed_set = true;
             }
             if let Some(v) = extract_number(&low, "speed_y") {
                 cfg.speed_y = v;
+                cfg.speed_set = true;
             }
             if let Some(v) = extract_number(&low, "speed_z") {
                 cfg.speed_z = v;
+                cfg.speed_set = true;
             }
             if let Some(v) = extract_number(&low, "speed") {
 
                 cfg.speed = v;
+                cfg.speed_set = true;
             }
             if let Some(v) = extract_number(&low, "beat") {
                 cfg.beat_depth = v.clamp(0.0, crate::sharkvis::MAX_BEAT_DEPTH);
@@ -340,15 +346,19 @@ impl AnimConfig {
         }
         if extract_number(&low, "speed_x").is_some() {
             self.speed_x = ov.speed_x;
+            self.speed_set = true;
         }
         if extract_number(&low, "speed_y").is_some() {
             self.speed_y = ov.speed_y;
+            self.speed_set = true;
         }
         if extract_number(&low, "speed_z").is_some() {
             self.speed_z = ov.speed_z;
+            self.speed_set = true;
         }
         if extract_number(&low, "speed").is_some() {
             self.speed = ov.speed;
+            self.speed_set = true;
         }
         if extract_number(&low, "beat").is_some() {
             self.beat_depth = ov.beat_depth;
@@ -1155,6 +1165,7 @@ impl Motion {
 pub const AUDIO_YAW: f32 = 0.15;
 pub const AUDIO_PITCH: f32 = 0.10;
 pub const AUDIO_ROLL: f32 = 0.06;
+pub const AUDIO_FLOOR: f32 = 0.05;
 
 pub const REVERT_YAW: f32 = 0.6;
 pub const REVERT_PITCH: f32 = 0.5;
@@ -1171,6 +1182,9 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     }
     let bal = (r - l) / sum;
     let mag = (sum * 0.5).clamp(0.0, 1.0);
+    if mag < AUDIO_FLOOR {
+        return (0.0, 0.0);
+    }
     (
         bal * mag * AUDIO_YAW,
         (1.0 - bal.abs()) * mag * AUDIO_PITCH,
@@ -1182,7 +1196,7 @@ pub fn revert_targets(left: f32, right: f32, energy: f32) -> [f32; 3] {
     let r = right.clamp(0.0, 1.0);
     let e = energy.clamp(0.0, 1.0);
     let sum = l + r;
-    if sum < 1e-3 {
+    if sum < 1e-3 || e < AUDIO_FLOOR {
         return [0.0, 0.0, 0.0];
     }
     let bal = (r - l) / sum;
@@ -2142,6 +2156,20 @@ mod tests {
         let held = pos;
         pos = spring_step(pos, 0.0, 0.5, REVERT_ATTACK, REVERT_RELEASE);
         assert!(pos < held * 0.3, "slow release falls back, got {}", pos);
+    }
+
+    #[test]
+    fn speed_presence_tracked() {
+        assert!(!AnimConfig::from_animation_str(Some("spin y")).speed_set);
+        assert!(!AnimConfig::from_animation_str(None).speed_set);
+        assert!(AnimConfig::from_animation_str(Some("spin y speed=2")).speed_set);
+        assert!(AnimConfig::from_animation_str(Some("spin y speed=0")).speed_set);
+        assert!(AnimConfig::from_animation_str(Some("spin y speed_y=2")).speed_set);
+        let mut cfg = AnimConfig::from_animation_str(Some("spin y"));
+        cfg.apply_sharkvis_str("boom=0.3");
+        assert!(!cfg.speed_set);
+        cfg.apply_sharkvis_str("speed=0");
+        assert!(cfg.speed_set);
     }
 
     #[test]

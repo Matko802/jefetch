@@ -83,6 +83,13 @@ impl App {
         if self.options.force_static {
             return false;
         }
+        let mut anim_cfg = crate::anim::AnimConfig::from_animation_str(
+            self.config.logo.animation.as_deref(),
+        );
+        anim_cfg.apply_logo_overrides(&self.config.logo);
+        if !anim_cfg.speed_set {
+            return false;
+        }
         if let Some(anim) = &self.config.logo.animation {
             let a = anim.to_ascii_lowercase();
 
@@ -98,7 +105,7 @@ impl App {
                 return true;
             }
         }
-        false
+        anim_cfg.sharkvis != crate::sharkvis::SharkvisMode::Off
     }
 
     fn build_entries(&self) -> Vec<ModuleEntry> {
@@ -399,8 +406,10 @@ impl App {
                     } else {
                         yaw_phase += f64::from(yaw_step);
                         pitch_phase += f64::from(pitch_step);
-                        roll_phase += f64::from(shark_live.energy)
-                            * f64::from(crate::anim::AUDIO_ROLL);
+                        if shark_live.energy > crate::anim::AUDIO_FLOOR {
+                            roll_phase += f64::from(shark_live.energy)
+                                * f64::from(crate::anim::AUDIO_ROLL);
+                        }
                         fx.audio = [
                             pitch_phase as f32,
                             yaw_phase as f32,
@@ -411,11 +420,15 @@ impl App {
                     fx.scale =
                         1.0 + anim_cfg.grow * shark_live.beat + boom * shark_live.energy;
                 }
+                let mut render_cfg = anim_cfg.clone();
+                if shark_live.active {
+                    render_cfg.speed = 0.0;
+                }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(
                         c,
                         spin_phase,
-                        &anim_cfg,
+                        &render_cfg,
                         render_height,
                         info_count,
                         &fx,
@@ -1235,6 +1248,26 @@ fn utf8_len(first: u8) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn animate_app(animation: Option<&str>, sharkvis: Option<&str>) -> App {
+        let mut app = App::new(CliOptions::default());
+        app.config.logo.animation = animation.map(|s| s.to_string());
+        app.config.logo.sharkvis = sharkvis.map(|s| s.to_string());
+        app
+    }
+
+    #[test]
+    fn should_animate_needs_speed() {
+        assert!(!animate_app(None, None).should_animate());
+        assert!(!animate_app(Some("off"), None).should_animate());
+        assert!(!animate_app(Some("spin y"), None).should_animate());
+        assert!(!animate_app(Some("spin y sharkvis"), None).should_animate());
+        assert!(animate_app(Some("spin y speed=2"), None).should_animate());
+        assert!(animate_app(Some("spin y speed=0"), None).should_animate());
+        assert!(animate_app(Some("spin xz flat"), Some("speed=0")).should_animate());
+        assert!(!animate_app(Some("spin xz flat"), Some("off")).should_animate());
+        assert!(!animate_app(Some("spin xz flat"), None).should_animate());
+    }
 
     #[test]
     fn live_keys_classify() {
