@@ -352,8 +352,7 @@ impl App {
             if animated {
 
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
-                    shark_live =
-                        shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth, anim_cfg.sense);
+                    shark_live = shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
                     shark_polled = std::time::Instant::now();
                 } else {
                     // Keep the cached frame; Sync throttles the /proc scan
@@ -375,9 +374,8 @@ impl App {
                     if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
-                    // Size grows and brightness breathes with the drive.
-                    fx.scale = 1.0 + anim_cfg.grow * shark_live.drive;
-                    fx.drive = shark_live.drive;
+                    // Size pulses with the bass beat; brightness never dims.
+                    fx.scale = 1.0 + anim_cfg.grow * shark_live.beat;
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(

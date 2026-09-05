@@ -71,29 +71,14 @@ impl SharkvisMode {
     }
 }
 
-/// Depth of the beat slowdown dip (multiplied with the volume follow).
+/// Depth of the beat slowdown dip.
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
-/// Sensitivity of the music drive. Higher = hotter reaction at low volume.
-pub const DEFAULT_SENSE: f32 = 4.0;
-pub const MAX_SENSE: f32 = 12.0;
-
-/// Normalized music drive `0..1` from raw energy. Raw monitor energy lives
-/// in a small band (often 0.05..0.4), so linear mapping barely moves the
-/// logo; saturating exponential normalization uses the full range:
-/// quiet still breathes, loud pegs at 1.
-pub fn drive(energy: f32, sense: f32) -> f32 {
-    let s = sense.clamp(0.5, MAX_SENSE);
-    (1.0 - (-energy.clamp(0.0, 1.0) * s).exp()).clamp(0.0, 1.0)
-}
-
-/// Speed follows the drive continuously: silence crawls at 0.5x, mid
-/// drive spins at 1x, full drive at 1.5x — times the beat dip.
-pub fn volume_speed_mult(drive: f32, beat: f32, depth: f32) -> f32 {
-    let vol = 0.5 + drive.clamp(0.0, 1.0);
-    let dip = 1.0 - depth.clamp(0.0, MAX_BEAT_DEPTH) * beat.clamp(0.0, 1.0);
-    (vol * dip).clamp(0.2, 2.0)
+/// Speed reacts to bass beats only: full speed between kicks, dipping to
+/// `1 - depth` on a beat.
+pub fn beat_speed_mult(beat: f32, depth: f32) -> f32 {
+    (1.0 - depth.clamp(0.0, MAX_BEAT_DEPTH) * beat.clamp(0.0, 1.0)).clamp(0.1, 1.0)
 }
 
 /// Depth of the beat zoom: `scale = 1 + grow * beat`.
@@ -111,8 +96,6 @@ pub struct LiveFrame {
     /// sharkvis `[visualizer] glyphs` charset as a shading ramp.
     pub glyphs: Option<Vec<String>>,
     pub energy: f32,
-    /// Normalized drive `0..1` (see [`drive`]).
-    pub drive: f32,
     pub beat: f32,
     pub speed_mult: f32,
 }
@@ -125,7 +108,6 @@ impl LiveFrame {
             flat: None,
             glyphs: None,
             energy: 0.0,
-            drive: 0.0,
             beat: 0.0,
             speed_mult: 1.0,
         }
@@ -1116,7 +1098,7 @@ impl Sync {
         }
     }
 
-    pub fn poll(&mut self, mode: SharkvisMode, beat_depth: f32, sense: f32) -> LiveFrame {
+    pub fn poll(&mut self, mode: SharkvisMode, beat_depth: f32) -> LiveFrame {
         if mode == SharkvisMode::Off {
             self.monitor = None;
             self.last = LiveFrame::inactive();
@@ -1167,7 +1149,6 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        let drv = drive(energy, sense);
         // Both gradient ends when known (vertical logo gradient mirroring
         // the sharkvis bars); otherwise the single live color, if any.
         let grad = self.gradients;
@@ -1178,9 +1159,8 @@ impl Sync {
             flat,
             glyphs: self.glyphs.clone(),
             energy,
-            drive: drv,
             beat,
-            speed_mult: volume_speed_mult(drv, beat, beat_depth),
+            speed_mult: beat_speed_mult(beat, beat_depth),
         };
         self.last = frame;
         self.last.clone()
@@ -1258,24 +1238,16 @@ mod tests {
     }
 
     #[test]
-    fn lerp_drive_and_speed_math() {
+    fn lerp_and_beat_math() {
         assert_eq!(lerp_rgb((0, 0, 0), (255, 255, 255), 0.5), (128, 128, 128));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 0.0), (0, 0, 0));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 1.0), (255, 0, 0));
-        // Drive: silence maps to 0, small energy already moves a lot.
-        assert!((drive(0.0, DEFAULT_SENSE) - 0.0).abs() < 1e-5);
-        assert!((drive(0.25, DEFAULT_SENSE) - 0.6321).abs() < 1e-3);
-        assert!((drive(1.0, DEFAULT_SENSE) - 0.9817).abs() < 1e-3);
-        // Hotter sense reacts even earlier.
-        assert!(drive(0.1, 8.0) > drive(0.1, 2.0));
-        // Volume follow on drive: 0 -> 0.5x, 0.5 -> 1x, 1 -> 1.5x.
-        assert!((volume_speed_mult(0.0, 0.0, 0.6) - 0.5).abs() < 1e-5);
-        assert!((volume_speed_mult(0.5, 0.0, 0.6) - 1.0).abs() < 1e-5);
-        assert!((volume_speed_mult(1.0, 0.0, 0.6) - 1.5).abs() < 1e-5);
-        // Beat dips on top: full drive + beat = 1.5 * 0.4.
-        assert!((volume_speed_mult(1.0, 1.0, 0.6) - 0.6).abs() < 1e-5);
-        // beat=0 disables the dip entirely.
-        assert!((volume_speed_mult(1.0, 1.0, 0.0) - 1.5).abs() < 1e-5);
+        // No beat: full speed, always.
+        assert!((beat_speed_mult(0.0, 0.6) - 1.0).abs() < 1e-5);
+        // Full beat dips by depth.
+        assert!((beat_speed_mult(1.0, 0.6) - 0.4).abs() < 1e-5);
+        assert!((beat_speed_mult(1.0, 0.0) - 1.0).abs() < 1e-5);
+        assert!((beat_speed_mult(1.0, 99.0) - 0.1).abs() < 1e-5);
     }
 
     #[test]
@@ -1324,7 +1296,7 @@ mod tests {
     #[test]
     fn sync_off_stays_inactive() {
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Off, DEFAULT_BEAT_DEPTH, DEFAULT_SENSE);
+        let f = s.poll(SharkvisMode::Off, DEFAULT_BEAT_DEPTH);
         assert!(!f.active);
         assert!((f.speed_mult - 1.0).abs() < 1e-5);
     }    #[test]
@@ -1334,7 +1306,7 @@ mod tests {
         // Point state away so no live file interferes.
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, DEFAULT_SENSE);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
         assert!(!f.active);
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
@@ -1362,13 +1334,12 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, DEFAULT_SENSE);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
         assert!(f.active);
         assert_eq!(f.grad, None);
         assert_eq!(f.flat, Some((255, 136, 0)), "single live color without gradients");
         assert!((f.beat - 1.0).abs() < 1e-5);
-        assert!((f.drive - 0.9093).abs() < 1e-3, "drive saturates at energy 0.6");
-        assert!((f.speed_mult - 0.5637).abs() < 1e-3, "vol 1.41 * dip 0.4");
+        assert!((f.speed_mult - 0.4).abs() < 1e-5, "beat dips by depth");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
@@ -1392,7 +1363,7 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, DEFAULT_SENSE);
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH);
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 0), (255, 0, 0))), "both gradient ends");
         assert_eq!(f.flat, None);
@@ -1400,8 +1371,8 @@ mod tests {
             f.glyphs,
             Some(vec!["1".to_string(), "2".to_string(), "3".to_string()])
         );
-        assert!((f.drive - 0.8647).abs() < 1e-3);
-        assert!((f.speed_mult - 1.3647).abs() < 1e-3, "volume follow at energy 0.5");
+        assert!((f.beat - 0.0).abs() < 1e-5);
+        assert!((f.speed_mult - 1.0).abs() < 1e-5, "full speed between beats");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");

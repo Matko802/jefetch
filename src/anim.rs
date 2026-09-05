@@ -35,7 +35,6 @@ pub struct AnimConfig {
     pub sharkvis_set: bool,
     pub beat_depth: f32,
     pub grow: f32,
-    pub sense: f32,
     /// True when the animation string / logo config picked an explicit
     /// charset (then sharkvis glyphs must not override it).
     pub shading_explicit: bool,
@@ -65,7 +64,6 @@ impl Default for AnimConfig {
             sharkvis_set: false,
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
-            sense: crate::sharkvis::DEFAULT_SENSE,
             shading_explicit: false,
         }
     }
@@ -75,7 +73,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat", "grow", "sense", "sensitivity",
+    "no-sharkvis", "beat", "grow",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -198,11 +196,6 @@ impl AnimConfig {
             }
             if let Some(v) = extract_number(&low, "grow") {
                 cfg.grow = v.clamp(0.0, crate::sharkvis::MAX_GROW);
-            }
-            if let Some(v) = extract_number(&low, "sense") {
-                cfg.sense = v.clamp(0.5, crate::sharkvis::MAX_SENSE);
-            } else if let Some(v) = extract_number(&low, "sensitivity") {
-                cfg.sense = v.clamp(0.5, crate::sharkvis::MAX_SENSE);
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -1034,9 +1027,6 @@ pub struct RenderFx {
     pub shading: Option<Vec<String>>,
     /// Zoom multiplier around the logo center (`1.0` = none).
     pub scale: f32,
-    /// Music drive `0..1`: breathes the gradient brightness
-    /// (`1.0` = full bright, as without fx).
-    pub drive: f32,
 }
 
 impl Default for RenderFx {
@@ -1051,15 +1041,11 @@ impl RenderFx {
             grad: None,
             shading: None,
             scale: 1.0,
-            drive: 1.0,
         }
     }
 
     pub fn is_none(&self) -> bool {
-        self.grad.is_none()
-            && self.shading.is_none()
-            && (self.scale - 1.0).abs() < 1e-6
-            && (self.drive - 1.0).abs() < 1e-6
+        self.grad.is_none() && self.shading.is_none() && (self.scale - 1.0).abs() < 1e-6
     }
 }
 
@@ -1085,7 +1071,6 @@ pub fn render_frame_with_tint(
         grad: tint.map(|c| (c, c)),
         shading: None,
         scale: 1.0,
-        drive: 1.0,
     };
     render_frame_with_fx(logo, frame, config, render_height, info_line_count, &fx)
 }
@@ -1128,7 +1113,6 @@ pub fn render_cloud_with_tint(
         grad: tint.map(|c| (c, c)),
         shading: None,
         scale: 1.0,
-        drive: 1.0,
     };
     render_cloud_with_fx(cloud, frame, config, render_height, info_line_count, &fx)
 }
@@ -1283,9 +1267,7 @@ pub fn render_cloud_with_fx(
     let full_mask = (1u32 << total_sub) - 1;
 
     // Vertical gradient escapes, one per output row (bottom → top),
-    // mirroring the sharkvis bar gradient. Brightness breathes with the
-    // music drive (0.7x dim when quiet, full when loud). Empty when ungraded.
-    let bright = 0.70 + 0.30 * fx.drive.clamp(0.0, 1.0);
+    // mirroring the sharkvis bar gradient. Empty when ungraded.
     let tint_rows: Vec<String> = match fx.grad {
         Some(((lr, lg, lb), (hr, hg, hb))) => (0..h)
             .map(|y| {
@@ -1294,9 +1276,7 @@ pub fn render_cloud_with_fx(
                 } else {
                     0.0
                 };
-                let mix = |a: u8, b: u8| {
-                    ((a as f32 + (b as f32 - a as f32) * t) * bright + 0.5) as u8
-                };
+                let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
                 format!(
                     "\x1b[38;2;{};{};{}m",
                     mix(lr, hr),
@@ -1907,22 +1887,16 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin y grow=99"));
         assert!((cfg.grow - crate::sharkvis::MAX_GROW).abs() < 1e-5);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin y sense=8"));
-        assert!((cfg.sense - 8.0).abs() < 1e-4);
-        assert!(cfg.spin_y && !cfg.spin_x && !cfg.spin_z);
-
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
         assert!(cfg.shading_explicit);
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=.,-~"));
         assert!(cfg.shading_explicit);
     }
 
-    fn fx_grad() -> RenderFx {
-        RenderFx {
+    fn fx_grad() -> RenderFx {        RenderFx {
             grad: Some(((255, 0, 0), (0, 0, 255))),
             shading: None,
             scale: 1.0,
-            drive: 1.0,
         }
     }
 
@@ -1951,37 +1925,25 @@ mod tests {
     }
 
     #[test]
-    fn dim_drive_dulls_gradient() {
-        fn max_glow(raw: &str) -> u32 {
-            let mut max = 0u32;
-            let mut rest = raw;
-            while let Some(p) = rest.find("\x1b[38;2;") {
-                let esc = &rest[p + "\x1b[38;2;".len()..];
-                let end = esc.find('m').unwrap_or(esc.len());
-                let sum: u32 = esc[..end]
+    fn gradient_stays_full_bright() {
+        // No dimming: the brightest row always reaches full brightness.
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let out = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &fx_grad());
+        let raw = out.lines.join("\n");
+        let mut top = 0u32;
+        let mut rest = raw.as_str();
+        while let Some(p) = rest.find("\x1b[38;2;") {
+            let esc = &rest[p + "\x1b[38;2;".len()..];
+            let end = esc.find('m').unwrap_or(esc.len());
+            top = top.max(
+                esc[..end]
                     .split(';')
                     .filter_map(|s| s.parse::<u32>().ok())
-                    .sum();
-                max = max.max(sum);
-                rest = &rest[p + 1..];
-            }
-            max
+                    .sum(),
+            );
+            rest = &rest[p + 1..];
         }
-        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let full = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &fx_grad());
-        let mut dim_fx = fx_grad();
-        dim_fx.drive = 0.0;
-        let dimmed = render_frame_with_fx(&solid_test_logo(), 5, &cfg, 36, 4, &dim_fx);
-        assert_ne!(full.lines, dimmed.lines, "drive breathes brightness");
-        let full_max = max_glow(&full.lines.join("\n"));
-        let dim_max = max_glow(&dimmed.lines.join("\n"));
-        assert!(full_max > 200, "full drive is bright, got {}", full_max);
-        assert!(
-            dim_max < full_max - 30,
-            "dimmed drive is duller: {} vs {}",
-            dim_max,
-            full_max
-        );
+        assert!(top > 200, "gradient stays bright, got {}", top);
     }
 
     #[test]
@@ -2008,7 +1970,6 @@ mod tests {
                 grad: None,
                 shading: None,
                 scale: 1.2,
-                drive: 1.0,
             },
         );
         assert_ne!(plain.lines, zoomed.lines, "zoom rescales the projection");
@@ -2032,7 +1993,6 @@ mod tests {
                     grad: None,
                     shading: Some(vec!["0".to_string()]),
                     scale: 1.0,
-                    drive: 1.0,
                 },
             );
             let text = joined_text(&out);
@@ -2066,7 +2026,6 @@ mod tests {
                 grad: None,
                 shading: Some(vec!["@".to_string()]),
                 scale: 1.0,
-                drive: 1.0,
             },
         );
         assert_ne!(plain.lines, custom.lines, "custom ramp redraws the logo");
