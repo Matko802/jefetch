@@ -93,6 +93,9 @@ fn parse_physical_mounts(text: &str) -> Vec<String> {
         if mp.starts_with("/run/") && !mp.starts_with("/run/media/") {
             continue;
         }
+        if mp == "/boot" || mp == "/boot/efi" || mp == "/efi" {
+            continue;
+        }
         if !out.iter().any(|m| m == &mp) {
             out.push(mp);
         }
@@ -181,6 +184,7 @@ mod tests {
         /dev/nvme0n1p2 / btrfs rw 0 0\n\
         /dev/nvme0n1p2 /home btrfs rw 0 0\n\
         /dev/nvme0n1p1 /boot vfat rw 0 0\n\
+        /dev/sda1 /mnt/ssd ext4 rw 0 0\n\
         tmpfs /tmp tmpfs rw 0 0\n\
         /dev/loop0 /snap/core squashfs ro 0 0\n\
         overlay /var/lib/docker/overlay2 overlay rw 0 0\n\
@@ -193,7 +197,7 @@ mod tests {
             vec![
                 "/".to_string(),
                 "/home".to_string(),
-                "/boot".to_string(),
+                "/mnt/ssd".to_string(),
                 "/tmp".to_string(),
             ]
         );
