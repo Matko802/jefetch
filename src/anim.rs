@@ -609,8 +609,7 @@ fn build_points(
 ) -> (Vec<Point>, Vec<String>) {
     let mut palette: Vec<String> = Vec::new();
     if !has_ansi {
-        palette.push("37".to_string());
-        palette.push("35".to_string());
+        palette.push("39".to_string());
     } else {
         for row in cells {
             for (_, p) in row {
@@ -824,11 +823,7 @@ fn build_points(
                             let p = &cells[row][col].1;
                             if p.is_empty() { -1 } else { pal_pos(&palette, p) }
                         } else {
-                            if k == 0 || k == layers - 1 {
-                                0
-                            } else {
-                                1
-                            }
+                            0
                         };
                         let (nx, ny, nz) = if k == 0 {
                             (gnx[row][col], gny[row][col], -gnz[row][col])
