@@ -151,9 +151,9 @@ How it works:
   (`color=#rrggbb energy=0..1 beat=0..1`) supplies live energy/beat and
   its color when no gradients are configured.
 - **Beat**: from the state file when present (tempo grid locked from
-  bass kicks — fills soft hits, recalibrates on tempo changes, drops in
-  silence), otherwise from a tiny built-in PulseAudio monitor (same
-  tracking on 8 kHz mono RMS) that only runs while the integration is
-  active.
+  kicks, snares and other onsets across the spectrum — fills soft hits,
+  recalibrates on tempo changes, drops in silence), otherwise from a
+  tiny built-in PulseAudio monitor (same tracking on 8 kHz mono RMS)
+  that only runs while the integration is active.
 
 Next: [Logos](Logos.md) →
