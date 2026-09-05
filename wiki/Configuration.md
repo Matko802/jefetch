@@ -1,12 +1,15 @@
 # Configuration
 
-Optional `config.jsonc` (JSON with `//` comments, trailing commas).
+Everything lives in one `config.jsonc` file. Plain JSON, but you can use
+`//` comments and trailing commas.
+
+jefetch looks for it here, in order:
 
 1. `-c /path/to/config.jsonc`
-2. `~/.config/jefetch/config.jsonc` (auto-created on first run)
-3. Compiled defaults
+2. `~/.config/jefetch/config.jsonc` (created for you on first run)
+3. Built-in defaults
 
-To start fresh: `rm ~/.config/jefetch/config.jsonc && jefetch`.
+Messed it up? `rm ~/.config/jefetch/config.jsonc && jefetch` starts over.
 
 ## Example
 
@@ -61,92 +64,109 @@ To start fresh: `rm ~/.config/jefetch/config.jsonc && jefetch`.
 
 ## Modules
 
-Ordered list shown in output. Bare name or object with options:
+Just the list of lines in your output, top to bottom. Each entry is either
+a bare name or an object with options:
 
 ```jsonc
 { "modules": ["os", { "type": "cpu", "temp": true }, "break", "colors"] }
 ```
 
-`title`, `separator`, `os`, `host`, `kernel`, `uptime`, `packages`, `shell`, `display`, `wm`/`de`, `theme`, `icons`, `font`, `cursor`, `terminal`, `terminalfont`, `cpu`, `gpu`, `memory`, `swap`, `disk`, `localip`/`ip`, `battery`, `locale`, `break`, `colors`.
+All of them: `title`, `separator`, `os`, `host`, `kernel`, `uptime`,
+`packages`, `shell`, `display`, `wm`/`de`, `theme`, `icons`, `font`,
+`cursor`, `terminal`, `terminalfont`, `cpu`, `gpu`, `memory`, `swap`,
+`disk`, `localip`/`ip`, `battery`, `locale`, `break`, `colors`.
 
-- `disk.folders`: one path or a list. Without it, all physical disks.
-- `packages.combined`: one total instead of per-manager lines.
+Two special cases:
+
+- `disk.folders`: give it one path or a list, otherwise it shows every
+  physical disk.
+- `packages.combined`: `true` collapses everything into one total instead
+  of a line per package manager.
+
+You can also reorder at runtime without touching the file:
 
 ```sh
-jefetch --structure "os:kernel:uptime:break:colors"  # override order at runtime
+jefetch --structure "os:kernel:uptime:break:colors"
 ```
 
 ## Display
 
-| Key | Default | Effect |
-|-----|---------|--------|
-| `separator` | `": "` | Between key and value |
-| `keyColor` / `titleColor` | bold cyan / blue | Key and `user@host` colors |
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `separator` | `": "` | Sits between key and value |
+| `keyColor` / `titleColor` | bold cyan / blue | Colors for keys and the `user@host` line |
 | `padding` | `0` | Left padding |
-| `brightColor` | `true` | Bright/bold |
+| `brightColor` | `true` | Bright/bold text |
 
 ## Logo
 
 | Key | Notes |
 |-----|-------|
-| `source` | Builtin id (`jefetch --list-logos`) or `""` to auto-detect |
-| `type` | `"builtin"` / `"none"` / `"file"` (`"source": "~/logo.txt"`) |
-| `color` | `"red"` or per-line `{ "1": "green", "2-4": "blue" }` (`$N` slots work automatically) |
-| `padding` | `4` or `{ top, left, right }` (`right` default `4`) |
-| `animation` | Needs an explicit `speed` or it stays static; `off` disables |
-| `style` / `chars` | `"flat"` or `"3d"`; `"ascii"`, `"blocks"`, or custom ramp — win over `animation` |
-| `sharkvis` | Standalone profile used while sharkvis runs (own speed/axes); base `animation` ignored then |
+| `source` | Builtin id (see `jefetch --list-logos`), or `""` to autodetect |
+| `type` | `"builtin"` / `"none"` / `"file"` (with `"source": "~/logo.txt"`) |
+| `color` | `"red"`, or per-line like `{ "1": "green", "2-4": "blue" }` (`$N` slots just work) |
+| `padding` | `4`, or `{ top, left, right }` (`right` defaults to `4`) |
+| `animation` | Needs an explicit `speed` or the logo won't move; `off` turns it off |
+| `style` / `chars` | `"flat"` or `"3d"`; `"ascii"`, `"blocks"`, or your own ramp. These beat `animation` |
+| `sharkvis` | Its own profile for when sharkvis is running (own speed and axes). Base `animation` is ignored meanwhile |
 
-`jefetch --logo arch` overrides the logo for one run.
+`jefetch --logo arch` swaps the logo for one run.
 
 ## Animation
 
-The logo truly spins in 3D. Static and animated share the same text output.
+The logo actually rotates in 3D. Static output and the animation print the
+same text, so nothing breaks when you pipe it.
 
 ```jsonc
 "animation": "spin y speed=2.0"               // gentle default
-"animation": "spin xyz speed=2.5 speed_z=-1"  // tumble, Z reversed
+"animation": "spin xyz speed=2.5 speed_z=-1"  // tumble with Z reversed
 "animation": "spin z speed=1.5 flat chars=ascii"
 ```
 
-`x` / `y` / `z` in any combo, per-axis speed (negative = reverse).
-`speed=N` sets the pace (refresh rate follows). In a terminal you get the
-live view: `t` pauses/resumes, `q` / `Esc` / `Ctrl-C` quits, `--static` prints one frame.
-Edits to `config.jsonc` apply live.
+Mix `x` / `y` / `z` however you like, each axis takes its own speed and
+negative runs backwards. `speed=N` sets the pace. In a terminal you get the
+live view where `t` pauses, `q` / `Esc` / `Ctrl-C` quits, and `--static`
+prints a single frame. Saving `config.jsonc` applies while it runs.
 
 ## sharkvis music mode
 
-Add `sharkvis` (or a `"sharkvis"` key) and, while `sharkvis` runs, the logo
-follows the music using that profile alone — base `animation` is ignored.
-Audio steers only enabled axes (right-heavy yaws `y` right, left-heavy
-yaws left, matched stereo pitches `x`, energy rolls `z`); quiet holds still:
+Put `sharkvis` in `animation` (or fill in the `"sharkvis"` key) and the logo
+dances while [sharkvis](https://github.com/Matko802/sharkvis) plays, using
+that profile only. Your base `animation` sits out meanwhile.
 
-- Logo keeps its own default colors unless you add `color=sharkvis`,
-  then it follows `gradient_low` → `gradient_high`. Sharkvis charset unless yours wins.
-- Dips per kick, pulses bigger, never dims. `boom=N` sizes up with volume.
-- `motion=continuous` accumulates (default), `motion=revert` winds to a turn then retracts (`retract=N` sets snap-back speed).
+Only the axes you enabled respond to audio: heavy right channel yaws `y`
+right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
+`z`. Silence holds still. Each kick dips the logo, it never dims, and
+`boom=N` makes it swell with volume.
+
+Colors stay the logo's own unless you add `color=sharkvis`, which hands them
+over to sharkvis's `gradient_low` → `gradient_high`. Same deal with
+characters: sharkvis's charset loses if you set your own.
+
+`motion=continuous` (the default) keeps winding up. `motion=revert` winds to
+a turn and snaps back, with `retract=N` controlling how fast.
 
 ```jsonc
 "animation": "spin y speed=2.0 sharkvis"
 { "logo": { "animation": "spin xz flat", "sharkvis": "speed=0 boom=0.3 chars=ascii" } }
 ```
 
-| Value | Effect |
-|-------|--------|
-| `sharkvis` / `=auto` / `=on` | Enable while `sharkvis` runs (default is off) |
-| `sharkvis=off` / `no-sharkvis` | Never integrate |
-| `color=sharkvis` | Logo follows sharkvis colors; without it the logo keeps its defaults |
-| `beat=N` | Dip depth, `0`–`0.9` (default `0.6`) |
-| `boom=N` | Size-up with volume, `0`–`1` |
-| `grow=N` | Pulse depth, `0`–`0.3` (default `0.12`, `0` disables) |
-| `motion` / `retract` / `limit` | `continuous` (default) or `revert`; `retract=N` snap-back speed (`0` holds, default `1`); `limit=N` max wind-up in turns, revert only (default `1`) |
+| Value | What it does |
+|-------|--------------|
+| `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
+| `sharkvis=off` / `no-sharkvis` | Never hook in |
+| `color=sharkvis` | Take colors from sharkvis, otherwise the logo keeps its own |
+| `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
+| `boom=N` | How much it swells with volume, `0`–`1` |
+| `grow=N` | Pulse strength, `0`–`0.3` (default `0.12`, `0` turns it off) |
+| `motion` / `retract` / `limit` | `continuous` (default) or `revert`; `retract=N` is the snap-back speed (`0` holds, default `1`); `limit=N` caps the wind-up in turns, revert only (default `1`) |
 
 ## CLI Overrides
 
-| Flag | Effect |
-|------|--------|
-| `-c <path>` | Explicit config |
-| `--logo <name>` | Logo override for one run |
-| `--no-config` | Ignore configs |
-| `--static` | Static output |
-| `--structure "os:kernel:"` | Module order override |
+| Flag | What it does |
+|------|--------------|
+| `-c <path>` | Use this config file |
+| `--logo <name>` | Different logo for one run |
+| `--no-config` | Skip configs entirely |
+| `--static` | Print once, no animation |
+| `--structure "os:kernel:"` | Reorder modules for one run |
