@@ -15,7 +15,9 @@ jefetch reads an optional `config.jsonc` file (JSONC = JSON with `//` and `/* */
 ```jsonc
 {
     "modules": [
-        "title", "separator", "os", "host", "kernel", "uptime", "packages",
+        "title", "separator", "os", "host", "kernel", "uptime",
+        // set "combined" to true for one total instead of per-manager counts
+        { "type": "packages", "combined": false },
         "shell", "display", "wm", "theme", "icons", "font", "cursor", "terminal",
         "cpu", "gpu", "memory", "swap", "disk", "localip", "locale", "break",
         "colors"
