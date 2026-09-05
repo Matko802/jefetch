@@ -11,12 +11,9 @@ Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](
 
 ## Features
 
-- Drop-in `fastfetch` replacement
-- 530 ASCII logos (all `fastfetch` logos)
-- Areofyl-style 3D spinning logo
-- sharkvis integration: logo takes sharkvis gradient + charset, slows down and grows on the beat
-- Pure Rust, zero crates except `libc`
-- Fully static `musl`
+- Uses Fastfetch logos
+- Musl lib
+- integration with sharkvis
 
 ## Building
 
