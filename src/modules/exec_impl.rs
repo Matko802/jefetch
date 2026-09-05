@@ -776,10 +776,21 @@ fn render_localip(_cfg: &Config) -> Option<ModuleOutput> {
         return None;
     }
     let mut list = ips;
-    if let Some(def) = crate::detection::localip::default_iface() {
-        if let Some(pos) = list.iter().position(|i| i.name == def) {
+    if let Some(src) = crate::detection::localip::outbound_src_ip() {
+        if let Some(pos) = list
+            .iter()
+            .position(|i| i.ipv4.iter().any(|a| a == &src))
+        {
             let only = list.swap_remove(pos);
             list = vec![only];
+        }
+    }
+    if list.len() > 1 {
+        if let Some(def) = crate::detection::localip::default_iface() {
+            if let Some(pos) = list.iter().position(|i| i.name == def) {
+                let only = list.swap_remove(pos);
+                list = vec![only];
+            }
         }
     }
     if list.len() > 1 {

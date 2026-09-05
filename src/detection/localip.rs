@@ -306,6 +306,44 @@ pub fn hostname_hint() -> Option<String> {
     getenv("HOSTNAME").filter(|h| !h.is_empty())
 }
 
+pub fn outbound_src_ip() -> Option<String> {
+    unsafe {
+        let fd = libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0);
+        if fd < 0 {
+            return None;
+        }
+        let mut dst: libc::sockaddr_in = std::mem::zeroed();
+        dst.sin_family = libc::AF_INET as u16;
+        dst.sin_port = 53u16.to_be();
+        dst.sin_addr.s_addr = u32::from_be_bytes([1, 1, 1, 1]);
+        let connected = libc::connect(
+            fd,
+            &dst as *const libc::sockaddr_in as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_in>() as u32,
+        ) == 0;
+        if !connected {
+            libc::close(fd);
+            return None;
+        }
+        let mut local: libc::sockaddr_in = std::mem::zeroed();
+        let mut len = std::mem::size_of::<libc::sockaddr_in>() as u32;
+        let ok = libc::getsockname(
+            fd,
+            &mut local as *mut libc::sockaddr_in as *mut libc::sockaddr,
+            &mut len,
+        ) == 0;
+        libc::close(fd);
+        if !ok {
+            return None;
+        }
+        let ip = format_addr4(local.sin_addr.s_addr);
+        if ip.is_empty() || ip == "0.0.0.0" {
+            return None;
+        }
+        Some(ip)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,12 +376,24 @@ mod tests {
         assert_eq!(parse_default_route(routes).as_deref(), Some("tun0"));
     }
 
-    #[test]
-    fn virtual_names_filtered() {        for n in ["proton0", "ipv6leakintrf0", "vboxnet0", "virbr0", "docker0", "wg0", "tun0"] {
+        #[test]
+    fn virtual_names_filtered() {
+        for n in ["proton0", "ipv6leakintrf0", "vboxnet0", "virbr0", "docker0", "wg0", "tun0"] {
             assert!(is_virtual(n), "{n} is virtual");
         }
         for n in ["enp9s0", "eth0", "wlan0", "eno1"] {
             assert!(!is_virtual(n), "{n} is physical");
+        }
+    }
+
+    #[test]
+    fn outbound_src_ip_is_valid_or_absent() {
+        if let Some(ip) = outbound_src_ip() {
+            let parts: Vec<&str> = ip.split('.').collect();
+            assert_eq!(parts.len(), 4);
+            assert!(parts.iter().all(|p| p.parse::<u8>().is_ok()));
+            assert_ne!(ip, "0.0.0.0");
+            assert_ne!(ip, "127.0.0.1");
         }
     }
 }
