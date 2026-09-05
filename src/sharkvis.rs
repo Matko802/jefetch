@@ -33,7 +33,10 @@ pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
 pub fn boom_mult(boom: f32, speed: f32, beat: f32) -> f32 {
-    let target = (boom / speed.abs().max(1e-6)).max(0.0);
+    if speed.abs() < 1e-6 {
+        return 1.0;
+    }
+    let target = (boom / speed.abs()).max(0.0);
     1.0 + (target - 1.0) * beat.clamp(0.0, 1.0)
 }
 
@@ -1163,6 +1166,7 @@ mod tests {
         assert!((boom_mult(6.0, 2.0, 1.0) - 3.0).abs() < 1e-5);
         assert!((boom_mult(100.0, 10.0, 1.0) - 10.0).abs() < 1e-4);
         assert!((boom_mult(0.0, 10.0, 1.0) - 0.0).abs() < 1e-5);
+        assert!((boom_mult(5.0, 0.0, 1.0) - 1.0).abs() < 1e-5);
     }
 
     #[test]

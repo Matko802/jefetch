@@ -1018,10 +1018,13 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     })
 }
 
+pub const BEAT_BOOST_STEP: f32 = 0.024;
+
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
     pub shading: Option<Vec<String>>,
     pub scale: f32,
+    pub spin_boost: f32,
 }
 
 impl Default for RenderFx {
@@ -1036,11 +1039,15 @@ impl RenderFx {
             grad: None,
             shading: None,
             scale: 1.0,
+            spin_boost: 0.0,
         }
     }
 
     pub fn is_none(&self) -> bool {
-        self.grad.is_none() && self.shading.is_none() && (self.scale - 1.0).abs() < 1e-6
+        self.grad.is_none()
+            && self.shading.is_none()
+            && (self.scale - 1.0).abs() < 1e-6
+            && self.spin_boost.abs() < 1e-6
     }
 }
 
@@ -1066,6 +1073,7 @@ pub fn render_frame_with_tint(
         grad: tint.map(|c| (c, c)),
         shading: None,
         scale: 1.0,
+        spin_boost: 0.0,
     };
     render_frame_with_fx(logo, frame, config, render_height, info_line_count, &fx)
 }
@@ -1108,6 +1116,7 @@ pub fn render_cloud_with_tint(
         grad: tint.map(|c| (c, c)),
         shading: None,
         scale: 1.0,
+        spin_boost: 0.0,
     };
     render_cloud_with_fx(cloud, frame, config, render_height, info_line_count, &fx)
 }
@@ -1166,9 +1175,10 @@ pub fn render_cloud_with_fx(
     let (zbuf, lumbuf, colorbuf, glyphbuf) = (&mut **buf_z, &mut **buf_lum, &mut **buf_col, &mut **buf_glyph);
 
     let mul = frame as f32 * BASE_FPS / config.auto_fps();
-    let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
-    let b = if config.spin_y { mul * 0.06 * config.speed * config.speed_y } else { 0.0 };
-    let c_ang = if config.spin_z { mul * 0.05 * config.speed * config.speed_z } else { 0.0 };
+    let boost = fx.spin_boost;
+    let a = if config.spin_x { mul * 0.04 * config.speed * config.speed_x + boost } else { 0.0 };
+    let b = if config.spin_y { mul * 0.06 * config.speed * config.speed_y + boost } else { 0.0 };
+    let c_ang = if config.spin_z { mul * 0.05 * config.speed * config.speed_z + boost } else { 0.0 };
     let (ca, sa) = (a.cos(), a.sin());
     let (cb, sb) = (b.cos(), b.sin());
     let (cc, sc) = (c_ang.cos(), c_ang.sin());
@@ -1884,10 +1894,12 @@ mod tests {
         assert!(cfg.shading_explicit);
     }
 
-    fn fx_grad() -> RenderFx {        RenderFx {
+    fn fx_grad() -> RenderFx {
+        RenderFx {
             grad: Some(((255, 0, 0), (0, 0, 255))),
             shading: None,
             scale: 1.0,
+            spin_boost: 0.0,
         }
     }
 
@@ -1947,6 +1959,32 @@ mod tests {
     }
 
     #[test]
+    fn spin_boost_rotates_frozen_logo() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=0"));
+        let still = render_frame_with_fx(
+            &solid_test_logo(),
+            7,
+            &cfg,
+            36,
+            4,
+            &RenderFx::none(),
+        );
+        let still2 = render_frame_with_fx(
+            &solid_test_logo(),
+            42,
+            &cfg,
+            36,
+            4,
+            &RenderFx::none(),
+        );
+        assert_eq!(still.lines, still2.lines, "speed=0 base stays frozen");
+        let mut kicked = RenderFx::none();
+        kicked.spin_boost = 0.5;
+        let moved = render_frame_with_fx(&solid_test_logo(), 7, &cfg, 36, 4, &kicked);
+        assert_ne!(still.lines, moved.lines, "beat boost rotates the frozen logo");
+    }
+
+    #[test]
     fn beat_zoom_changes_pose() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let plain = render_frame(&solid_test_logo(), 9, &cfg, 36, 4);
@@ -1960,6 +1998,7 @@ mod tests {
                 grad: None,
                 shading: None,
                 scale: 1.2,
+                spin_boost: 0.0,
             },
         );
         assert_ne!(plain.lines, zoomed.lines, "zoom rescales the projection");
@@ -1983,6 +2022,7 @@ mod tests {
                     grad: None,
                     shading: Some(vec!["0".to_string()]),
                     scale: 1.0,
+                    spin_boost: 0.0,
                 },
             );
             let text = joined_text(&out);
@@ -2015,6 +2055,7 @@ mod tests {
                 grad: None,
                 shading: Some(vec!["@".to_string()]),
                 scale: 1.0,
+                spin_boost: 0.0,
             },
         );
         assert_ne!(plain.lines, custom.lines, "custom ramp redraws the logo");
