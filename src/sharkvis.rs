@@ -80,10 +80,11 @@ pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
 /// Beat target speed from `boom=N`: on a full beat the spin moves toward
-/// `boom` (below `speed` = dip, above = faster, clamped to 0..4x).
-/// Off beat the multiplier is always 1.
+/// `boom` as an absolute speed — below `speed` it dips (`speed=10
+/// boom=5`), above it accelerates (`speed=10 boom=100`). Off beat the
+/// multiplier is always 1; the beat envelope ramps between them.
 pub fn boom_mult(boom: f32, speed: f32, beat: f32) -> f32 {
-    let target = (boom / speed.abs().max(1e-6)).clamp(0.0, 4.0);
+    let target = (boom / speed.abs().max(1e-6)).max(0.0);
     1.0 + (target - 1.0) * beat.clamp(0.0, 1.0)
 }
 
@@ -1279,12 +1280,12 @@ mod tests {
         assert!((boom_mult(5.0, 10.0, 1.0) - 0.5).abs() < 1e-5);
         // Off beat always 1.
         assert!((boom_mult(5.0, 10.0, 0.0) - 1.0).abs() < 1e-5);
-        // Above speed spins faster: speed=2 boom=6 triples.
+        // Above speed accelerates: speed=2 boom=6 triples.
         assert!((boom_mult(6.0, 2.0, 1.0) - 3.0).abs() < 1e-5);
+        // Absolute value, no ceiling: speed=10 boom=100 goes 10x.
+        assert!((boom_mult(100.0, 10.0, 1.0) - 10.0).abs() < 1e-4);
         // boom=0 stops dead.
         assert!((boom_mult(0.0, 10.0, 1.0) - 0.0).abs() < 1e-5);
-        // Clamped to 4x.
-        assert!((boom_mult(99.0, 10.0, 1.0) - 4.0).abs() < 1e-5);
     }
 
     #[test]
