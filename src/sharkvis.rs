@@ -522,6 +522,134 @@ impl Drop for BeatMonitor {
     }
 }
 
+struct BeatTracker {
+    avg: f32,
+    peak: f32,
+    prev: f32,
+    beat: f32,
+    now: f32,
+    onsets: [f32; 8],
+    n: usize,
+    period: f32,
+    next: f32,
+    misses: f32,
+}
+
+impl BeatTracker {
+    fn new() -> BeatTracker {
+        BeatTracker {
+            avg: 0.0,
+            peak: 0.0,
+            prev: 0.0,
+            beat: 0.0,
+            now: 0.0,
+            onsets: [0.0; 8],
+            n: 0,
+            period: 0.0,
+            next: 0.0,
+            misses: 0.0,
+        }
+    }
+
+    fn period(&self) -> f32 {
+        self.period
+    }
+
+    fn step(&mut self, energy: f32, dt: f32) -> f32 {
+        let dt = dt.clamp(0.001, 1.0);
+        self.now += dt;
+        let e = energy.clamp(0.0, 1.0);
+        self.avg += (e - self.avg) * (1.0 - (-dt * 1.5).exp());
+        self.peak = e.max(self.peak * (-dt * 0.8).exp());
+        let range = (self.peak - self.avg).max(0.05);
+        let strength = ((e - self.avg) / range).clamp(0.0, 1.0);
+        if strength > 0.55 && e > 0.05 && e > self.prev {
+            self.prev = e;
+            self.push_onset();
+            self.beat = 1.0;
+        } else {
+            self.prev = e;
+            if self.period > 0.0 {
+                let window = 0.12 * self.period;
+                if self.now >= self.next - window && strength > 0.25 && e > 0.05 {
+                    self.beat = 1.0;
+                    self.misses = 0.0;
+                    self.next += self.period;
+                } else {
+                    self.beat *= (-dt * 5.0).exp();
+                    if self.now > self.next + window {
+                        self.misses += 1.0;
+                        self.next += self.period;
+                        if self.misses >= 4.0 {
+                            self.period = 0.0;
+                        }
+                    }
+                }
+            } else {
+                self.beat *= (-dt * 5.0).exp();
+            }
+        }
+        self.beat.clamp(0.0, 1.0)
+    }
+
+    fn push_onset(&mut self) {
+        let t = self.now;
+        if self.n < 8 {
+            self.onsets[self.n] = t;
+            self.n += 1;
+        } else {
+            self.onsets.copy_within(1.., 0);
+            self.onsets[7] = t;
+        }
+        if self.n < 5 {
+            return;
+        }
+        if let Some(p) = estimate_period(&self.onsets[..self.n]) {
+            if self.period <= 0.0 || (p - self.period).abs() / self.period > 0.15 {
+                self.period = p;
+                self.next = t + p;
+                self.misses = 0.0;
+            } else {
+                let window = 0.12 * self.period;
+                if (self.next - t).abs() <= window {
+                    self.next = t + self.period;
+                    self.misses = 0.0;
+                }
+            }
+        }
+    }
+}
+
+fn estimate_period(times: &[f32]) -> Option<f32> {
+    let mut iois = [0.0f32; 8];
+    let mut n = 0usize;
+    for w in times.windows(2) {
+        let d = w[1] - w[0];
+        if d > 0.05 && n < 8 {
+            iois[n] = d;
+            n += 1;
+        }
+    }
+    if n < 3 {
+        return None;
+    }
+    for i in 1..n {
+        let mut j = i;
+        while j > 0 && iois[j] < iois[j - 1] {
+            iois.swap(j, j - 1);
+            j -= 1;
+        }
+    }
+    let mut p = iois[n / 2].clamp(0.2, 1.5);
+    while p > 0.65 {
+        p /= 2.0;
+    }
+    while p < 0.30 {
+        p *= 2.0;
+    }
+    Some(p)
+}
+
 fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBool>) {
     let mut client = match BeatClient::connect("jefetch-beat") {
         Ok(c) => c,
@@ -546,10 +674,8 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
     };
     let mut raw = vec![0u8; BEAT_WINDOW * 2];
     let mut energy = 0.0f32;
-    let mut avg = 0.0f32;
-    let mut peak = 0.0f32;
-    let mut prev = 0.0f32;
-    let mut beat = 0.0f32;
+    let mut tracker = BeatTracker::new();
+    let window_dt = BEAT_WINDOW as f32 / BEAT_RATE as f32;
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
@@ -582,16 +708,7 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
         let rms = (sum / BEAT_WINDOW as f32).sqrt();
         let target = (rms * 4.0).clamp(0.0, 1.0);
         energy += (target - energy) * 0.4;
-        avg += (energy - avg) * 0.05;
-        peak = energy.max(peak * 0.995);
-        let range = (peak - avg).max(0.05);
-        let strength = ((energy - avg) / range).clamp(0.0, 1.0);
-        if strength > 0.55 && energy > 0.05 && energy > prev {
-            beat = 1.0;
-        } else {
-            beat *= 0.92;
-        }
-        prev = energy;
+        let beat = tracker.step(energy, window_dt);
         sample.energy_bits.store(energy.to_bits(), Ordering::Relaxed);
         sample.beat_bits.store(beat.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         sample.updated_ms.store(now_ms(), Ordering::Relaxed);
@@ -1279,6 +1396,36 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn tracker_locks_and_unlocks() {
+        let dt = 1.0 / 60.0;
+        let mut tr = BeatTracker::new();
+        for _ in 0..60 {
+            tr.step(0.15, dt);
+        }
+        for _ in 0..8 {
+            tr.step(0.7, dt);
+            for _ in 1..30 {
+                tr.step(0.15, dt);
+            }
+        }
+        assert!((tr.period() - 0.5).abs() < 0.05, "locks 120bpm, got {}", tr.period());
+        let mut filled = 0;
+        for _ in 0..4 {
+            if tr.step(0.3, dt) == 1.0 {
+                filled += 1;
+            }
+            for _ in 1..30 {
+                tr.step(0.15, dt);
+            }
+        }
+        assert!(filled >= 3, "soft kicks fire on grid, got {}", filled);
+        for _ in 0..(60 * 4) {
+            tr.step(0.12, dt);
+        }
+        assert_eq!(tr.period(), 0.0, "lock drops without support");
     }
 
     #[test]
