@@ -323,6 +323,22 @@ mod tests {
     }
 
     #[test]
+    fn slash1_pair_beats_plain_default() {
+        let routes = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n\
+            enp9s0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\n\
+            proton0\t00000000\t00000000\t0003\t0\t0\t50\t80000000\n\
+            proton0\t80000000\t00000000\t0003\t0\t0\t50\t80000000\n";
+        assert_eq!(parse_default_route(routes).as_deref(), Some("proton0"));
+    }
+
+    #[test]
+    fn lone_slash1_still_counts() {
+        let routes = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n\
+            tun0\t80000000\t00000000\t0003\t0\t0\t10\t80000000\n";
+        assert_eq!(parse_default_route(routes).as_deref(), Some("tun0"));
+    }
+
+    #[test]
     fn virtual_names_filtered() {        for n in ["proton0", "ipv6leakintrf0", "vboxnet0", "virbr0", "docker0", "wg0", "tun0"] {
             assert!(is_virtual(n), "{n} is virtual");
         }
@@ -338,22 +354,50 @@ pub fn default_iface() -> Option<String> {
 }
 
 fn parse_default_route(text: &str) -> Option<String> {
-    let mut best: Option<(u64, String)> = None;
+    let mut best_def: Option<(u64, String)> = None;
+    let mut low1: Option<(u64, String)> = None;
+    let mut high1: Option<(u64, String)> = None;
     for line in text.lines().skip(1) {
         let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() < 8 || f[1] != "00000000" {
+        if f.len() < 8 {
             continue;
         }
+        let dest = u32::from_str_radix(f[1], 16).unwrap_or(u32::MAX);
+        let mask = u32::from_str_radix(f[7], 16).unwrap_or(0);
         let metric = u64::from_str_radix(f[6], 10).unwrap_or(u64::MAX);
-        let replace = match &best {
-            Some((m, _)) => metric < *m,
-            None => true,
+        let consider = |slot: &mut Option<(u64, String)>| {
+            let replace = match slot {
+                Some((m, _)) => metric < *m,
+                None => true,
+            };
+            if replace {
+                *slot = Some((metric, f[0].to_string()));
+            }
         };
-        if replace {
-            best = Some((metric, f[0].to_string()));
+        if dest == 0 && mask == 0 {
+            consider(&mut best_def);
+        } else if dest == 0 && mask == 0x80000000 {
+            consider(&mut low1);
+        } else if dest == 0x80000000 && mask == 0x80000000 {
+            consider(&mut high1);
         }
     }
-    best.map(|(_, name)| name)
+    match (&low1, &high1) {
+        (Some((lm, ln)), Some((hm, hn))) => {
+            if ln == hn {
+                return Some(ln.clone());
+            }
+            return Some(if lm <= hm { ln.clone() } else { hn.clone() });
+        }
+        _ => {}
+    }
+    if let Some((_, name)) = best_def {
+        return Some(name);
+    }
+    if let Some((_, name)) = low1 {
+        return Some(name);
+    }
+    high1.map(|(_, name)| name)
 }
 
 pub fn is_virtual(name: &str) -> bool {
