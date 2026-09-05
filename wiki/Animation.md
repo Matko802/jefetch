@@ -134,7 +134,7 @@ jefetch borrows its look and groove:
 | `sharkvis=on` | Same as `auto`: still needs the running process, no exceptions |
 | `sharkvis=off` / `no-sharkvis` | Never integrate (default) |
 | `beat=N` | Slowdown dip on the beat, `0`–`0.9` (default `0.6`) |
-| `slow=N` | Absolute slowed speed on a full beat — `speed=10 slow=5` dips to 5 (wins over `beat=`) |
+| `boom=N` | Beat target speed — below `speed` dips (e.g. `speed=10 boom=5`), above spins faster (up to 4x, e.g. `speed=2 boom=6`); wins over `beat=` |
 | `grow=N` | Pulse-bigger depth on the beat, `0`–`0.3` (default `0.12`, `0` disables) |
 
 Or as a separate logo key (the animation string wins when both are set):

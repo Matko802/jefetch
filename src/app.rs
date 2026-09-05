@@ -358,12 +358,7 @@ impl App {
             if animated {
 
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
-                    let depth = crate::sharkvis::dip_depth(
-                        anim_cfg.beat_depth,
-                        anim_cfg.slow,
-                        anim_cfg.speed,
-                    );
-                    shark_live = shark_sync.poll(anim_cfg.sharkvis, depth);
+                    shark_live = shark_sync.poll(anim_cfg.sharkvis, anim_cfg.beat_depth);
                     shark_polled = std::time::Instant::now();
                 } else {
                     // Keep the cached frame; Sync throttles the /proc scan
@@ -371,7 +366,17 @@ impl App {
                     // re-reads on every drawn frame.
                     shark_live = shark_sync.last();
                 }
-                spin_phase += f64::from(shark_live.speed_mult);
+                // Beat speed: `boom=N` moves toward N on a kick (below
+                // speed = dip, above = faster), else the `beat=` dip.
+                let beat_mult = match anim_cfg.boom {
+                    Some(b) => crate::sharkvis::boom_mult(
+                        b,
+                        anim_cfg.speed,
+                        shark_live.beat,
+                    ),
+                    None => shark_live.speed_mult,
+                };
+                spin_phase += f64::from(beat_mult);
                 let frame = spin_phase as usize;
                 // sharkvis look: vertical gradient (low → high), charset
                 // ramp unless the user picked one, beat zoom.

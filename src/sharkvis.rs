@@ -79,14 +79,12 @@ impl SharkvisMode {
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
 
-/// Effective dip depth for a frame. `slow` (from `slow=N`) is an absolute
-/// slowed speed: `speed=10 slow=5` dips to half speed on a full beat.
-/// It wins over the relative `beat=` depth when present.
-pub fn dip_depth(beat_depth: f32, slow: Option<f32>, speed: f32) -> f32 {
-    match slow {
-        Some(s) => (1.0 - s / speed.abs().max(1e-6)).clamp(0.0, 1.0),
-        None => beat_depth.clamp(0.0, MAX_BEAT_DEPTH),
-    }
+/// Beat target speed from `boom=N`: on a full beat the spin moves toward
+/// `boom` (below `speed` = dip, above = faster, clamped to 0..4x).
+/// Off beat the multiplier is always 1.
+pub fn boom_mult(boom: f32, speed: f32, beat: f32) -> f32 {
+    let target = (boom / speed.abs().max(1e-6)).clamp(0.0, 4.0);
+    1.0 + (target - 1.0) * beat.clamp(0.0, 1.0)
 }
 
 /// Speed reacts to bass beats only: full speed between kicks, dipping to
@@ -1276,16 +1274,17 @@ mod tests {
     }
 
     #[test]
-    fn dip_depth_prefers_slow() {
-        // speed=10 slow=5 dips to half on a full beat.
-        assert!((dip_depth(0.6, Some(5.0), 10.0) - 0.5).abs() < 1e-5);
-        // slow=0 stops dead.
-        assert!((dip_depth(0.6, Some(0.0), 10.0) - 1.0).abs() < 1e-5);
-        // slow above speed means no dip.
-        assert!((dip_depth(0.6, Some(20.0), 10.0) - 0.0).abs() < 1e-5);
-        // No slow: plain beat depth, clamped.
-        assert!((dip_depth(0.6, None, 10.0) - 0.6).abs() < 1e-5);
-        assert!((dip_depth(99.0, None, 10.0) - MAX_BEAT_DEPTH).abs() < 1e-5);
+    fn boom_mult_math() {
+        // speed=10 boom=5 dips to half on a full beat.
+        assert!((boom_mult(5.0, 10.0, 1.0) - 0.5).abs() < 1e-5);
+        // Off beat always 1.
+        assert!((boom_mult(5.0, 10.0, 0.0) - 1.0).abs() < 1e-5);
+        // Above speed spins faster: speed=2 boom=6 triples.
+        assert!((boom_mult(6.0, 2.0, 1.0) - 3.0).abs() < 1e-5);
+        // boom=0 stops dead.
+        assert!((boom_mult(0.0, 10.0, 1.0) - 0.0).abs() < 1e-5);
+        // Clamped to 4x.
+        assert!((boom_mult(99.0, 10.0, 1.0) - 4.0).abs() < 1e-5);
     }
 
     #[test]
