@@ -249,7 +249,6 @@ impl App {
         let mut yaw_phase: f64 = 0.0;
         let mut pitch_phase: f64 = 0.0;
         let mut roll_phase: f64 = 0.0;
-        let mut spring = [0.0f64; 3];
         let mut last_fx = std::time::Instant::now();
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
@@ -378,31 +377,27 @@ impl App {
                     }
                     let (yaw_step, pitch_step) =
                         crate::anim::stereo_spin(shark_live.left, shark_live.right);
+                    let fx_now = std::time::Instant::now();
+                    let dt = fx_now
+                        .duration_since(last_fx)
+                        .as_secs_f32()
+                        .clamp(0.001, 0.5);
+                    last_fx = fx_now;
                     if anim_cfg.motion == crate::anim::Motion::Revert {
-                        yaw_phase = 0.0;
-                        pitch_phase = 0.0;
-                        roll_phase = 0.0;
-                        let fx_now = std::time::Instant::now();
-                        let dt = fx_now
-                            .duration_since(last_fx)
-                            .as_secs_f32()
-                            .clamp(0.001, 0.5);
-                        last_fx = fx_now;
-                        let targets = crate::anim::revert_targets(
-                            shark_live.left,
-                            shark_live.right,
-                            shark_live.energy,
-                        );
-                        for i in 0..3 {
-                            spring[i] = crate::anim::spring_step(
-                                spring[i],
-                                targets[i],
-                                dt,
-                                crate::anim::REVERT_ATTACK,
-                                crate::anim::REVERT_RELEASE,
-                            );
-                        }
-                        fx.audio = [spring[0] as f32, spring[1] as f32, spring[2] as f32];
+                        yaw_phase = crate::anim::revert_step(yaw_phase, f64::from(yaw_step), dt);
+                        pitch_phase =
+                            crate::anim::revert_step(pitch_phase, f64::from(pitch_step), dt);
+                        let roll_step = if shark_live.energy > crate::anim::AUDIO_FLOOR {
+                            f64::from(shark_live.energy) * f64::from(crate::anim::AUDIO_ROLL)
+                        } else {
+                            0.0
+                        };
+                        roll_phase = crate::anim::revert_step(roll_phase, roll_step, dt);
+                        fx.audio = [
+                            pitch_phase as f32,
+                            yaw_phase as f32,
+                            roll_phase as f32,
+                        ];
                     } else {
                         yaw_phase += f64::from(yaw_step);
                         pitch_phase += f64::from(pitch_step);

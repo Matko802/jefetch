@@ -1167,11 +1167,8 @@ pub const AUDIO_PITCH: f32 = 0.10;
 pub const AUDIO_ROLL: f32 = 0.06;
 pub const AUDIO_FLOOR: f32 = 0.05;
 
-pub const REVERT_YAW: f32 = 0.6;
-pub const REVERT_PITCH: f32 = 0.5;
-pub const REVERT_ROLL: f32 = 0.4;
-pub const REVERT_ATTACK: f32 = 14.0;
-pub const REVERT_RELEASE: f32 = 4.0;
+pub const REVERT_LIMIT: f64 = 6.2832;
+pub const REVERT_TAU: f32 = 1.2;
 
 pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     let l = left.clamp(0.0, 1.0);
@@ -1191,27 +1188,9 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     )
 }
 
-pub fn revert_targets(left: f32, right: f32, energy: f32) -> [f32; 3] {
-    let l = left.clamp(0.0, 1.0);
-    let r = right.clamp(0.0, 1.0);
-    let e = energy.clamp(0.0, 1.0);
-    let sum = l + r;
-    if sum < 1e-3 || e < AUDIO_FLOOR {
-        return [0.0, 0.0, 0.0];
-    }
-    let bal = (r - l) / sum;
-    let mono = 1.0 - bal.abs();
-    [
-        mono * e * REVERT_PITCH,
-        bal * e * REVERT_YAW,
-        e * REVERT_ROLL,
-    ]
-}
-
-pub fn spring_step(pos: f64, target: f32, dt: f32, attack: f32, release: f32) -> f64 {
-    let rate = if target as f64 > pos { attack } else { release };
-    let k = 1.0 - (-dt.max(0.0) * rate).exp();
-    pos + (target as f64 - pos) * k as f64
+pub fn revert_step(acc: f64, step: f64, dt: f32) -> f64 {
+    let wound = (acc + step).clamp(-REVERT_LIMIT, REVERT_LIMIT);
+    wound * (-dt.max(0.0) / REVERT_TAU).exp() as f64
 }
 
 pub struct RenderFx {
@@ -2145,17 +2124,21 @@ mod tests {
     }
 
     #[test]
-    fn revert_targets_and_spring() {
-        let t = revert_targets(0.1, 0.7, 0.6);
-        assert!(t[1] > 0.0, "right-heavy yaws right");
-        assert!(t[0] >= 0.0 && t[2] >= 0.0);
-        assert_eq!(revert_targets(0.0, 0.0, 0.0), [0.0, 0.0, 0.0]);
-        let mut pos = 0.0;
-        pos = spring_step(pos, 0.5, 0.033, REVERT_ATTACK, REVERT_RELEASE);
-        assert!(pos > 0.1, "fast attack rises, got {}", pos);
-        let held = pos;
-        pos = spring_step(pos, 0.0, 0.5, REVERT_ATTACK, REVERT_RELEASE);
-        assert!(pos < held * 0.3, "slow release falls back, got {}", pos);
+    fn revert_winds_to_limit_then_retracts() {
+        let mut acc = 0.0;
+        for _ in 0..400 {
+            acc = revert_step(acc, 0.15, 0.033);
+        }
+        assert!(acc > 5.0 && acc <= REVERT_LIMIT + 1e-6, "winds near limit, got {}", acc);
+        for _ in 0..400 {
+            acc = revert_step(acc, 0.0, 0.033);
+        }
+        assert!(acc.abs() < 0.05, "retracts to rest, got {}", acc);
+        let mut neg = 0.0;
+        for _ in 0..400 {
+            neg = revert_step(neg, -0.15, 0.033);
+        }
+        assert!(neg < -5.0 && neg >= -REVERT_LIMIT - 1e-6, "winds negative, got {}", neg);
     }
 
     #[test]

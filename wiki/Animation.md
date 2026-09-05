@@ -158,7 +158,7 @@ animation while sharkvis runs, per-key over `animation` (explicit
 | `boom=N` | Bass size-up `0`–`1` (e.g. `boom=0.3` grows to 1.3x on full bass) |
 | `grow=N` | Pulse-bigger depth on the beat, `0`–`0.3` (default `0.12`, `0` disables) |
 | `motion=continuous` | Reactive spin accumulates forever (default) |
-| `motion=revert` | Bars-style: kicks push the logo off its rest pose and it eases back (also bare `revert`) |
+| `motion=revert` | Bars-style: winds up toward a full turn while the music plays, eases back to rest when quiet (also bare `revert`) |
 
 Or as a separate logo key (the animation string wins when both are set):
 
