@@ -274,3 +274,62 @@ fn flags_for(ifname: &str) -> String {
 pub fn hostname_hint() -> Option<String> {
     getenv("HOSTNAME").filter(|h| !h.is_empty())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROUTES: &str = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n\
+        enp9s0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\n\
+        proton0\t00000000\t00000000\t0003\t0\t0\t50\t00000000\n\
+        enp9s0\t0001A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\n";
+
+    #[test]
+    fn default_route_picks_lowest_metric() {
+        assert_eq!(parse_default_route(ROUTES).as_deref(), Some("proton0"));
+        assert_eq!(parse_default_route("Iface\tDestination\n"), None);
+        assert_eq!(parse_default_route(""), None);
+    }
+
+    #[test]
+    fn virtual_names_filtered() {
+        for n in ["proton0", "ipv6leakintrf0", "vboxnet0", "virbr0", "docker0", "wg0", "tun0"] {
+            assert!(is_virtual(n), "{n} is virtual");
+        }
+        for n in ["enp9s0", "eth0", "wlan0", "eno1"] {
+            assert!(!is_virtual(n), "{n} is physical");
+        }
+    }
+}
+
+pub fn default_iface() -> Option<String> {
+    let text = std::fs::read_to_string("/proc/net/route").ok()?;
+    parse_default_route(&text)
+}
+
+fn parse_default_route(text: &str) -> Option<String> {
+    let mut best: Option<(u64, String)> = None;
+    for line in text.lines().skip(1) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 8 || f[1] != "00000000" {
+            continue;
+        }
+        let metric = u64::from_str_radix(f[6], 10).unwrap_or(u64::MAX);
+        let replace = match &best {
+            Some((m, _)) => metric < *m,
+            None => true,
+        };
+        if replace {
+            best = Some((metric, f[0].to_string()));
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+pub fn is_virtual(name: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "docker", "veth", "virbr", "vmnet", "br-", "proton", "wg", "tun", "tap", "zt",
+        "tailscale", "ipv6leak", "vboxnet", "vmbr", "lxc", "qemu", "podman",
+    ];
+    PREFIXES.iter().any(|p| name.starts_with(p))
+}

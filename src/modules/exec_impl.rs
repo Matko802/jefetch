@@ -775,8 +775,24 @@ fn render_localip(_cfg: &Config) -> Option<ModuleOutput> {
     if ips.is_empty() {
         return None;
     }
+    let mut list = ips;
+    if let Some(def) = crate::detection::localip::default_iface() {
+        if let Some(pos) = list.iter().position(|i| i.name == def) {
+            let only = list.swap_remove(pos);
+            list = vec![only];
+        }
+    }
+    if list.len() > 1 {
+        let filtered: Vec<_> = std::mem::take(&mut list)
+            .into_iter()
+            .filter(|i| !crate::detection::localip::is_virtual(&i.name))
+            .collect();
+        if !filtered.is_empty() {
+            list = filtered;
+        }
+    }
     let mut values = Vec::new();
-    for i in ips {
+    for i in list {
         let mut v = i.name.clone();
         if !i.ipv4.is_empty() {
             v.push_str(&format!(" ({})", i.ipv4.join(", ")));
