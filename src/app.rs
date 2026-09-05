@@ -52,16 +52,6 @@ impl App {
                     self.config = cfg;
                     return;
                 }
-                let legacy = format!("{}/sharkfetch/config.jsonc", dir);
-                if std::path::Path::new(&legacy).exists() {
-                    let _ = std::fs::create_dir_all(format!("{}/jefetch", dir));
-                    if std::fs::copy(&legacy, &candidate_jsonc).is_ok() {
-                        if let Some(cfg) = load_config_file(&candidate_jsonc) {
-                            self.config = cfg;
-                            return;
-                        }
-                    }
-                }
             }
 
         }
