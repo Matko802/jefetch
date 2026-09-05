@@ -118,9 +118,10 @@ jefetch borrows its look and groove:
 - **Beat**: the spin dips on each kick (`speed × (1 − depth × beat)`)
   and the logo pulses bigger (`scale = 1 + grow × beat`). Brightness
   never dims — quiet still shows full color.
-- **Direction**: the music steers the logo across all axes — right-heavy
-  sound yaws right, left-heavy yaws left, matched stereo pitches up and
-  down, overall energy rolls. Audio motion applies on top of the idle
+- **Direction**: the music steers the enabled spin axes — right-heavy
+  sound yaws a `y` spin right, left-heavy yaws it left, matched stereo
+  pitches an `x` spin up and down, overall energy rolls a `z` spin.
+  Axes without spin stay still. Audio motion applies on top of the idle
   spin, so even `speed=0` dances.
 - **Expand**: `boom=N` sizes the logo up with the volume
   (`scale = 1 + boom × energy`, `0`–`1`).

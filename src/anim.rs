@@ -1193,10 +1193,22 @@ pub fn render_cloud_with_fx(
 
     let mul = frame as f32 * BASE_FPS / config.auto_fps();
     let boost = fx.audio;
-    let ax = if config.spin_x { mul * 0.04 * config.speed * config.speed_x } else { 0.0 };
-    let ay = if config.spin_y { mul * 0.06 * config.speed * config.speed_y } else { 0.0 };
-    let az = if config.spin_z { mul * 0.05 * config.speed * config.speed_z } else { 0.0 };
-    let (a, b, c_ang) = (ax + boost[0], ay + boost[1], az + boost[2]);
+    let ax = if config.spin_x {
+        mul * 0.04 * config.speed * config.speed_x + boost[0]
+    } else {
+        0.0
+    };
+    let ay = if config.spin_y {
+        mul * 0.06 * config.speed * config.speed_y + boost[1]
+    } else {
+        0.0
+    };
+    let az = if config.spin_z {
+        mul * 0.05 * config.speed * config.speed_z + boost[2]
+    } else {
+        0.0
+    };
+    let (a, b, c_ang) = (ax, ay, az);
     let (ca, sa) = (a.cos(), a.sin());
     let (cb, sb) = (b.cos(), b.sin());
     let (cc, sc) = (c_ang.cos(), c_ang.sin());
@@ -2027,6 +2039,16 @@ mod tests {
         let a = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
         let b = render_frame(&solid_test_logo(), 11.0, &cfg, 36, 4);
         assert_ne!(a.lines, b.lines, "phase advances the pose");
+    }
+
+    #[test]
+    fn audio_ignores_disabled_axes() {
+        let cfg = AnimConfig::from_animation_str(Some("spin z speed=0"));
+        let plain = render_frame_with_fx(&solid_test_logo(), 7.0, &cfg, 36, 4, &RenderFx::none());
+        let mut noisy = RenderFx::none();
+        noisy.audio = [0.5, 0.5, 0.0];
+        let out = render_frame_with_fx(&solid_test_logo(), 7.0, &cfg, 36, 4, &noisy);
+        assert_eq!(plain.lines, out.lines, "disabled axes stay still");
     }
 
     #[test]
