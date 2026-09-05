@@ -3,15 +3,6 @@
 Same static `musl` binary every way. Needs Linux x86_64, `cargo` + `rustup` (or Nix).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Matko802/jefetch/main/install.sh | sh
-```
-
-Or grab the static binary for your arch from
-[Releases](https://github.com/Matko802/jefetch/releases) (`jefetch-linux-x86_64.tar.gz`,
-`jefetch-linux-aarch64.tar.gz`) and copy `jefetch` to `/usr/local/bin`.
-Updating is the same command again.
-
-```sh
 nix run github:Matko802/jefetch                      # one-off
 git clone https://github.com/Matko802/jefetch && cd jefetch
 make deps && make && sudo make install               # /usr/local/bin/jefetch
