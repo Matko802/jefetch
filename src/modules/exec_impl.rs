@@ -368,13 +368,7 @@ fn render_packages(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> 
 fn format_packages(amounts: &[(String, usize)], combined: bool) -> Vec<String> {
     if combined {
         let total: usize = amounts.iter().map(|(_, n)| n).sum();
-        let mut out = vec![total.to_string()];
-        if amounts.len() > 1 {
-            for (_, n) in amounts {
-                out.push(n.to_string());
-            }
-        }
-        out
+        vec![total.to_string()]
     } else {
         vec![amounts
             .iter()
@@ -1593,7 +1587,7 @@ mod tests {
     fn packages_combined_totals() {
         assert_eq!(
             format_packages(&sample_amounts(), true),
-            vec!["2206".to_string(), "7".to_string(), "2199".to_string(),]
+            vec!["2206".to_string()]
         );
         assert_eq!(format_packages(&[], true), vec!["0".to_string()]);
     }
