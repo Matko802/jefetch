@@ -279,7 +279,7 @@ impl App {
         let mut refresh_busy: Option<u64> = None;
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
-            print!("\x1b[?25h\x1b[0m\x1b[2J\x1b[H");
+            print!("\x1b[?25h\x1b[0m\n");
             let _ = std::io::Write::flush(&mut std::io::stdout());
             if is_tty && tty_fd != -1 {
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, orig_term); }
@@ -1135,7 +1135,7 @@ static mut LIVE_SAVED_TERM: Option<libc::termios> = None;
 
 extern "C" fn live_signal_restore(sig: libc::c_int) {
     unsafe {
-        let seq = b"\x1b[?25h\x1b[0m\x1b[2J\x1b[H";
+        let seq = b"\x1b[?25h\x1b[0m\n";
         let _ = libc::write(
             libc::STDOUT_FILENO,
             seq.as_ptr() as *const libc::c_void,
