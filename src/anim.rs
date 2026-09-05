@@ -37,6 +37,7 @@ pub struct AnimConfig {
     pub grow: f32,
     pub boom: Option<f32>,
     pub shading_explicit: bool,
+    pub motion: Motion,
 }
 
 impl Default for AnimConfig {
@@ -65,6 +66,7 @@ impl Default for AnimConfig {
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
             shading_explicit: false,
+            motion: Motion::default(),
         }
     }
 }
@@ -73,7 +75,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat", "grow", "boom",
+    "no-sharkvis", "beat", "grow", "boom", "motion",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -198,6 +200,15 @@ impl AnimConfig {
             }
             if let Some(v) = extract_number(&low, "boom") {
                 cfg.boom = Some(v.clamp(0.0, 1.0));
+            }
+            if let Some(v) = extract_word(&low, raw, "motion", true) {
+                if let Some(m) = Motion::parse_value(&v) {
+                    cfg.motion = m;
+                }
+            } else if has_word(&low, "revert") {
+                cfg.motion = Motion::Revert;
+            } else if has_word(&low, "continuous") || has_word(&low, "continues") {
+                cfg.motion = Motion::Continuous;
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -347,6 +358,22 @@ impl AnimConfig {
         }
         if extract_number(&low, "boom").is_some() {
             self.boom = ov.boom;
+        }
+        let mut motion_mentioned = false;
+        if let Some(v) = extract_word(&low, raw, "motion", true) {
+            if Motion::parse_value(&v).is_some() {
+                motion_mentioned = true;
+            }
+        }
+        if !motion_mentioned
+            && (has_word(&low, "revert")
+                || has_word(&low, "continuous")
+                || has_word(&low, "continues"))
+        {
+            motion_mentioned = true;
+        }
+        if motion_mentioned {
+            self.motion = ov.motion;
         }
         if extract_number(&low, "size").is_some() {
             self.size = ov.size;
@@ -1108,9 +1135,32 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Motion {
+    #[default]
+    Continuous,
+    Revert,
+}
+
+impl Motion {
+    pub fn parse_value(v: &str) -> Option<Motion> {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "continuous" | "continues" | "continue" => Some(Motion::Continuous),
+            "revert" | "bars" | "spring" | "back" => Some(Motion::Revert),
+            _ => None,
+        }
+    }
+}
+
 pub const AUDIO_YAW: f32 = 0.15;
 pub const AUDIO_PITCH: f32 = 0.10;
 pub const AUDIO_ROLL: f32 = 0.06;
+
+pub const REVERT_YAW: f32 = 0.6;
+pub const REVERT_PITCH: f32 = 0.5;
+pub const REVERT_ROLL: f32 = 0.4;
+pub const REVERT_ATTACK: f32 = 14.0;
+pub const REVERT_RELEASE: f32 = 4.0;
 
 pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     let l = left.clamp(0.0, 1.0);
@@ -1125,6 +1175,29 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
         bal * mag * AUDIO_YAW,
         (1.0 - bal.abs()) * mag * AUDIO_PITCH,
     )
+}
+
+pub fn revert_targets(left: f32, right: f32, energy: f32) -> [f32; 3] {
+    let l = left.clamp(0.0, 1.0);
+    let r = right.clamp(0.0, 1.0);
+    let e = energy.clamp(0.0, 1.0);
+    let sum = l + r;
+    if sum < 1e-3 {
+        return [0.0, 0.0, 0.0];
+    }
+    let bal = (r - l) / sum;
+    let mono = 1.0 - bal.abs();
+    [
+        mono * e * REVERT_PITCH,
+        bal * e * REVERT_YAW,
+        e * REVERT_ROLL,
+    ]
+}
+
+pub fn spring_step(pos: f64, target: f32, dt: f32, attack: f32, release: f32) -> f64 {
+    let rate = if target as f64 > pos { attack } else { release };
+    let k = 1.0 - (-dt.max(0.0) * rate).exp();
+    pos + (target as f64 - pos) * k as f64
 }
 
 pub struct RenderFx {
@@ -2039,6 +2112,36 @@ mod tests {
         cfg.apply_logo_overrides(&logo);
         assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Off);
         assert!((cfg.speed - 0.0).abs() < 1e-4, "options still apply");
+    }
+
+    #[test]
+    fn motion_parses_and_overlays() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        assert_eq!(cfg.motion, Motion::Continuous);
+        let cfg = AnimConfig::from_animation_str(Some("spin y motion=revert"));
+        assert_eq!(cfg.motion, Motion::Revert);
+        let cfg = AnimConfig::from_animation_str(Some("spin y revert"));
+        assert_eq!(cfg.motion, Motion::Revert);
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0 continuous"));
+        assert_eq!(cfg.motion, Motion::Continuous);
+        let mut cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        cfg.apply_sharkvis_str("motion=revert");
+        assert_eq!(cfg.motion, Motion::Revert);
+        assert!((cfg.speed - 2.0).abs() < 1e-4, "overlay keeps base speed");
+    }
+
+    #[test]
+    fn revert_targets_and_spring() {
+        let t = revert_targets(0.1, 0.7, 0.6);
+        assert!(t[1] > 0.0, "right-heavy yaws right");
+        assert!(t[0] >= 0.0 && t[2] >= 0.0);
+        assert_eq!(revert_targets(0.0, 0.0, 0.0), [0.0, 0.0, 0.0]);
+        let mut pos = 0.0;
+        pos = spring_step(pos, 0.5, 0.033, REVERT_ATTACK, REVERT_RELEASE);
+        assert!(pos > 0.1, "fast attack rises, got {}", pos);
+        let held = pos;
+        pos = spring_step(pos, 0.0, 0.5, REVERT_ATTACK, REVERT_RELEASE);
+        assert!(pos < held * 0.3, "slow release falls back, got {}", pos);
     }
 
     #[test]
