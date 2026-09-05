@@ -361,21 +361,24 @@ fn render_packages(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> 
     );
     Some(ModuleOutput::supported(
         "Packages",
-        vec![format_packages(&p.amounts, combined)],
+        format_packages(&p.amounts, combined),
     ))
 }
 
-fn format_packages(amounts: &[(String, usize)], combined: bool) -> String {
+fn format_packages(amounts: &[(String, usize)], combined: bool) -> Vec<String> {
     if combined {
         let total: usize = amounts.iter().map(|(_, n)| n).sum();
-        let names: Vec<String> = amounts.iter().map(|(name, _)| name.to_lowercase()).collect();
-        format!("{} ({})", total, names.join(", "))
+        let mut out = vec![total.to_string()];
+        for (name, n) in amounts {
+            out.push(format!("{} ({})", n, name.to_lowercase()));
+        }
+        out
     } else {
-        amounts
+        vec![amounts
             .iter()
             .map(|(name, n)| format!("{} ({})", n, name.to_lowercase()))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", ")]
     }
 }
 
@@ -1580,7 +1583,7 @@ mod tests {
     fn packages_split_lists_managers() {
         assert_eq!(
             format_packages(&sample_amounts(), false),
-            "7 (flatpak-system), 2199 (nix-system)"
+            vec!["7 (flatpak-system), 2199 (nix-system)".to_string()]
         );
     }
 
@@ -1588,8 +1591,12 @@ mod tests {
     fn packages_combined_totals() {
         assert_eq!(
             format_packages(&sample_amounts(), true),
-            "2206 (flatpak-system, nix-system)"
+            vec![
+                "2206".to_string(),
+                "7 (flatpak-system)".to_string(),
+                "2199 (nix-system)".to_string(),
+            ]
         );
-        assert_eq!(format_packages(&[], true), "0 ()");
+        assert_eq!(format_packages(&[], true), vec!["0".to_string()]);
     }
 }
