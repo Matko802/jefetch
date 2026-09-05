@@ -368,7 +368,8 @@ impl App {
                     if !anim_cfg.original_glyphs && !anim_cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
-                    fx.scale = 1.0 + anim_cfg.grow * shark_live.beat;
+                    // Size grows with the volume.
+                    fx.scale = 1.0 + anim_cfg.grow * shark_live.energy;
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(

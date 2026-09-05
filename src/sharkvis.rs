@@ -39,15 +39,16 @@ pub type Rgb = (u8, u8, u8);
 
 /// How sharkvis integration behaves. Parsed from the `animation` string
 /// (`sharkvis`, `sharkvis=on|off|auto`, `no-sharkvis`) and/or the
-/// `logo.sharkvis` config key.
+/// `logo.sharkvis` config key. Default is `Off`: nothing happens unless
+/// the animation string (or logo key) explicitly enables it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SharkvisMode {
     /// Enable automatically while a `sharkvis` process is running.
-    #[default]
     Auto,
     /// Always try (monitor + state file even without a process match).
     On,
     /// Never integrate.
+    #[default]
     Off,
 }
 
@@ -70,9 +71,17 @@ impl SharkvisMode {
     }
 }
 
-/// Depth of the beat slowdown: `speed_mult = 1 - depth * beat`.
+/// Depth of the beat slowdown dip (multiplied with the volume follow).
 pub const DEFAULT_BEAT_DEPTH: f32 = 0.6;
 pub const MAX_BEAT_DEPTH: f32 = 0.9;
+
+/// Speed follows the volume continuously: silence crawls at 0.5x, mid
+/// volume spins at 1x, full volume at 1.5x — times the beat dip.
+pub fn volume_speed_mult(energy: f32, beat: f32, depth: f32) -> f32 {
+    let vol = 0.5 + energy.clamp(0.0, 1.0);
+    let dip = 1.0 - depth.clamp(0.0, MAX_BEAT_DEPTH) * beat.clamp(0.0, 1.0);
+    (vol * dip).clamp(0.2, 2.0)
+}
 
 /// Depth of the beat zoom: `scale = 1 + grow * beat`.
 pub const DEFAULT_GROW: f32 = 0.12;
@@ -105,11 +114,6 @@ impl LiveFrame {
             speed_mult: 1.0,
         }
     }
-}
-
-pub fn beat_speed_mult(beat: f32, depth: f32) -> f32 {
-    let depth = depth.clamp(0.0, MAX_BEAT_DEPTH);
-    (1.0 - depth * beat.clamp(0.0, 1.0)).clamp(1.0 - MAX_BEAT_DEPTH, 1.0)
 }
 
 pub fn lerp_rgb(lo: Rgb, hi: Rgb, t: f32) -> Rgb {
@@ -661,7 +665,7 @@ fn beat_thread(sample: std::sync::Arc<BeatSample>, stop: std::sync::Arc<AtomicBo
         let target = (rms * 4.0).clamp(0.0, 1.0);
         energy += (target - energy) * 0.4;
         avg += (energy - avg) * 0.05;
-        if energy > avg * 1.5 + 0.08 && energy > 0.12 {
+        if energy > avg * 1.25 + 0.04 && energy > 0.06 {
             beat = 1.0;
         } else {
             beat *= 0.92;
@@ -1158,7 +1162,7 @@ impl Sync {
             glyphs: self.glyphs.clone(),
             energy,
             beat,
-            speed_mult: beat_speed_mult(beat, beat_depth),
+            speed_mult: volume_speed_mult(energy, beat, beat_depth),
         };
         self.last = frame;
         self.last.clone()
@@ -1240,9 +1244,14 @@ mod tests {
         assert_eq!(lerp_rgb((0, 0, 0), (255, 255, 255), 0.5), (128, 128, 128));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 0.0), (0, 0, 0));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 1.0), (255, 0, 0));
-        assert!((beat_speed_mult(0.0, 0.6) - 1.0).abs() < 1e-5);
-        assert!((beat_speed_mult(1.0, 0.6) - 0.4).abs() < 1e-5);
-        assert!((beat_speed_mult(1.0, 99.0) - 0.1).abs() < 1e-5);
+        // Volume follow: silence crawls, mid is 1x, loud is 1.5x.
+        assert!((volume_speed_mult(0.0, 0.0, 0.6) - 0.5).abs() < 1e-5);
+        assert!((volume_speed_mult(0.5, 0.0, 0.6) - 1.0).abs() < 1e-5);
+        assert!((volume_speed_mult(1.0, 0.0, 0.6) - 1.5).abs() < 1e-5);
+        // Beat dips on top: loud + beat = 1.5 * 0.4.
+        assert!((volume_speed_mult(1.0, 1.0, 0.6) - 0.6).abs() < 1e-5);
+        // beat=0 disables the dip entirely.
+        assert!((volume_speed_mult(1.0, 1.0, 0.0) - 1.5).abs() < 1e-5);
     }
 
     #[test]
@@ -1334,7 +1343,7 @@ mod tests {
         assert_eq!(f.grad, None);
         assert_eq!(f.flat, Some((255, 136, 0)), "single live color without gradients");
         assert!((f.beat - 1.0).abs() < 1e-5);
-        assert!((f.speed_mult - 0.4).abs() < 1e-5, "beat=1 dips to 1-depth");
+        assert!((f.speed_mult - 0.44).abs() < 1e-5, "vol 1.1 * dip 0.4 at energy 0.6 + beat");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");

@@ -1812,11 +1812,12 @@ mod tests {
     #[test]
     fn sharkvis_mode_parses() {
         use crate::sharkvis::SharkvisMode;
+        // Off unless explicitly enabled.
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        assert_eq!(cfg.sharkvis, SharkvisMode::Auto);
+        assert_eq!(cfg.sharkvis, SharkvisMode::Off);
         assert!(!cfg.sharkvis_set);
 
-        let cfg = AnimConfig::from_animation_str(Some("spin y sharkvis"));
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0 sharkvis"));
         assert_eq!(cfg.sharkvis, SharkvisMode::On);
         assert!(cfg.sharkvis_set);
 

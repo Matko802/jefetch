@@ -104,8 +104,9 @@ Or as a separate logo key:
 
 ## sharkvis: same colors, charset, beats
 
-While [`sharkvis`](https://github.com/Matko802/sharkvis) is running,
-jefetch can borrow its look and groove:
+Nothing happens unless the animation string asks for it — add `sharkvis`
+and, while [`sharkvis`](https://github.com/Matko802/sharkvis) is running,
+jefetch borrows its look and groove:
 
 - **Colors**: the spinning logo gets the full vertical gradient —
   `gradient_low` at the bottom → `gradient_high` at the top — just like
@@ -113,24 +114,26 @@ jefetch can borrow its look and groove:
   are configured).
 - **Charset**: the logo is shaded with sharkvis's `[visualizer] glyphs`
   ramp, unless your animation picks its own (`chars=...` always wins).
-- **Beat**: the spin slows down (`speed × (1 − depth × beat)`) and the
-  logo grows (`scale = 1 + grow × beat`).
+- **Volume**: the spin follows the volume (silence crawls at 0.5x, loud
+  plays at 1.5x) with an extra dip on each beat, and the logo grows
+  (`scale = 1 + grow × volume`).
 
 ```jsonc
-"animation": "spin y speed=2.0 sharkvis"                 // auto: active while sharkvis runs
+"animation": "spin y speed=2.0 sharkvis"                 // the trigger: nothing without it
 "animation": "spin y sharkvis beat=0.8 grow=0.2"         // deeper dip + bigger pulse
-"animation": "spin y sharkvis=off"                       // opt out (also: "no-sharkvis")
+"animation": "spin y sharkvis=off"                       // explicitly off (the default)
 "animation": "spin y sharkvis chars=blocks"              // keep jefetch's own ramp
-"animation": "spin y sharkvis grow=0"                    // slowdown only, no zoom
+"animation": "spin y sharkvis grow=0"                    // volume speed only, no zoom
 ```
 
 | Value | Effect |
 |-------|--------|
-| `sharkvis` / `sharkvis=auto` | Integrate when a `sharkvis` process is detected (default) |
+| `sharkvis` | Enable while a `sharkvis` process is detected (required — default is off) |
+| `sharkvis=auto` | Same as bare `sharkvis` |
 | `sharkvis=on` | Always try (state file + monitor, even without a process match) |
-| `sharkvis=off` / `no-sharkvis` | Never integrate |
-| `beat=N` | Slowdown depth on the beat, `0`–`0.9` (default `0.6`) |
-| `grow=N` | Zoom depth on the beat, `0`–`0.3` (default `0.12`, `0` disables) |
+| `sharkvis=off` / `no-sharkvis` | Never integrate (default) |
+| `beat=N` | Extra slowdown dip on the beat, `0`–`0.9` (default `0.6`) |
+| `grow=N` | Zoom-with-volume depth, `0`–`0.3` (default `0.12`, `0` disables) |
 
 Or as a separate logo key (the animation string wins when both are set):
 
@@ -145,8 +148,9 @@ How it works:
   gradient. A fresh `$XDG_RUNTIME_DIR/sharkvis/state` file
   (`color=#rrggbb energy=0..1 beat=0..1`) supplies live energy/beat and
   its color when no gradients are configured.
-- **Beat**: from the state file when present, otherwise from a tiny
-  built-in PulseAudio monitor (8 kHz mono RMS + onset envelope) that only
-  runs while the integration is active — no new dependencies.
+- **Beat**: from the state file when present (tracked on the bass
+  bars, where kicks live), otherwise from a tiny built-in PulseAudio
+  monitor (8 kHz mono RMS + onset envelope) that only runs while the
+  integration is active — no new dependencies.
 
 Next: [Logos](Logos.md) →
