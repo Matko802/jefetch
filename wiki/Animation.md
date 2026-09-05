@@ -129,9 +129,9 @@ jefetch borrows its look and groove:
 
 | Value | Effect |
 |-------|--------|
-| `sharkvis` | Enable while a `sharkvis` process is detected (required — default is off) |
+| `sharkvis` | Enable while a `sharkvis` process is running (required — default is off) |
 | `sharkvis=auto` | Same as bare `sharkvis` |
-| `sharkvis=on` | Always try (state file + monitor, even without a process match) |
+| `sharkvis=on` | Same as `auto`: still needs the running process, no exceptions |
 | `sharkvis=off` / `no-sharkvis` | Never integrate (default) |
 | `beat=N` | Slowdown dip on the beat, `0`–`0.9` (default `0.6`) |
 | `grow=N` | Pulse-bigger depth on the beat, `0`–`0.3` (default `0.12`, `0` disables) |

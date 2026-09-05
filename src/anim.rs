@@ -154,13 +154,14 @@ impl AnimConfig {
                         cfg.sharkvis_set = true;
                     }
                     None => {
-                        // Unknown sub-option: still enable, stay forward compatible.
-                        cfg.sharkvis = crate::sharkvis::SharkvisMode::On;
+                        // Unknown sub-option: enable if/when running,
+                        // stay forward compatible.
+                        cfg.sharkvis = crate::sharkvis::SharkvisMode::Auto;
                         cfg.sharkvis_set = true;
                     }
                 }
             } else if has_word(&low, "sharkvis") {
-                cfg.sharkvis = crate::sharkvis::SharkvisMode::On;
+                cfg.sharkvis = crate::sharkvis::SharkvisMode::Auto;
                 cfg.sharkvis_set = true;
             }
 
@@ -1828,7 +1829,7 @@ mod tests {
         assert!(!cfg.sharkvis_set);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0 sharkvis"));
-        assert_eq!(cfg.sharkvis, SharkvisMode::On);
+        assert_eq!(cfg.sharkvis, SharkvisMode::Auto);
         assert!(cfg.sharkvis_set);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y sharkvis=off"));

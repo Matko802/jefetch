@@ -41,11 +41,16 @@ pub type Rgb = (u8, u8, u8);
 /// (`sharkvis`, `sharkvis=on|off|auto`, `no-sharkvis`) and/or the
 /// `logo.sharkvis` config key. Default is `Off`: nothing happens unless
 /// the animation string (or logo key) explicitly enables it.
+///
+/// Integration is hard-gated on a running `sharkvis` process: enabled in
+/// config but sharkvis not running means fully inactive — no tint, no
+/// monitor, no beat thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SharkvisMode {
-    /// Enable automatically while a `sharkvis` process is running.
+    /// Enable while a `sharkvis` process is running.
     Auto,
-    /// Always try (monitor + state file even without a process match).
+    /// Same as `Auto` (kept for compatibility): still requires the
+    /// process, but also consults the live state file first.
     On,
     /// Never integrate.
     #[default]
@@ -65,8 +70,7 @@ impl SharkvisMode {
     pub fn enabled(self, running: bool) -> bool {
         match self {
             SharkvisMode::Off => false,
-            SharkvisMode::On => true,
-            SharkvisMode::Auto => running,
+            SharkvisMode::Auto | SharkvisMode::On => running,
         }
     }
 }
@@ -1195,7 +1199,8 @@ mod tests {
         assert_eq!(SharkvisMode::parse_value("bogus"), None);
         assert!(SharkvisMode::Auto.enabled(true));
         assert!(!SharkvisMode::Auto.enabled(false));
-        assert!(SharkvisMode::On.enabled(false));
+        assert!(SharkvisMode::On.enabled(true));
+        assert!(!SharkvisMode::On.enabled(false), "on still needs the process");
         assert!(!SharkvisMode::Off.enabled(true));
     }
 
@@ -1302,6 +1307,27 @@ mod tests {
         assert!(!f.active);
         assert!((f.speed_mult - 1.0).abs() < 1e-5);
     }    #[test]
+    fn sync_on_requires_running_process() {
+        // Hard gate: enabled in config but sharkvis not running means
+        // fully inactive, even with a fresh state file on disk.
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
+        std::fs::write(&path, "color=#ff0000 energy=1 beat=1").unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
+        for mode in [SharkvisMode::Auto, SharkvisMode::On] {
+            let mut s = Sync::new();
+            let f = s.poll(mode, DEFAULT_BEAT_DEPTH);
+            assert!(!f.active, "{:?} must stay inactive without the process", mode);
+            assert!((f.speed_mult - 1.0).abs() < 1e-5);
+            assert!(f.grad.is_none() && f.flat.is_none());
+        }
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn sync_auto_inactive_without_process() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
