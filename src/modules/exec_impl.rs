@@ -917,8 +917,7 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
         return None;
     }
     let mut values = Vec::new();
-    for (i, d) in disks.iter().enumerate() {
-        let mp = &d.mountpoint;
+    for d in disks.iter() {
         let fs = &d.filesystem;
         let used = common::format_bytes(d.used, "");
         let total = common::format_bytes(d.total, "");
@@ -927,16 +926,11 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
         if !fs.is_empty() {
             v.push_str(&format!(" - {}", fs));
         }
-        if i == 0 {
-            values.push(v);
-        } else if inst.args.key.is_some() {
-            values.push(format!("({}): {}", mp, v));
-        } else {
-            values.push(v);
-        }
+        values.push(v);
     }
     let first_mp = disks[0].mountpoint.clone();
-    Some(ModuleOutput::supported(&format!("Disk ({})", first_mp), values))
+    let out = ModuleOutput::supported(&format!("Disk ({})", first_mp), values);
+    Some(out)
 }
 
 fn render_battery(_cfg: &Config) -> Option<ModuleOutput> {

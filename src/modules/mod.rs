@@ -114,6 +114,7 @@ pub struct ModuleOutput {
     pub supported: bool,
 
     pub blank: bool,
+    pub repeat_key: bool,
 }
 
 impl ModuleOutput {
@@ -123,6 +124,7 @@ impl ModuleOutput {
             values,
             supported: true,
             blank: false,
+            repeat_key: false,
         }
     }
     pub fn blank() -> Self {
@@ -131,6 +133,7 @@ impl ModuleOutput {
             values: vec![String::new()],
             supported: true,
             blank: true,
+            repeat_key: false,
         }
     }
     pub fn unsupported() -> Self {
@@ -139,6 +142,7 @@ impl ModuleOutput {
             values: Vec::new(),
             supported: false,
             blank: false,
+            repeat_key: false,
         }
     }
 }

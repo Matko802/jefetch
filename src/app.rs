@@ -736,7 +736,7 @@ impl App {
             let sep_render = separator_colored(cfg.display.separator.as_str(), cfg);
             let indent = key_visible + crate::print::format::visible_len(&sep_render) + padding;
             for (idx, v) in out.values.iter().enumerate() {
-                if idx == 0 {
+                if idx == 0 || out.repeat_key {
                     lines.push(format!(
                         "{}{}{}{}",
                         out.key,
