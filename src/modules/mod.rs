@@ -32,7 +32,7 @@ pub static MODULES: &[ModuleInfo] = &[
     mod_info!("Chassis", "Print chassis type information (desktop, laptop, etc.)", true),
     mod_info!("Codec", "Print hardware video acceleration codec types (decode / encode)", true),
     mod_info!("Command", "Run custom shell scripts", true),
-    mod_info!("Colors", "Display the terminal colors", false),
+    mod_info!("Colors", "Display the terminal's 16-color palette", false),
     mod_info!("CPU", "Print CPU name, frequency, etc", true),
     mod_info!("CPUCache", "Print CPU caches", true),
     mod_info!("CPUUsage", "Print CPU usage", true),

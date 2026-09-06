@@ -12,7 +12,7 @@ pub fn render(name: &str, inst: &ModuleInstance, cfg: &Config) -> Option<ModuleO
         "shell" => render_shell(cfg),
         "custom" => render_custom(inst),
         "command" => render_command(inst),
-        "colors" => render_colors(cfg),
+        "colors" => render_colors(inst, cfg),
         "datetime" => render_datetime(cfg),
         "loadavg" => render_loadavg(cfg),
         "processes" => render_processes(cfg),
@@ -78,19 +78,181 @@ fn render_command(inst: &ModuleInstance) -> Option<ModuleOutput> {
     Some(ModuleOutput::supported("", vec![value]))
 }
 
-fn render_colors(_cfg: &Config) -> Option<ModuleOutput> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ColorsSymbol {
+    Block,
+    Background,
+    Circle,
+    Diamond,
+    Triangle,
+    Square,
+    Star,
+}
 
-    let mut normal = String::new();
-    for bg in 40..=47 {
-        normal.push_str(&format!("\x1b[{bg}m   "));
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ColorsBrightness {
+    Default,
+    Normal,
+    Light,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ColorsOpts {
+    symbol: ColorsSymbol,
+    pad: usize,
+    width: usize,
+    range: (u8, u8),
+    brightness: ColorsBrightness,
+}
+
+impl Default for ColorsOpts {
+    fn default() -> Self {
+        ColorsOpts {
+            symbol: ColorsSymbol::Background,
+            pad: 0,
+            width: 3,
+            range: (0, 15),
+            brightness: ColorsBrightness::Default,
+        }
     }
-    normal.push_str("\x1b[m");
-    let mut bright = String::from("\x1b[5m");
-    for bg in 100..=107 {
-        bright.push_str(&format!("\x1b[{bg}m   "));
+}
+
+fn render_colors(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
+    let opts = ColorsOpts::from_module(inst, cfg);
+    let rows = colors_rows(&opts);
+    if rows.is_empty() {
+        return None;
     }
-    bright.push_str("\x1b[m");
-    Some(ModuleOutput::supported("", vec![normal, bright]))
+    Some(ModuleOutput::supported(" ", rows))
+}
+
+fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
+    let pad = " ".repeat(opts.pad);
+    match opts.symbol {
+        ColorsSymbol::Block | ColorsSymbol::Background => {
+            let mut rows = Vec::new();
+            if opts.brightness != ColorsBrightness::Light {
+                let mut row = String::new();
+                for i in opts.range.0..=opts.range.1.min(7) {
+                    if opts.symbol == ColorsSymbol::Block {
+                        row.push_str(&format!("\x1b[3{i}m"));
+                        row.push_str(&"█".repeat(opts.width));
+                    } else {
+                        row.push_str(&format!("\x1b[4{i}m"));
+                        row.push_str(&" ".repeat(opts.width));
+                    }
+                }
+                if !row.is_empty() {
+                    row.push_str("\x1b[m");
+                    rows.push(format!("{pad}{row}"));
+                }
+            }
+            if opts.brightness != ColorsBrightness::Normal {
+                let mut row = String::new();
+                if opts.symbol == ColorsSymbol::Background && needs_linux_console_blink() {
+                    row.push_str("\x1b[5m");
+                }
+                for i in opts.range.0.max(8)..=opts.range.1 {
+                    if opts.symbol == ColorsSymbol::Block {
+                        row.push_str(&format!("\x1b[9{}m", i - 8));
+                        row.push_str(&"█".repeat(opts.width));
+                    } else {
+                        row.push_str(&format!("\x1b[10{}m", i - 8));
+                        row.push_str(&" ".repeat(opts.width));
+                    }
+                }
+                let bare = row.replace("\x1b[5m", "");
+                if !bare.is_empty() {
+                    row.push_str("\x1b[m");
+                    rows.push(format!("{pad}{row}"));
+                }
+            }
+            rows
+        }
+        _ => {
+            let glyph = match opts.symbol {
+                ColorsSymbol::Circle => "● ",
+                ColorsSymbol::Diamond => "◆ ",
+                ColorsSymbol::Triangle => "▲ ",
+                ColorsSymbol::Square => "■ ",
+                ColorsSymbol::Star => "★ ",
+                _ => "███ ",
+            };
+            let mut row = String::new();
+            if opts.brightness == ColorsBrightness::Default {
+                for i in (1..=8).rev() {
+                    row.push_str(&format!("\x1b[38;5;{i}m{glyph}"));
+                }
+            } else {
+                let prefix = if opts.brightness == ColorsBrightness::Normal { '3' } else { '9' };
+                for i in 0..=7 {
+                    row.push_str(&format!("\x1b[{prefix}{i}m{glyph}"));
+                }
+            }
+            while row.ends_with(' ') {
+                row.pop();
+            }
+            row.push_str("\x1b[m");
+            vec![format!("{pad}{row}")]
+        }
+    }
+}
+
+fn needs_linux_console_blink() -> bool {
+    match std::env::var("TERM") {
+        Ok(t) => !t.starts_with("xterm"),
+        Err(_) => true,
+    }
+}
+
+impl ColorsOpts {
+    fn from_module(inst: &ModuleInstance, cfg: &Config) -> Self {
+        let mut opts = ColorsOpts::default();
+        let get = |key: &str| -> Option<J> {
+            inst.raw
+                .as_ref()
+                .and_then(|r| r.get(key))
+                .or_else(|| cfg.module_options("colors").and_then(|o| o.get(key)))
+                .cloned()
+        };
+        if let Some(v) = get("symbol").and_then(|v| v.as_str().map(|s| s.to_string())) {
+            opts.symbol = match v.to_ascii_lowercase().as_str() {
+                "block" => ColorsSymbol::Block,
+                "background" => ColorsSymbol::Background,
+                "circle" => ColorsSymbol::Circle,
+                "diamond" => ColorsSymbol::Diamond,
+                "triangle" => ColorsSymbol::Triangle,
+                "square" => ColorsSymbol::Square,
+                "star" => ColorsSymbol::Star,
+                _ => ColorsSymbol::Background,
+            };
+        }
+        if let Some(n) = get("paddingLeft").and_then(|v| v.as_u64()) {
+            opts.pad = n.min(64) as usize;
+        }
+        if let Some(b) = get("block") {
+            if let Some(w) = b.get("width").and_then(|v| v.as_u64()) {
+                opts.width = w.clamp(1, 64) as usize;
+            }
+            if let Some(range) = b.get("range").and_then(|v| v.arr()) {
+                if range.len() == 2 {
+                    if let (Some(a), Some(b)) = (range[0].as_u64(), range[1].as_u64()) {
+                        if a <= b && b <= 15 {
+                            opts.range = (a as u8, b as u8);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(v) = get("brightness").and_then(|v| v.as_str().map(|s| s.to_string())) {
+            opts.brightness = match v.to_ascii_lowercase().as_str() {
+                "normal" => ColorsBrightness::Normal,
+                "light" => ColorsBrightness::Light,
+                _ => ColorsBrightness::Default,
+            };
+        }
+        opts
+    }
 }
 
 fn render_datetime(cfg: &Config) -> Option<ModuleOutput> {
@@ -1700,20 +1862,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn colors_match_fastfetch_default() {
-        let cfg = crate::config::configfile::Config::default();
-        let out = render_colors(&cfg).expect("colors render");
+    fn colors_default_matches_fastfetch() {
+        let opts = ColorsOpts::default();
+        let rows = colors_rows(&opts);
+        assert_eq!(rows.len(), 2);
         let mut normal = String::new();
         for bg in 40..=47 {
             normal.push_str(&format!("\x1b[{bg}m   "));
         }
         normal.push_str("\x1b[m");
-        let mut bright = String::from("\x1b[5m");
-        for bg in 100..=107 {
-            bright.push_str(&format!("\x1b[{bg}m   "));
-        }
-        bright.push_str("\x1b[m");
-        assert_eq!(out.values, vec![normal, bright]);
+        assert_eq!(rows[0], normal);
+        assert!(rows[1].ends_with("\x1b[m"));
+        assert!(rows[1].contains("\x1b[100m   "));
+        assert!(rows[1].contains("\x1b[107m   "));
+    }
+
+    #[test]
+    fn colors_symbols_and_brightness() {
+        let mut opts = ColorsOpts::default();
+        opts.symbol = ColorsSymbol::Square;
+        let rows = colors_rows(&opts);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].starts_with("\x1b[38;5;8m■ "));
+        assert!(rows[0].contains("\x1b[38;5;1m■\x1b[m"));
+        opts.brightness = ColorsBrightness::Normal;
+        let rows = colors_rows(&opts);
+        assert!(rows[0].starts_with("\x1b[30m■ "));
+        opts.brightness = ColorsBrightness::Light;
+        opts.symbol = ColorsSymbol::Background;
+        opts.range = (0, 7);
+        let rows = colors_rows(&opts);
+        assert!(rows.is_empty());
+        opts.brightness = ColorsBrightness::Normal;
+        let rows = colors_rows(&opts);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].starts_with("\x1b[40m   "));
     }
 
     #[test]

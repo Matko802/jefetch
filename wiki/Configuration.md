@@ -85,6 +85,10 @@ Two special cases:
   of a line per package manager. Same via format:
   `{ "type": "packages", "format": "{all}" }`, and per-manager bits work
   too: `"{nix-system} (nix), {nix-user} (user)"`.
+- `colors`: same options as fastfetch — `"symbol"` (`background` default,
+  `block`, `circle`, `diamond`, `triangle`, `square`, `star`),
+  `"brightness"` (`default`, `normal`, `light`), `"paddingLeft"`, and
+  `"block": { "width": 3, "range": [0, 15] }`.
 
 You can also reorder at runtime without touching the file:
 
