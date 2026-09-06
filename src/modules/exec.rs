@@ -14,10 +14,14 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     let base = super::exec_impl::render(name.as_str(), inst, cfg)?;
 
     let values: Vec<String> = if let Some(fmt_str) = &inst.args.format {
-        base.values
-            .iter()
-            .map(|v| render(fmt_str, inst, v))
-            .collect()
+        if name == "packages" && super::exec_impl::packages_owns_format(fmt_str) {
+            base.values.clone()
+        } else {
+            base.values
+                .iter()
+                .map(|v| render(fmt_str, inst, v))
+                .collect()
+        }
     } else {
         base.values.clone()
     };

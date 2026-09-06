@@ -82,7 +82,9 @@ Two special cases:
 - `disk.folders`: give it one path or a list, otherwise it shows every
   physical disk.
 - `packages.combined`: `true` collapses everything into one total instead
-  of a line per package manager.
+  of a line per package manager. Same via format:
+  `{ "type": "packages", "format": "{all}" }`, and per-manager bits work
+  too: `"{nix-system} (nix), {nix-user} (user)"`.
 
 You can also reorder at runtime without touching the file:
 

@@ -385,10 +385,57 @@ fn render_packages(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> 
         cfg.module_options("packages").and_then(|o| o.get("combined")),
         Some(J::Bool(true))
     );
+    if let Some(fmt) = packages_format(inst, cfg) {
+        if let Some(expanded) = expand_packages_template(&fmt, &p.amounts) {
+            return Some(ModuleOutput::supported("Packages", vec![expanded]));
+        }
+    }
     Some(ModuleOutput::supported(
         "Packages",
         format_packages(&p.amounts, combined),
     ))
+}
+
+fn packages_format(inst: &ModuleInstance, cfg: &Config) -> Option<String> {
+    if let Some(f) = &inst.args.format {
+        return Some(f.clone());
+    }
+    cfg.module_options("packages")
+        .and_then(|o| o.get("format"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+pub fn packages_owns_format(fmt: &str) -> bool {
+    fmt.contains("{all}")
+        || [
+            "{flatpak-system}",
+            "{flatpak-user}",
+            "{nix-system}",
+            "{nix-user}",
+            "{nix-default}",
+            "{nix}",
+        ]
+        .iter()
+        .any(|k| fmt.contains(k))
+}
+
+fn expand_packages_template(fmt: &str, amounts: &[(String, usize)]) -> Option<String> {
+    let mut out = fmt.to_string();
+    let mut touched = false;
+    if out.contains("{all}") {
+        let total: usize = amounts.iter().map(|(_, n)| n).sum();
+        out = out.replace("{all}", &total.to_string());
+        touched = true;
+    }
+    for (name, n) in amounts {
+        let key = format!("{{{}}}", name);
+        if out.contains(&key) {
+            out = out.replace(&key, &n.to_string());
+            touched = true;
+        }
+    }
+    touched.then_some(out)
 }
 
 fn format_packages(amounts: &[(String, usize)], combined: bool) -> Vec<String> {
@@ -1667,6 +1714,21 @@ mod tests {
         }
         bright.push_str("\x1b[m");
         assert_eq!(out.values, vec![normal, bright]);
+    }
+
+    #[test]
+    fn packages_template_expands() {
+        assert_eq!(
+            expand_packages_template("{all}", &sample_amounts()),
+            Some("2206".to_string())
+        );
+        assert_eq!(
+            expand_packages_template("{nix-system} sys", &sample_amounts()),
+            Some("2199 sys".to_string())
+        );
+        assert_eq!(expand_packages_template("{value}", &sample_amounts()), None);
+        assert!(packages_owns_format("{all}"));
+        assert!(!packages_owns_format("{value}"));
     }
 
     fn sample_amounts() -> Vec<(String, usize)> {
