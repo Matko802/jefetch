@@ -123,7 +123,7 @@ fn render_colors(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     if rows.is_empty() {
         return None;
     }
-    Some(ModuleOutput::supported(" ", rows))
+    Some(ModuleOutput::supported("", rows))
 }
 
 fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
@@ -324,14 +324,12 @@ fn render_swap(cfg: &Config) -> Option<ModuleOutput> {
     if m.swap_total == 0 {
         return None;
     }
-    let pct = common::percent(m.swap_used, m.swap_total)
-        .map(|p| p.to_string())
-        .unwrap_or_else(|| "0".to_string());
+    let pct = common::percent(m.swap_used, m.swap_total).unwrap_or(0);
     let text = format!(
-        "{} / {} ({}%)",
+        "{} / {} {}",
         common::format_bytes(m.swap_used, ""),
         common::format_bytes(m.swap_total, ""),
-        pct
+        pct_colored(pct)
     );
     Some(render_single("Swap", text, cfg))
 }
@@ -397,14 +395,12 @@ fn render_memory(cfg: &Config) -> Option<ModuleOutput> {
     if m.mem_total == 0 {
         return None;
     }
-    let pct = common::percent(m.mem_used, m.mem_total)
-        .map(|p| p.to_string())
-        .unwrap_or_else(|| "0".to_string());
+    let pct = common::percent(m.mem_used, m.mem_total).unwrap_or(0);
     let text = format!(
-        "{} / {} ({}%)",
+        "{} / {} {}",
         common::format_bytes(m.mem_used, ""),
         common::format_bytes(m.mem_total, ""),
-        pct
+        pct_colored(pct)
     );
     Some(render_single("Memory", text, cfg))
 }
@@ -867,15 +863,7 @@ fn fastfetch_disk(_inst: &ModuleInstance) -> Option<ModuleOutput> {
             let total_s = common::format_bytes(total, "");
             let used_s = common::format_bytes(used, "");
             let pct_val = common::percent(used, total).unwrap_or(0);
-            let pct_s = pct_val.to_string();
-            let pct_colored = {
-                let color = if pct_val < 50 { "green" } else if pct_val < 80 { "yellow" } else { "bright_red" };
-                match crate::print::color::color_code_to_ansi(color) {
-                    crate::print::color::ApplyResult::Ansi { start, end } => format!("{}({}%){}", start, pct_s, end),
-                    _ => format!("({}%)", pct_s),
-                }
-            };
-            let mut v = format!("{} / {} {}", used_s, total_s, pct_colored);
+            let mut v = format!("{} / {} {}", used_s, total_s, pct_colored(pct_val));
             if !fs.is_empty() {
                 v.push_str(&format!(" - {}", fs));
             }
@@ -891,6 +879,23 @@ fn fastfetch_disk(_inst: &ModuleInstance) -> Option<ModuleOutput> {
         }
     }
     None
+}
+
+fn pct_colored(pct_val: u8) -> String {
+    let pct_s = pct_val.to_string();
+    let color = if pct_val <= 50 {
+        "green"
+    } else if pct_val <= 80 {
+        "bright_yellow"
+    } else {
+        "bright_red"
+    };
+    match crate::print::color::color_code_to_ansi(color) {
+        crate::print::color::ApplyResult::Ansi { start, end } => {
+            format!("({}{}%{})", start, pct_s, end)
+        }
+        _ => format!("({}%)", pct_s),
+    }
 }
 
 fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
@@ -918,15 +923,7 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
         let used = common::format_bytes(d.used, "");
         let total = common::format_bytes(d.total, "");
         let pct_val = common::percent(d.used, d.total).unwrap_or(0);
-        let pct_s = pct_val.to_string();
-        let pct_colored = {
-            let color = if pct_val < 50 { "green" } else if pct_val < 80 { "yellow" } else { "bright_red" };
-            match crate::print::color::color_code_to_ansi(color) {
-                crate::print::color::ApplyResult::Ansi { start, end } => format!("{}({}%){}", start, pct_s, end),
-                _ => format!("({}%)", pct_s),
-            }
-        };
-        let mut v = format!("{} / {} {}", used, total, pct_colored);
+        let mut v = format!("{} / {} {}", used, total, pct_colored(pct_val));
         if !fs.is_empty() {
             v.push_str(&format!(" - {}", fs));
         }
