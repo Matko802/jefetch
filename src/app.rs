@@ -772,26 +772,14 @@ impl App {
                         " ".repeat(padding),
                         v
                     ));
-                } else if v.starts_with("Disk (") {
-
-                    if let Some(colon) = v.find(": ") {
-                        let key_part = &v[..colon];
-                        let rest = &v[colon + 2..];
-                        let colored_key = match cfg.display.key_color.as_deref().map(|c| crate::print::color::color_code_to_ansi(c)) {
-                            Some(crate::print::color::ApplyResult::Ansi { start, end }) => format!("{}{}{}", start, key_part, end),
-                            _ => {
-
-                                match crate::print::color::color_code_to_ansi("bold_cyan") {
-                                    crate::print::color::ApplyResult::Ansi { start, end } => format!("{}{}{}", start, key_part, end),
-                                    _ => key_part.to_string(),
-                                }
-                            }
-                        };
-                        let sep = separator_colored(cfg.display.separator.as_str(), cfg);
-                        lines.push(format!("{}{}{}{}", colored_key, sep, " ".repeat(padding), rest));
-                    } else {
-                        lines.push(v.clone());
-                    }
+                } else if v.starts_with("(/") {
+                    lines.push(format!(
+                        "{}{}{}{}",
+                        out.key,
+                        sep_render,
+                        " ".repeat(padding),
+                        v
+                    ));
                 } else {
                     lines.push(format!("{}{}", " ".repeat(indent), v));
                 }

@@ -932,8 +932,9 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
         }
         if i == 0 {
             values.push(v);
+        } else if inst.args.key.is_some() {
+            values.push(format!("({}): {}", mp, v));
         } else {
-
             values.push(format!("Disk ({}): {}", mp, v));
         }
     }
