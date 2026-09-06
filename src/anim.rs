@@ -39,9 +39,7 @@ pub struct AnimConfig {
     pub grow: f32,
     pub boom: Option<f32>,
     pub shading_explicit: bool,
-    pub motion: Motion,
-    pub retract: f32,
-    pub limit: Option<f32>,
+    pub return_secs: Option<f32>,
 }
 
 impl Default for AnimConfig {
@@ -72,9 +70,7 @@ impl Default for AnimConfig {
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
             shading_explicit: false,
-            motion: Motion::default(),
-            retract: 1.0,
-            limit: None,
+            return_secs: None,
         }
     }
 }
@@ -83,7 +79,7 @@ const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
-    "no-sharkvis", "beat", "grow", "boom", "motion", "retract", "limit",
+    "no-sharkvis", "beat", "grow", "boom", "return",
 ];
 
 const QUADRANT_GLYPHS: &[&str] = &[
@@ -218,20 +214,8 @@ impl AnimConfig {
             if let Some(v) = extract_number(&low, "boom") {
                 cfg.boom = Some(v.clamp(0.0, 1.0));
             }
-            if let Some(v) = extract_number(&low, "retract") {
-                cfg.retract = v.max(0.0);
-            }
-            if let Some(v) = extract_number(&low, "limit") {
-                cfg.limit = Some(v.max(0.0));
-            }
-            if let Some(v) = extract_word(&low, raw, "motion", true) {
-                if let Some(m) = Motion::parse_value(&v) {
-                    cfg.motion = m;
-                }
-            } else if has_word(&low, "revert") {
-                cfg.motion = Motion::Revert;
-            } else if has_word(&low, "continuous") || has_word(&low, "continues") {
-                cfg.motion = Motion::Continuous;
+            if let Some(v) = extract_number(&low, "return") {
+                cfg.return_secs = Some(v.max(0.0));
             }
             if let Some(v) = extract_number(&low, "size") {
                 cfg.size = v;
@@ -1044,30 +1028,12 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Motion {
-    #[default]
-    Continuous,
-    Revert,
-}
-
-impl Motion {
-    pub fn parse_value(v: &str) -> Option<Motion> {
-        match v.trim().to_ascii_lowercase().as_str() {
-            "continuous" | "continues" | "continue" => Some(Motion::Continuous),
-            "revert" | "bars" | "spring" | "back" => Some(Motion::Revert),
-            _ => None,
-        }
-    }
-}
-
 pub const AUDIO_YAW: f32 = 0.20;
 pub const AUDIO_PITCH: f32 = 0.14;
 pub const AUDIO_ROLL: f32 = 0.09;
 pub const AUDIO_FLOOR: f32 = 0.04;
 
-pub const REVERT_LIMIT: f64 = 6.2832;
-pub const REVERT_TAU: f32 = 1.2;
+pub const RETURN_RATE: f64 = std::f64::consts::PI;
 
 pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     let l = left.clamp(0.0, 1.0);
@@ -1087,15 +1053,16 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     )
 }
 
-pub fn revert_step(acc: f64, step: f64, dt: f32, tau: f32, limit: f64) -> f64 {
-    let lim = limit.max(0.0);
-    if step == 0.0 {
-        if tau <= 0.0 {
-            return acc;
-        }
-        return acc * (-dt.max(0.0) / tau).exp() as f64;
+pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let target = (phase / tau).round() * tau;
+    let diff = target - phase;
+    let step = RETURN_RATE * dt.max(0.0) as f64;
+    if diff.abs() <= step {
+        target
+    } else {
+        phase + diff.signum() * step
     }
-    (acc + step).clamp(-lim, lim)
 }
 
 pub struct RenderFx {
@@ -1567,13 +1534,13 @@ mod tests {
 
     #[test]
     fn live_colors_opt_in() {
-        let cfg = AnimConfig::from_animation_str(Some("motion=continuous color=sharkvis"));
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 color=sharkvis"));
         assert!(cfg.live_colors);
-        let cfg = AnimConfig::from_animation_str(Some("motion=continuous COLOR=SharkVis"));
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 COLOR=SharkVis"));
         assert!(cfg.live_colors);
-        let cfg = AnimConfig::from_animation_str(Some("motion=continuous boom=10"));
+        let cfg = AnimConfig::from_animation_str(Some("boom=10"));
         assert!(!cfg.live_colors);
-        let cfg = AnimConfig::from_animation_str(Some("motion=continuous color=red"));
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 color=red"));
         assert!(!cfg.live_colors);
     }
 
@@ -1984,82 +1951,24 @@ mod tests {
     }
 
     #[test]
-    fn motion_parses_and_overlays() {
-        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        assert_eq!(cfg.motion, Motion::Continuous);
-        let cfg = AnimConfig::from_animation_str(Some("spin y motion=revert"));
-        assert_eq!(cfg.motion, Motion::Revert);
-        let cfg = AnimConfig::from_animation_str(Some("spin y revert"));
-        assert_eq!(cfg.motion, Motion::Revert);
-        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0 continuous"));
-        assert_eq!(cfg.motion, Motion::Continuous);
+    fn return_parses() {
+        assert!(AnimConfig::from_animation_str(Some("spin y")).return_secs.is_none());
+        let cfg = AnimConfig::from_animation_str(Some("spin y return=10"));
+        assert!((cfg.return_secs.unwrap() - 10.0).abs() < 1e-4);
+        let cfg = AnimConfig::from_animation_str(Some("spin y return=0"));
+        assert!((cfg.return_secs.unwrap() - 0.0).abs() < 1e-4);
     }
 
     #[test]
-    fn revert_winds_to_limit_then_retracts() {
-        let mut acc = 0.0;
-        for _ in 0..400 {
-            acc = revert_step(acc, 0.15, 0.033, REVERT_TAU, REVERT_LIMIT);
-        }
-        assert!(acc > 5.0 && acc <= REVERT_LIMIT + 1e-6, "winds near limit, got {}", acc);
-        for _ in 0..400 {
-            acc = revert_step(acc, 0.0, 0.033, REVERT_TAU, REVERT_LIMIT);
-        }
-        assert!(acc.abs() < 0.05, "retracts to rest, got {}", acc);
-        let mut neg = 0.0;
-        for _ in 0..400 {
-            neg = revert_step(neg, -0.15, 0.033, REVERT_TAU, REVERT_LIMIT);
-        }
-        assert!(neg < -5.0 && neg >= -REVERT_LIMIT - 1e-6, "winds negative, got {}", neg);
-        let mut slow_max = 0.0f64;
-        let mut fast_max = 0.0f64;
-        let mut a = 0.0;
-        let mut b = 0.0;
-        for _ in 0..400 {
-            a = revert_step(a, 0.15, 0.033, REVERT_TAU / 0.5, REVERT_LIMIT);
-            b = revert_step(b, 0.15, 0.033, REVERT_TAU / 4.0, REVERT_LIMIT);
-            slow_max = slow_max.max(a);
-            fast_max = fast_max.max(b);
-        }
-        assert!(
-            (slow_max - fast_max).abs() < 0.05,
-            "retract must not change max offset: {} vs {}",
-            slow_max,
-            fast_max
-        );
-        let mut slow = 5.0;
-        let mut fast = 5.0;
-        for _ in 0..60 {
-            slow = revert_step(slow, 0.0, 0.033, REVERT_TAU / 0.5, REVERT_LIMIT);
-            fast = revert_step(fast, 0.0, 0.033, REVERT_TAU / 4.0, REVERT_LIMIT);
-        }
-        assert!(fast < slow, "higher retract snaps back sooner");
-        let held = revert_step(5.0, 0.0, 1.0, f32::INFINITY, REVERT_LIMIT);
-        assert!((held - 5.0).abs() < 1e-6, "retract=0 holds");
-        let mut half = 0.0;
-        for _ in 0..400 {
-            half = revert_step(half, 0.15, 0.033, REVERT_TAU, 0.5 * std::f64::consts::TAU);
-        }
-        assert!(
-            half <= 0.5 * std::f64::consts::TAU + 1e-6 && half > 2.0,
-            "limit caps wind-up, got {}",
-            half
-        );
-    }
-
-    #[test]
-    fn limit_parses() {
-        assert!(AnimConfig::from_animation_str(Some("spin y")).limit.is_none());
-        let cfg = AnimConfig::from_animation_str(Some("spin y limit=0.5"));
-        assert!((cfg.limit.unwrap() - 0.5).abs() < 1e-4);
-    }
-
-    #[test]
-    fn retract_parses() {
-        assert!((AnimConfig::from_animation_str(Some("spin y")).retract - 1.0).abs() < 1e-6);
-        let cfg = AnimConfig::from_animation_str(Some("spin y motion=revert retract=2.5"));
-        assert!((cfg.retract - 2.5).abs() < 1e-4);
-        assert_eq!(cfg.motion, Motion::Revert);
+    fn ease_to_root_snaps_to_nearest_turn() {
+        let tau = std::f64::consts::TAU;
+        assert!((ease_to_root(0.0, 0.033) - 0.0).abs() < 1e-9);
+        assert!((ease_to_root(0.05, 0.033) - 0.0).abs() < 1e-9);
+        assert!((ease_to_root(tau - 0.05, 0.033) - tau).abs() < 1e-9);
+        let moved = ease_to_root(1.0, 0.033);
+        assert!(moved < 1.0 && moved > 0.0, "eases toward root, got {}", moved);
+        let moved = ease_to_root(tau + 2.0, 0.033);
+        assert!(moved > tau && moved < tau + 2.0, "eases down, got {}", moved);
     }
 
     #[test]

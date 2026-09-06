@@ -52,7 +52,7 @@ Messed it up? `rm ~/.config/jefetch/config.jsonc && jefetch` starts over.
     "logo": {
         "source": "cachyos",
         "animation": "spin speed=0 xyz",
-        "sharkvis": "motion=revert retract=1 boom=10 chars=blocks",
+        "sharkvis": "return=10 boom=10 chars=blocks",
         "padding": {
             "top": 0,
             "left": 0,
@@ -150,8 +150,9 @@ Colors stay the logo's own unless you add `color=sharkvis`, which hands them
 over to sharkvis's `gradient_low` → `gradient_high`. Same deal with
 characters: sharkvis's charset loses if you set your own.
 
-`motion=continuous` (the default) keeps winding up. `motion=revert` winds to
-a turn and snaps back, with `retract=N` controlling how fast.
+The rotation always keeps winding up while there's sound. `return=N`
+eases the logo back to its root position after `N` seconds of silence.
+Without it the logo stays where the music left it.
 
 ```jsonc
 "animation": "spin y speed=2.0 sharkvis"
@@ -166,7 +167,7 @@ a turn and snaps back, with `retract=N` controlling how fast.
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |
 | `grow=N` | Pulse strength, `0`–`0.3` (default `0.12`, `0` turns it off) |
-| `motion` / `retract` / `limit` | `continuous` (default) or `revert`; `retract=N` is the snap-back speed (`0` holds, default `1`); `limit=N` caps the wind-up in turns, revert only (default `1`) |
+| `return=N` | Seconds of silence before easing back to root position; unset means it never returns |
 
 ## CLI Overrides
 

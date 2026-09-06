@@ -288,6 +288,7 @@ impl App {
         let mut pitch_phase: f64 = 0.0;
         let mut roll_phase: f64 = 0.0;
         let mut last_fx = std::time::Instant::now();
+        let mut last_sound = std::time::Instant::now();
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
         print!("\x1b[0m\x1b[2J\x1b[3J\x1b[H\x1b[?25l");
@@ -433,53 +434,24 @@ impl App {
                         .as_secs_f32()
                         .clamp(0.001, 0.5);
                     last_fx = fx_now;
-                    if cfg.motion == crate::anim::Motion::Revert {
-                        let tau = if cfg.retract <= 0.0 {
-                            f32::INFINITY
-                        } else {
-                            crate::anim::REVERT_TAU / cfg.retract.clamp(0.1, 10.0)
-                        };
-                        let lim = cfg.limit.unwrap_or(1.0).max(0.0) as f64
-                            * std::f64::consts::TAU;
-                        yaw_phase = crate::anim::revert_step(
-                            yaw_phase,
-                            f64::from(yaw_step),
-                            dt,
-                            tau,
-                            lim,
-                        );
-                        pitch_phase = crate::anim::revert_step(
-                            pitch_phase,
-                            f64::from(pitch_step),
-                            dt,
-                            tau,
-                            lim,
-                        );
-                        let roll_step = if shark_live.energy > crate::anim::AUDIO_FLOOR {
-                            f64::from(shark_live.energy) * f64::from(crate::anim::AUDIO_ROLL)
-                        } else {
-                            0.0
-                        };
-                        roll_phase =
-                            crate::anim::revert_step(roll_phase, roll_step, dt, tau, lim);
-                        fx.audio = [
-                            pitch_phase as f32,
-                            yaw_phase as f32,
-                            roll_phase as f32,
-                        ];
-                    } else {
-                        yaw_phase += f64::from(yaw_step);
-                        pitch_phase += f64::from(pitch_step);
-                        if shark_live.energy > crate::anim::AUDIO_FLOOR {
-                            roll_phase += f64::from(shark_live.energy)
-                                * f64::from(crate::anim::AUDIO_ROLL);
+                    yaw_phase += f64::from(yaw_step);
+                    pitch_phase += f64::from(pitch_step);
+                    if shark_live.energy > crate::anim::AUDIO_FLOOR {
+                        roll_phase += f64::from(shark_live.energy)
+                            * f64::from(crate::anim::AUDIO_ROLL);
+                        last_sound = fx_now;
+                    } else if let Some(secs) = cfg.return_secs {
+                        if fx_now.duration_since(last_sound).as_secs_f32() >= secs {
+                            yaw_phase = crate::anim::ease_to_root(yaw_phase, dt);
+                            pitch_phase = crate::anim::ease_to_root(pitch_phase, dt);
+                            roll_phase = crate::anim::ease_to_root(roll_phase, dt);
                         }
-                        fx.audio = [
-                            pitch_phase as f32,
-                            yaw_phase as f32,
-                            roll_phase as f32,
-                        ];
                     }
+                    fx.audio = [
+                        pitch_phase as f32,
+                        yaw_phase as f32,
+                        roll_phase as f32,
+                    ];
                     let boom = cfg.boom.unwrap_or(0.0);
                     fx.scale =
                         1.0 + cfg.grow * shark_live.beat + boom * shark_live.energy;

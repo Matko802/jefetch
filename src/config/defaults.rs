@@ -36,7 +36,7 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
     "logo": {
         "source": "cachyos",
         "animation": "spin speed=0 xyz",
-        "sharkvis": "motion=revert retract=1 boom=10 chars=blocks",
+        "sharkvis": "return=10 boom=10 chars=blocks",
         "padding": {
             "top": 0,
             "left": 0,
