@@ -20,6 +20,8 @@ pub fn render(name: &str, inst: &ModuleInstance, cfg: &Config) -> Option<ModuleO
         "swap" => render_swap(cfg),
         "wm" => render_wm(cfg),
         "de" => render_de(cfg),
+        "initsystem" => render_initsystem(cfg),
+        "lm" => render_lm(cfg),
         "terminal" => render_terminal(cfg),
         "terminalfont" => render_terminal_font(cfg),
         "packages" => render_packages(inst, cfg),
@@ -273,6 +275,34 @@ fn render_wm(cfg: &Config) -> Option<ModuleOutput> {
         format!("{} ({})", w.name, w.session_type)
     };
     Some(render_single("WM", value, cfg))
+}
+
+fn render_initsystem(cfg: &Config) -> Option<ModuleOutput> {
+    let i = crate::detection::initsystem::detect();
+    if i.name.is_empty() {
+        return None;
+    }
+    let value = if i.version.is_empty() {
+        i.name
+    } else {
+        format!("{} {}", i.name, i.version)
+    };
+    Some(render_single("Init System", value, cfg))
+}
+
+fn render_lm(cfg: &Config) -> Option<ModuleOutput> {
+    let m = crate::detection::lm::detect();
+    if m.name.is_empty() {
+        return None;
+    }
+    let value = if m.version.is_empty() {
+        m.name
+    } else if m.version.to_ascii_lowercase().contains(&m.name.to_ascii_lowercase()) {
+        m.version
+    } else {
+        format!("{} {}", m.name, m.version)
+    };
+    Some(render_single("LM", value, cfg))
 }
 
 fn render_de(cfg: &Config) -> Option<ModuleOutput> {
@@ -997,6 +1027,8 @@ pub fn json_type_name(name: &str) -> &'static str {
         "kernel" => "Kernel",
         "wm" => "WM",
         "de" => "DE",
+        "initsystem" => "InitSystem",
+        "lm" => "LM",
         "terminal" => "Terminal",
         "terminalfont" => "TerminalFont",
         "shell" => "Shell",
@@ -1108,6 +1140,26 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
                 ("protocolName", J::Str(String::new())),
                 ("pluginName", J::Str(String::new())),
                 ("version", J::Str(String::new())),
+            ]))
+        }
+        "initsystem" => {
+            let i = crate::detection::initsystem::detect();
+            if i.name.is_empty() {
+                return None;
+            }
+            Some(jobj(vec![
+                ("name", J::Str(i.name)),
+                ("version", J::Str(i.version)),
+            ]))
+        }
+        "lm" => {
+            let m = crate::detection::lm::detect();
+            if m.name.is_empty() {
+                return None;
+            }
+            Some(jobj(vec![
+                ("name", J::Str(m.name)),
+                ("version", J::Str(m.version)),
             ]))
         }
         "terminal" => {

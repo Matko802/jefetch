@@ -74,7 +74,8 @@ a bare name or an object with options:
 All of them: `title`, `separator`, `os`, `host`, `kernel`, `uptime`,
 `packages`, `shell`, `display`, `wm`/`de`, `theme`, `icons`, `font`,
 `cursor`, `terminal`, `terminalfont`, `cpu`, `gpu`, `memory`, `swap`,
-`disk`, `localip`/`ip`, `battery`, `locale`, `break`, `colors`.
+`disk`, `localip`/`ip`, `battery`, `locale`, `break`, `colors`,
+`initsystem`, `lm`.
 
 Two special cases:
 
