@@ -80,21 +80,17 @@ fn render_command(inst: &ModuleInstance) -> Option<ModuleOutput> {
 
 fn render_colors(_cfg: &Config) -> Option<ModuleOutput> {
 
-    let blocks = [
-        (41u8, "black"),
-        (42u8, "red"),
-        (43u8, "green"),
-        (44u8, "yellow"),
-        (45u8, "blue"),
-        (46u8, "magenta"),
-        (47u8, "cyan"),
-        (100u8, "white"),
-    ];
-    let mut line = String::new();
-    for (bg, _) in blocks {
-        line.push_str(&format!("\x1b[{}m  \x1b[0m ", bg));
+    let mut normal = String::new();
+    for bg in 40..=47 {
+        normal.push_str(&format!("\x1b[{bg}m   "));
     }
-    Some(ModuleOutput::supported("", vec![line]))
+    normal.push_str("\x1b[m");
+    let mut bright = String::from("\x1b[5m");
+    for bg in 100..=107 {
+        bright.push_str(&format!("\x1b[{bg}m   "));
+    }
+    bright.push_str("\x1b[m");
+    Some(ModuleOutput::supported("", vec![normal, bright]))
 }
 
 fn render_datetime(cfg: &Config) -> Option<ModuleOutput> {
@@ -1655,6 +1651,23 @@ fn boot_time_iso(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colors_match_fastfetch_default() {
+        let cfg = crate::config::configfile::Config::default();
+        let out = render_colors(&cfg).expect("colors render");
+        let mut normal = String::new();
+        for bg in 40..=47 {
+            normal.push_str(&format!("\x1b[{bg}m   "));
+        }
+        normal.push_str("\x1b[m");
+        let mut bright = String::from("\x1b[5m");
+        for bg in 100..=107 {
+            bright.push_str(&format!("\x1b[{bg}m   "));
+        }
+        bright.push_str("\x1b[m");
+        assert_eq!(out.values, vec![normal, bright]);
+    }
 
     fn sample_amounts() -> Vec<(String, usize)> {
         vec![
