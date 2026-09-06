@@ -7,6 +7,7 @@ pub struct GpuInfo {
     pub model: String,
     pub driver: String,
     pub device_id: String,
+    pub dtype: String,
 }
 
 const VENDOR_NAMES: &[(&str, &str)] = &[
@@ -64,6 +65,7 @@ pub fn detect() -> Vec<GpuInfo> {
             vendor_name: vendor_name(&vendor),
             model: String::new(),
             driver: String::new(),
+            dtype: String::new(),
         };
         if let Some(uevent) = read_file(base.join("device/uevent")) {
             for line in uevent.lines() {
@@ -87,9 +89,40 @@ pub fn detect() -> Vec<GpuInfo> {
         if g.model.is_empty() {
             g.model = format!("{} ({})", g.vendor_name, device);
         }
+        g.dtype = gpu_type(&base, &vendor, &g.driver);
         out.push(g);
     }
     out
+}
+
+fn gpu_type(base: &std::path::Path, vendor: &str, driver: &str) -> String {
+    if vendor.eq_ignore_ascii_case("0x1002") && driver == "amdgpu" {
+        if let Ok(hwmon) = std::fs::read_dir(base.join("device/hwmon")) {
+            for entry in hwmon.flatten() {
+                if entry.path().join("in1_input").exists() {
+                    return "Integrated".to_string();
+                }
+            }
+        }
+        return "Discrete".to_string();
+    }
+    if vendor.eq_ignore_ascii_case("0x8086") {
+        let addr = std::fs::read_link(base.join("device"))
+            .map(|p| {
+                p.file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        if addr == "0000:00:02.0" {
+            return "Integrated".to_string();
+        }
+        return "Discrete".to_string();
+    }
+    if vendor.eq_ignore_ascii_case("0x10de") {
+        return "Discrete".to_string();
+    }
+    String::new()
 }
 
 fn vendor_name(id: &str) -> String {

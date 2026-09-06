@@ -427,11 +427,14 @@ fn render_wm(cfg: &Config) -> Option<ModuleOutput> {
     if w.name.is_empty() {
         return None;
     }
-    let value = if w.session_type.is_empty() {
-        w.name.clone()
-    } else {
-        format!("{} ({})", w.name, w.session_type)
-    };
+    let mut value = w.name.clone();
+    if !w.version.is_empty() {
+        value.push(' ');
+        value.push_str(&w.version);
+    }
+    if !w.session_type.is_empty() {
+        value.push_str(&format!(" ({})", w.session_type));
+    }
     Some(render_single("WM", value, cfg))
 }
 
@@ -615,15 +618,13 @@ fn format_packages(amounts: &[(String, usize)], combined: bool) -> Vec<String> {
 
 fn render_board(_cfg: &Config) -> Option<ModuleOutput> {
     let b = crate::detection::board::detect();
-    if b.name.is_empty() && b.vendor.is_empty() {
+    if b.name.is_empty() {
         return None;
     }
-    let value = if b.vendor.is_empty() {
+    let value = if b.version.is_empty() {
         b.name.clone()
-    } else if b.name.is_empty() || b.name.eq_ignore_ascii_case(&b.vendor) {
-        b.vendor.clone()
     } else {
-        format!("{} ({})", b.vendor, b.name)
+        format!("{} ({})", b.name, b.version)
     };
     Some(render_single("Board", value, _cfg))
 }
@@ -730,10 +731,10 @@ fn render_gpu(_cfg: &Config) -> Option<ModuleOutput> {
     }
     let mut values = Vec::new();
     for g in &gpus {
-        let v = if g.driver.is_empty() {
+        let v = if g.dtype.is_empty() {
             g.model.clone()
         } else {
-            format!("{} ({})", g.model, g.driver)
+            format!("{} [{}]", g.model, g.dtype)
         };
         values.push(v);
     }
@@ -775,16 +776,15 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
     }
     let mut values = Vec::new();
     for d in &ds {
-
-        let mut name = d.name.clone();
-        if let Some(rest) = name.strip_prefix("card") {
-            if let Some(sep) = rest.find('-') {
-                name = rest[sep + 1..].to_string();
-            }
+        let mut v = format!("{}x{}", d.width, d.height);
+        if d.size_in > 0 {
+            v.push_str(&format!(" in {}\"", d.size_in));
         }
-        let mut v = format!("{} @ {}x{}", name, d.width, d.height);
         if d.refresh_rate > 0 {
-            v.push_str(&format!(" @ {} Hz", d.refresh_rate));
+            v.push_str(&format!(", {} Hz", d.refresh_rate));
+        }
+        if !d.dtype.is_empty() {
+            v.push_str(&format!(" [{}]", d.dtype));
         }
         values.push(v);
     }
@@ -1150,7 +1150,7 @@ fn render_theme(_cfg: &Config, which: &str) -> Option<ModuleOutput> {
             key = "Cursor";
         }
         "font" => {
-            value = t.font;
+            value = pretty_pango_font(&t.font);
             key = "Font";
         }
         _ => {}
@@ -1159,6 +1159,25 @@ fn render_theme(_cfg: &Config, which: &str) -> Option<ModuleOutput> {
         return None;
     }
     Some(render_single(key, value, _cfg))
+}
+
+fn pretty_pango_font(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some((name, size)) = raw.rsplit_once(' ') {
+        if !name.is_empty() {
+            if let Ok(n) = size.parse::<f64>() {
+                if n > 0.0 {
+                    let size = if n.fract() == 0.0 {
+                        format!("{}", n as u64)
+                    } else {
+                        size.to_string()
+                    };
+                    return format!("{name} ({size}pt)");
+                }
+            }
+        }
+    }
+    raw.to_string()
 }
 
 #[allow(dead_code)]
@@ -1987,5 +2006,18 @@ mod tests {
             localip_line(&empty),
             ("Local IP (eth0)".to_string(), String::new())
         );
+    }
+}
+
+#[cfg(test)]
+mod pango_tests {
+    use super::pretty_pango_font;
+
+    #[test]
+    fn splits_pango_size() {
+        assert_eq!(pretty_pango_font("DepartureMono Nerd Font 10"), "DepartureMono Nerd Font (10pt)");
+        assert_eq!(pretty_pango_font("Inter 11.5"), "Inter (11.5pt)");
+        assert_eq!(pretty_pango_font("monospace"), "monospace");
+        assert_eq!(pretty_pango_font(""), "");
     }
 }

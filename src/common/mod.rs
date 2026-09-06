@@ -1,4 +1,7 @@
 pub fn format_bytes(bytes: u64, _unit: &str) -> String {
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
     let (value, suffix) = humanize_unit(bytes);
     format!("{:.2} {}", value, suffix)
 }

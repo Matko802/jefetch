@@ -62,7 +62,7 @@ impl App {
         let path_jsonc = format!("{}/jefetch/config.jsonc", dir);
         if let Ok(content) = std::fs::read_to_string(&path_jsonc) {
             if content.trim().is_empty() {
-
+                backup_config(&path_jsonc);
                 if let Ok(_) = std::fs::create_dir_all(format!("{}/jefetch", dir)) {
                     if let Ok(_) = std::fs::write(&path_jsonc, crate::config::defaults::DEFAULT_JSONC_CONFIG) {
                         return Some(path_jsonc);
@@ -1255,6 +1255,11 @@ fn install_live_signal_handlers() {
 fn config_stamp(path: &str) -> Option<(std::time::SystemTime, u64)> {
     let meta = std::fs::metadata(path).ok()?;
     Some((meta.modified().ok()?, meta.len()))
+}
+
+fn backup_config(path: &str) {
+    let backup = format!("{}.bak", path);
+    let _ = std::fs::copy(path, &backup);
 }
 
 pub fn load_config_file(path: &str) -> Option<Config> {
