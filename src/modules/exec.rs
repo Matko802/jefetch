@@ -13,11 +13,6 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
 
     let base = super::exec_impl::render(name.as_str(), inst, cfg)?;
 
-    let mut base = base;
-    if name == "disk" && inst.args.key.is_some() {
-        base.repeat_key = true;
-    }
-
     let values: Vec<String> = if let Some(fmt_str) = &inst.args.format {
         if name == "packages" && super::exec_impl::packages_owns_format(fmt_str) {
             base.values.clone()
