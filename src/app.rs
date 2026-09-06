@@ -748,35 +748,13 @@ impl App {
             let indent = key_visible + crate::print::format::visible_len(&sep_render) + padding;
             for (idx, v) in out.values.iter().enumerate() {
                 if idx == 0 || out.repeat_key {
-                    if out.repeat_key && idx > 0 && !v.starts_with("Disk (") {
-                        lines.push(format!(
-                            "{}{}{}{}",
-                            out.key,
-                            sep_render,
-                            " ".repeat(padding),
-                            v
-                        ));
-                    } else if out.repeat_key && idx > 0 {
-                        if let Some(colon) = v.find(": ") {
-                            lines.push(format!(
-                                "{}{}{}{}",
-                                &v[..colon],
-                                sep_render,
-                                " ".repeat(padding),
-                                &v[colon + 2..]
-                            ));
-                        } else {
-                            lines.push(v.clone());
-                        }
-                    } else {
-                        lines.push(format!(
-                            "{}{}{}{}",
-                            out.key,
-                            sep_render,
-                            " ".repeat(padding),
-                            v
-                        ));
-                    }
+                    lines.push(format!(
+                        "{}{}{}{}",
+                        out.key,
+                        sep_render,
+                        " ".repeat(padding),
+                        v
+                    ));
                 } else {
                     lines.push(format!("{}{}", " ".repeat(indent), v));
                 }
