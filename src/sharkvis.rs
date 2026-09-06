@@ -309,16 +309,28 @@ pub struct LiveState {
 }
 
 pub fn read_live_state() -> Option<LiveState> {
+    read_live_state_sig(None).map(|(st, _)| st)
+}
+
+type StateSig = (String, std::time::SystemTime, u64);
+
+fn read_live_state_sig(known: Option<&(StateSig, LiveState)>) -> Option<(LiveState, StateSig)> {
     let stale = stale_after();
     for p in state_paths() {
         let meta = std::fs::metadata(&p).ok()?;
-        let fresh = meta
-            .modified()
+        let mtime = meta.modified().ok()?;
+        let fresh = mtime
+            .elapsed()
             .ok()
-            .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age <= stale);
         if !fresh {
             continue;
+        }
+        let sig = (p.clone(), mtime, meta.len());
+        if let Some((known_sig, known_state)) = known {
+            if *known_sig == sig {
+                return Some((known_state.clone(), sig));
+            }
         }
         if let Ok(text) = std::fs::read_to_string(&p) {
             if text.trim().is_empty() {
@@ -334,7 +346,7 @@ pub fn read_live_state() -> Option<LiveState> {
                 || st.left.is_some()
                 || st.right.is_some()
             {
-                return Some(st);
+                return Some((st, sig));
             }
         }
     }
@@ -498,6 +510,7 @@ fn parse_beat(v: &str) -> Option<f32> {
 
 const BEAT_RATE: u32 = 8000;
 const BEAT_WINDOW: usize = 256;
+const MAX_PA_FRAME: usize = 256 * 1024;
 
 struct BeatSample {
     energy_bits: AtomicU32,
@@ -1017,7 +1030,7 @@ impl BeatClient {
         self.sock.read_exact(&mut desc).map_err(|e| format!("pulse read: {}", e))?;
         let len = u32::from_be_bytes(desc[0..4].try_into().unwrap()) as usize;
         let channel = u32::from_be_bytes(desc[4..8].try_into().unwrap());
-        if len == 0 || len > 4 * 1024 * 1024 {
+        if len == 0 || len > MAX_PA_FRAME {
             return Err(format!("pulse: bogus frame {}", len));
         }
         let mut payload = vec![0u8; len];
@@ -1134,7 +1147,7 @@ impl BeatRecord {
                 self.sock.read_exact(&mut desc).map_err(|e| format!("pulse read: {}", e))?;
                 let len = u32::from_be_bytes(desc[0..4].try_into().unwrap()) as usize;
                 let channel = u32::from_be_bytes(desc[4..8].try_into().unwrap());
-                if len > 4 * 1024 * 1024 {
+                if len == 0 || len > MAX_PA_FRAME {
                     return Err("pulse: bogus frame".into());
                 }
                 let mut payload = vec![0u8; len];
@@ -1173,6 +1186,7 @@ pub struct Sync {
     monitor: Option<BeatMonitor>,
     last: LiveFrame,
     last_ok: Option<Instant>,
+    state_mem: Option<(StateSig, LiveState)>,
 }
 
 impl Sync {
@@ -1186,6 +1200,7 @@ impl Sync {
             monitor: None,
             last: LiveFrame::inactive(),
             last_ok: None,
+            state_mem: None,
         }
     }
 
@@ -1219,9 +1234,10 @@ impl Sync {
         let mut bass: Option<f32> = None;
         let mut left: Option<f32> = None;
         let mut right: Option<f32> = None;
-        let live = read_live_state();
+        let live = read_live_state_sig(self.state_mem.as_ref());
         let have_state = live.is_some();
-        if let Some(live) = live {
+        if let Some((live, sig)) = live {
+            self.state_mem = Some((sig, live.clone()));
             energy = live.energy;
             beat = live.beat;
             color = live.color;

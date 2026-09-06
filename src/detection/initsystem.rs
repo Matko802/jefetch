@@ -7,6 +7,11 @@ pub struct InitSystemInfo {
 }
 
 pub fn detect() -> InitSystemInfo {
+    static CACHE: std::sync::OnceLock<InitSystemInfo> = std::sync::OnceLock::new();
+    CACHE.get_or_init(detect_uncached).clone()
+}
+
+fn detect_uncached() -> InitSystemInfo {
     let mut info = InitSystemInfo::default();
     let comm = read_file("/proc/1/comm").map(|s| s.trim().to_string()).unwrap_or_default();
     let exe = std::fs::read_link("/proc/1/exe")

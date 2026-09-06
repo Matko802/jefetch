@@ -12,6 +12,36 @@ const KNOWN: &[&str] = &[
 ];
 
 pub fn detect() -> LoginManagerInfo {
+    let key = display_manager_target();
+    if key.is_none() {
+        return detect_uncached();
+    }
+    {
+        let guard = cache_slot().lock().unwrap_or_else(|e| e.into_inner());
+        if let (Some(info), cached) = (&guard.0, &guard.1) {
+            if cached == &Some(key.clone()) {
+                return info.clone();
+            }
+        }
+    }
+    let info = detect_uncached();
+    *cache_slot().lock().unwrap_or_else(|e| e.into_inner()) = (Some(info.clone()), Some(key));
+    info
+}
+
+fn cache_slot() -> &'static std::sync::Mutex<(Option<LoginManagerInfo>, Option<Option<String>>)> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<(Option<LoginManagerInfo>, Option<Option<String>>)>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new((None, None)))
+}
+
+fn display_manager_target() -> Option<String> {
+    std::fs::read_link("/etc/systemd/system/display-manager.service")
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+fn detect_uncached() -> LoginManagerInfo {
     let mut info = LoginManagerInfo::default();
     let raw = display_manager_service().or_else(|| running_manager());
     let Some(raw) = raw else { return info };

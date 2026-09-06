@@ -369,6 +369,12 @@ pub fn visible_len(s: &str) -> usize {
 
 pub fn truncate_visible(s: &str, max: usize) -> String {
     let mut out = String::new();
+    truncate_visible_into(s, max, &mut out);
+    out
+}
+
+pub fn truncate_visible_into(s: &str, max: usize, out: &mut String) {
+    out.clear();
     let b = s.as_bytes();
     let mut i = 0;
     let mut w = 0;
@@ -396,7 +402,6 @@ pub fn truncate_visible(s: &str, max: usize) -> String {
     if cut {
         out.push_str("\x1b[0m");
     }
-    out
 }
 
 #[inline]

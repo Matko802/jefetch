@@ -355,38 +355,50 @@ fn kitty_tty_font() -> Option<(String, String)> {
     if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
         return None;
     }
-    let result = kitty_tty_exchange(fd, &req, family_key, size_key);
-    unsafe {
-        libc::tcsetattr(fd, libc::TCSANOW, &orig);
+    let _guard = TtyGuard { fd, orig };
+    kitty_tty_exchange(fd, &req, family_key, size_key)
+}
+
+struct TtyGuard {
+    fd: i32,
+    orig: libc::termios,
+}
+
+impl Drop for TtyGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &self.orig);
+        }
     }
-    result
 }
 
 fn kitty_tty_exchange(fd: i32, req: &[u8], family_key: &str, size_key: &str) -> Option<(String, String)> {
-    use std::io::Write;
-    use std::os::unix::io::FromRawFd;
-    let mut writer = unsafe { std::fs::File::from_raw_fd(fd) };
-    if writer.write_all(req).is_err() || writer.flush().is_err() {
-        std::mem::forget(writer);
-        return None;
+    let mut written = 0;
+    while written < req.len() {
+        let n = unsafe {
+            libc::write(
+                fd,
+                req[written..].as_ptr() as *const libc::c_void,
+                (req.len() - written) as libc::size_t,
+            )
+        };
+        if n <= 0 {
+            return None;
+        }
+        written += n as usize;
     }
-    std::mem::forget(writer);
-    let mut reader = unsafe { std::fs::File::from_raw_fd(fd) };
     let mut buf = Vec::new();
     let mut tmp = [0u8; 512];
     for _ in 0..4 {
-        match reader.read(&mut tmp) {
-            Ok(0) => continue,
-            Ok(n) => {
-                buf.extend_from_slice(&tmp[..n]);
-                if buf.windows(2).filter(|w| w == b"\x1b\\").count() >= 2 {
-                    break;
-                }
-            }
-            Err(_) => break,
+        let n = unsafe { libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, tmp.len() as libc::size_t) };
+        if n <= 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n as usize]);
+        if buf.windows(2).filter(|w| w == b"\x1b\\").count() >= 2 {
+            break;
         }
     }
-    std::mem::forget(reader);
     kitty_tty_parse(&buf, family_key, size_key)
 }
 

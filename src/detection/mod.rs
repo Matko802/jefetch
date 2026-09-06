@@ -67,62 +67,6 @@ pub fn getenv(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-#[allow(dead_code)]
-pub fn fastfetch_json() -> Option<String> {
-    use std::sync::OnceLock;
-    static CACHE: OnceLock<Option<String>> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let cache_path = {
-            if let Some(dir) = std::env::var_os("XDG_CACHE_HOME") {
-                format!("{}/jefetch/cache.json", dir.to_string_lossy())
-            } else if let Some(home) = std::env::var_os("HOME") {
-                format!("{}/.cache/jefetch/cache.json", home.to_string_lossy())
-            } else {
-                "/tmp/jefetch-cache.json".to_string()
-            }
-        };
-
-        if let Ok(meta) = std::fs::metadata(&cache_path) {
-            if let Ok(mtime) = meta.modified() {
-                let is_fresh = mtime.elapsed().map(|e| e.as_secs() < 60).unwrap_or(false);
-                if let Ok(txt) = std::fs::read_to_string(&cache_path) {
-                    if !txt.is_empty() {
-                        if is_fresh {
-                            return Some(txt);
-                        }
-
-                        let cache_clone = cache_path.clone();
-                        std::thread::spawn(move || {
-                            if let Some(out) = run_capture_timeout(
-                                "/run/current-system/sw/bin/fastfetch",
-                                &["--json", "--structure", "title:separator:os:host:kernel:uptime:packages:shell:display:wm:theme:icons:font:cursor:terminal:cpu:gpu:memory:swap:disk:localip:locale:break:colors"],
-                                800,
-                            ) {
-                                let _ = std::fs::create_dir_all(std::path::Path::new(&cache_clone).parent().unwrap_or(std::path::Path::new("/tmp")));
-                                let _ = std::fs::write(&cache_clone, &out);
-                            }
-                        });
-                        return Some(txt);
-                    }
-                }
-            }
-        }
-
-        let cache_clone = cache_path.clone();
-        std::thread::spawn(move || {
-            if let Some(out) = run_capture_timeout(
-                "/run/current-system/sw/bin/fastfetch",
-                &["--json", "--structure", "title:separator:os:host:kernel:uptime:packages:shell:display:wm:theme:icons:font:cursor:terminal:cpu:gpu:memory:swap:disk:localip:locale:break:colors"],
-                800,
-            ) {
-                let _ = std::fs::create_dir_all(std::path::Path::new(&cache_clone).parent().unwrap_or(std::path::Path::new("/tmp")));
-                let _ = std::fs::write(&cache_clone, &out);
-            }
-        });
-        None
-    }).clone()
-}
-
 pub fn run_capture(cmd: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(cmd)
         .args(args)
@@ -150,12 +94,22 @@ pub fn run_capture_timeout(cmd: &str, args: &[&str], timeout_ms: u64) -> Option<
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
+    let pid = child.id();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let out = child.wait_with_output();
         let _ = tx.send(out);
     });
-    let out = rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)).ok()?.ok()?;
+    let out = match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+        Ok(out) => out,
+        Err(_) => {
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+            }
+            return None;
+        }
+    };
+    let out = out.ok()?;
     if !out.status.success() {
         return None;
     }

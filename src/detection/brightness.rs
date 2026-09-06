@@ -24,7 +24,7 @@ pub fn detect() -> Vec<BrightnessInfo> {
         if max == 0 {
             continue;
         }
-        let percentage = ((value as f64 / max as f64) * 100.0).round() as u8;
+        let percentage = ((value as f64 / max as f64) * 100.0).round().clamp(0.0, 100.0) as u8;
         out.push(BrightnessInfo {
             name,
             value,

@@ -1,4 +1,4 @@
-use crate::detection::{getenv, run_capture};
+use crate::detection::getenv;
 
 #[derive(Debug, Clone, Default)]
 pub struct ShellInfo {
@@ -10,13 +10,42 @@ pub struct ShellInfo {
 }
 
 pub fn detect() -> ShellInfo {
+    let path = find_shell_via_proc().or_else(|| getenv("SHELL")).unwrap_or_default();
+    let key = shell_mtime(&path);
+    {
+        let guard = cache_slot().lock().unwrap_or_else(|e| e.into_inner());
+        if let (Some(info), cached) = (&guard.0, &guard.1) {
+            if *cached == key {
+                return info.clone();
+            }
+        }
+    }
+    let info = detect_uncached(&path);
+    *cache_slot().lock().unwrap_or_else(|e| e.into_inner()) = (Some(info.clone()), key);
+    info
+}
+
+fn cache_slot() -> &'static std::sync::Mutex<(Option<ShellInfo>, Option<std::time::SystemTime>)> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<(Option<ShellInfo>, Option<std::time::SystemTime>)>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new((None, None)))
+}
+
+fn shell_mtime(path: &str) -> Option<std::time::SystemTime> {
+    if path.is_empty() {
+        return None;
+    }
+    let resolved = resolve(path);
+    std::fs::metadata(&resolved).and_then(|m| m.modified()).ok()
+}
+
+fn detect_uncached(shell_path: &str) -> ShellInfo {
     let mut info = ShellInfo::default();
 
-    let shell_path = find_shell_via_proc().or_else(|| getenv("SHELL")).unwrap_or_default();
     if shell_path.is_empty() {
         return info;
     }
-    info.shell_path = shell_path;
+    info.shell_path = shell_path.to_string();
 
     let base = info
         .shell_path
@@ -129,7 +158,7 @@ fn version_output(path: &str) -> String {
     if real.is_empty() {
         return String::new();
     }
-    let out = run_capture(&real, &["--version"]);
+    let out = crate::detection::run_capture_timeout(&real, &["--version"], 500);
     out.unwrap_or_default()
 }
 

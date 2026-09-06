@@ -465,15 +465,22 @@ impl App {
                         info_count,
                         &fx,
                     ),
-                    None => base_logo.clone().expect("animated needs a logo"),
+                    None => base_logo.clone().unwrap_or(ResolvedLogo {
+                        lines: Vec::new(),
+                        colors: Vec::new(),
+                        width: 0,
+                        padding_right: 0,
+                    }),
                 };
                 out.clear();
                 out.push_str("\x1b[H");
                 let n = anim_logo.lines.len();
+                let mut line = String::new();
+                let mut clipped = String::new();
                 for row in 0..n {
 
                     let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
-                    let mut line = String::new();
+                    line.clear();
                     line.push_str(logo_canvas);
 
                     let info_row = row as isize - 1;
@@ -481,10 +488,12 @@ impl App {
                         line.push_str(&" ".repeat(GAP));
                         line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
                     }
-                    out.push_str(&crate::print::format::truncate_visible(
+                    crate::print::format::truncate_visible_into(
                         line.trim_end(),
                         cols,
-                    ));
+                        &mut clipped,
+                    );
+                    out.push_str(&clipped);
                     out.push_str("\x1b[K");
                     if row + 1 < n {
                         out.push('\n');
@@ -683,7 +692,9 @@ impl App {
                     }));
                 }
                 for h in handles {
-                    ordered.push(h.join().unwrap());
+                    if let Ok(line) = h.join() {
+                        ordered.push(line);
+                    }
                 }
             });
             ordered.sort_by_key(|(idx, _)| *idx);

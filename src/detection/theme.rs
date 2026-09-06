@@ -12,6 +12,40 @@ pub struct GtkThemeInfo {
 }
 
 pub fn detect() -> GtkThemeInfo {
+    let key = settings_key();
+    {
+        let guard = cache_slot().lock().unwrap_or_else(|e| e.into_inner());
+        if let (Some(info), cached) = (&guard.0, &guard.1) {
+            if cached == &Some(key) {
+                return info.clone();
+            }
+        }
+    }
+    let info = detect_uncached();
+    *cache_slot().lock().unwrap_or_else(|e| e.into_inner()) = (Some(info.clone()), Some(key));
+    info
+}
+
+fn cache_slot() -> &'static std::sync::Mutex<(Option<GtkThemeInfo>, Option<SettingsKey>)> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<(Option<GtkThemeInfo>, Option<SettingsKey>)>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new((None, None)))
+}
+
+type SettingsKey = (Option<std::time::SystemTime>, Option<std::time::SystemTime>, Option<std::time::SystemTime>, Option<std::time::SystemTime>);
+
+fn settings_key() -> SettingsKey {
+    let home = getenv("HOME").unwrap_or_default();
+    let mtime = |p: String| std::fs::metadata(&p).and_then(|m| m.modified()).ok();
+    (
+        mtime(format!("{}/.config/gtk-3.0/settings.ini", home)),
+        mtime(format!("{}/.gtkrc-2.0", home)),
+        mtime(format!("{}/.config/gtk-4.0/settings.ini", home)),
+        mtime(format!("{}/.config/dconf/user", home)),
+    )
+}
+
+fn detect_uncached() -> GtkThemeInfo {
     let mut info = GtkThemeInfo {
         desktop: desktop_name(),
         ..Default::default()
@@ -74,7 +108,7 @@ fn parse_settings_file(info: &mut GtkThemeInfo) {
 
 fn gsettings_lookup(key: &str) -> Option<String> {
     let schema = "org.gnome.desktop.interface";
-    let v = crate::detection::run_capture("gsettings", &["get", schema, key])?;
+    let v = crate::detection::run_capture_timeout("gsettings", &["get", schema, key], 500)?;
     let v = v.trim().trim_matches('\'').to_string();
     if v.is_empty() {
         None

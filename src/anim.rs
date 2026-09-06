@@ -994,6 +994,8 @@ pub struct LogoCloud {
     buf_glyph: Vec<char>,
     buf_w: usize,
     buf_h: usize,
+    tint_rows: Vec<String>,
+    tint_key: Option<(Option<((u8, u8, u8), (u8, u8, u8))>, usize)>,
 }
 
 pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud> {
@@ -1025,6 +1027,8 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
         buf_glyph: Vec::new(),
         buf_w: 0,
         buf_h: 0,
+        tint_rows: Vec::new(),
+        tint_key: None,
     })
 }
 
@@ -1186,6 +1190,8 @@ pub fn render_cloud_with_fx(
         buf_glyph,
         buf_w,
         buf_h,
+        tint_rows,
+        tint_key,
     } = cloud;
     let (sub_rows, sub_cols) = (*sub_rows, *sub_cols);
     let has_ansi = *has_ansi;
@@ -1326,25 +1332,28 @@ pub fn render_cloud_with_fx(
     let total_sub = sub_rows * sub_cols;
     let full_mask = (1u32 << total_sub) - 1;
 
-    let tint_rows: Vec<String> = match fx.grad {
-        Some(((lr, lg, lb), (hr, hg, hb))) => (0..h)
-            .map(|y| {
+    let tint_key_now = Some((fx.grad, h));
+    if *tint_key != tint_key_now {
+        tint_rows.clear();
+        if let Some(((lr, lg, lb), (hr, hg, hb))) = fx.grad {
+            for y in 0..h {
                 let t = if h > 1 {
                     (h - 1 - y) as f32 / (h - 1) as f32
                 } else {
                     0.0
                 };
                 let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
-                format!(
+                tint_rows.push(format!(
                     "\x1b[38;2;{};{};{}m",
                     mix(lr, hr),
                     mix(lg, hg),
                     mix(lb, hb)
-                )
-            })
-            .collect(),
-        None => Vec::new(),
-    };
+                ));
+            }
+        }
+        *tint_key = tint_key_now;
+    }
+    let tint_rows: &[String] = tint_rows;
 
     fn push_color(
         line: &mut String,

@@ -290,7 +290,7 @@ fn render_loadavg(cfg: &Config) -> Option<ModuleOutput> {
         .take(3)
         .map(|s| s.to_string())
         .collect();
-    if vals.is_empty() {
+    if vals.len() < 3 {
         return None;
     }
     Some(render_single(
@@ -491,41 +491,6 @@ fn render_terminal(cfg: &Config) -> Option<ModuleOutput> {
     Some(render_single("Terminal", value, cfg))
 }
 
-#[allow(dead_code)]
-fn fastfetch_terminal() -> Option<String> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != "Terminal" { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        let o = result.obj()?;
-        let pretty = o.iter().find(|(k, _)| k == "prettyName").and_then(|(_, v)| v.as_str()).unwrap_or("");
-        let exe = o.iter().find(|(k, _)| k == "exe").and_then(|(_, v)| v.as_str()).unwrap_or("");
-        let version = o.iter().find(|(k, _)| k == "version").and_then(|(_, v)| v.as_str()).unwrap_or("");
-
-        if pretty.starts_with("ai.opencode.desktop") {
-            return Some(pretty.to_string());
-        }
-        if !pretty.is_empty() && !version.is_empty() {
-            return Some(format!("{} {}", pretty, version));
-        }
-        if !exe.is_empty() && !exe.starts_with("/nix/store") {
-            return Some(exe.to_string());
-        }
-        if !pretty.is_empty() {
-            return Some(pretty.to_string());
-        }
-        if !exe.is_empty() {
-
-            return Some(exe.to_string());
-        }
-    }
-    None
-}
-
 fn render_terminal_font(cfg: &Config) -> Option<ModuleOutput> {
     let t = crate::detection::terminal::detect();
     if t.font.is_empty() {
@@ -692,34 +657,6 @@ fn render_cpu(inst: &ModuleInstance) -> Option<ModuleOutput> {
     Some(render_single("CPU", value, &Config::default()))
 }
 
-#[allow(dead_code)]
-fn fastfetch_cpu() -> Option<String> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != "CPU" { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        let o = result.obj()?;
-        let model = o.iter().find(|(k, _)| k == "cpu").and_then(|(_, v)| v.as_str()).unwrap_or("");
-        if model.is_empty() { return None; }
-        let cores = o.iter().find(|(k, _)| k == "cores").and_then(|(_, v)| v.obj());
-        let logical = cores.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "logical").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-        let freq = o.iter().find(|(k, _)| k == "frequency").and_then(|(_, v)| v.obj());
-        let max = freq.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "max").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-        let base = freq.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "base").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-        let f = if max > 0 { max } else { base };
-        let mut v = if logical > 0 { format!("{} ({})", model, logical) } else { model.to_string() };
-        if f > 0 {
-            v = format!("{} @ {:.2} GHz", v, f as f64 / 1000.0);
-        }
-        return Some(v);
-    }
-    None
-}
-
 fn render_gpu(_cfg: &Config) -> Option<ModuleOutput> {
     let gpus = crate::detection::gpu::detect();
     if gpus.is_empty() {
@@ -735,34 +672,6 @@ fn render_gpu(_cfg: &Config) -> Option<ModuleOutput> {
         values.push(v);
     }
     Some(ModuleOutput::supported("GPU", values))
-}
-
-#[allow(dead_code)]
-fn fastfetch_gpu() -> Option<Vec<String>> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != "GPU" { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        let gpus = result.arr()?;
-        let mut out = Vec::new();
-        for g in gpus {
-            let o = g.obj()?;
-            let name = o.iter().find(|(k, _)| k == "name").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            let typ = o.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            if name.is_empty() { continue; }
-            let mut v = name.to_string();
-            if !typ.is_empty() && typ != "Unknown" {
-                v.push_str(&format!(" [{}]", typ));
-            }
-            out.push(v);
-        }
-        if !out.is_empty() { return Some(out); }
-    }
-    None
 }
 
 fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
@@ -785,100 +694,6 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
         values.push(v);
     }
     Some(ModuleOutput::supported("Display", values))
-}
-
-#[allow(dead_code)]
-fn fastfetch_display() -> Option<ModuleOutput> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != "Display" { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        let displays = result.arr()?;
-        let mut values = Vec::new();
-        let mut key_name = "Display".to_string();
-        for d in displays {
-            let o = d.obj()?;
-            let name = o.iter().find(|(k, _)| k == "name").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            if !name.is_empty() {
-                key_name = format!("Display ({})", name);
-            }
-            let output = o.iter().find(|(k, _)| k == "output").and_then(|(_, v)| v.obj());
-            let width = output.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "width").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-            let height = output.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "height").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-            let refresh = output.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "refreshRate").and_then(|(_, v)| v.as_f64())).unwrap_or(0.0);
-            let physical = o.iter().find(|(k, _)| k == "physical").and_then(|(_, v)| v.obj());
-            let pwidth = physical.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "width").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-            let pheight = physical.as_ref().and_then(|m| m.iter().find(|(k, _)| k == "height").and_then(|(_, v)| v.as_u64())).unwrap_or(0);
-            let typ = o.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            let mut size_str = String::new();
-            if pwidth > 0 && pheight > 0 {
-                let diag_mm = ((pwidth as f64).powi(2) + (pheight as f64).powi(2)).sqrt();
-                let diag_in = diag_mm / 25.4;
-                size_str = format!(" in {}\"", diag_in.round() as u64);
-            }
-            let mut v = format!("{}x{}{}, {} Hz", width, height, size_str, refresh.round() as u64);
-            if !typ.is_empty() {
-                v.push_str(&format!(" [{}]", typ));
-            }
-            values.push(v);
-        }
-        if !values.is_empty() {
-            return Some(ModuleOutput::supported(&key_name, values));
-        }
-    }
-    None
-}
-
-#[allow(dead_code)]
-fn fastfetch_disk(_inst: &ModuleInstance) -> Option<ModuleOutput> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != "Disk" { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        let disks = result.arr()?;
-        let mut values = Vec::new();
-        let mut first_key = String::new();
-        for d in disks {
-            let o = d.obj()?;
-            let mp = o.iter().find(|(k, _)| k == "mountpoint").and_then(|(_, v)| v.as_str()).unwrap_or("/");
-
-            let vol_type = o.iter().find(|(k, _)| k == "volumeType").and_then(|(_, v)| v.arr());
-            let is_regular = vol_type.map(|arr| arr.iter().any(|v| v.as_str() == Some("Regular"))).unwrap_or(false);
-            let is_subvol = vol_type.map(|arr| arr.iter().any(|v| v.as_str() == Some("Subvolume"))).unwrap_or(false);
-            if is_subvol && !is_regular {
-                continue;
-            }
-            let fs = o.iter().find(|(k, _)| k == "filesystem").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            let bytes = o.iter().find(|(k, _)| k == "bytes").and_then(|(_, v)| v.obj())?;
-            let total = bytes.iter().find(|(k, _)| k == "total").and_then(|(_, v)| v.as_u64()).unwrap_or(0);
-            let used = bytes.iter().find(|(k, _)| k == "used").and_then(|(_, v)| v.as_u64()).unwrap_or(0);
-            let total_s = common::format_bytes(total, "");
-            let used_s = common::format_bytes(used, "");
-            let pct_val = common::percent(used, total).unwrap_or(0);
-            let mut v = format!("{} / {} {}", used_s, total_s, pct_colored(pct_val));
-            if !fs.is_empty() {
-                v.push_str(&format!(" - {}", fs));
-            }
-            if first_key.is_empty() {
-                first_key = format!("Disk ({})", mp);
-                values.push(v);
-            } else {
-                values.push(format!("Disk ({}): {}", mp, v));
-            }
-        }
-        if !values.is_empty() {
-            return Some(ModuleOutput::supported(&first_key, values));
-        }
-    }
-    None
 }
 
 fn pct_colored(pct_val: u8) -> String {
@@ -1052,40 +867,6 @@ fn localip_line(i: &crate::detection::localip::IpInfo) -> (String, String) {
     (key, String::new())
 }
 
-#[allow(dead_code)]
-fn fastfetch_localip() -> Option<ModuleOutput> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != "LocalIp" { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        let ips = result.arr()?;
-        let mut values = Vec::new();
-        let mut first_key = String::new();
-        for ip in ips {
-            let o = ip.obj()?;
-            let name = o.iter().find(|(k, _)| k == "name").and_then(|(_, v)| v.as_str()).unwrap_or("");
-            let ipv4 = o.iter().find(|(k, _)| k == "ipv4").and_then(|(_, v)| v.as_str()).unwrap_or("");
-
-            let v = if !ipv4.is_empty() { ipv4.to_string() } else { String::new() };
-            if v.is_empty() { continue; }
-            if first_key.is_empty() {
-                first_key = format!("Local IP ({})", name);
-                values.push(v);
-            } else {
-                values.push(format!("Local IP ({}): {}", name, v));
-            }
-        }
-        if !values.is_empty() {
-            return Some(ModuleOutput::supported(&first_key, values));
-        }
-    }
-    None
-}
-
 fn render_wifi(_cfg: &Config) -> Option<ModuleOutput> {
     let ws = crate::detection::wifi::detect();
     if ws.is_empty() {
@@ -1169,62 +950,6 @@ fn pretty_pango_font(raw: &str) -> String {
         }
     }
     raw.to_string()
-}
-
-#[allow(dead_code)]
-fn fastfetch_theme(which: &str) -> Option<String> {
-    let json = crate::detection::fastfetch_json()?;
-    let root = crate::config::parse(&json).ok()?;
-    let arr = root.arr()?;
-    let target_type = match which {
-        "theme" => "Theme",
-        "icons" => "Icons",
-        "cursor" => "Cursor",
-        "font" => "Font",
-        _ => return None,
-    };
-    for item in arr {
-        let obj = item.obj()?;
-        let typ = obj.iter().find(|(k, _)| k == "type").and_then(|(_, v)| v.as_str())?;
-        if typ != target_type { continue; }
-        let result = obj.iter().find(|(k, _)| k == "result").map(|(_, v)| v)?;
-        if let Some(obj) = result.obj() {
-
-            let key = match which {
-                "theme" => "theme2",
-                "icons" => "icons2",
-                "font" => "display",
-                "cursor" => "theme",
-                _ => "",
-            };
-            if let Some(v) = obj.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_str()) {
-                if !v.is_empty() {
-
-                    if which == "cursor" {
-                        if let Some(size) = obj.iter().find(|(k, _)| k == "size").and_then(|(_, v)| v.as_str()) {
-                            if !size.is_empty() {
-                                return Some(format!("{} ({}px)", v, size));
-                            }
-                        }
-                    }
-                    return Some(v.to_string());
-                }
-            }
-
-            if which == "font" {
-                if let Some(arr) = obj.iter().find(|(k, _)| k == "fonts").and_then(|(_, v)| v.arr()) {
-                    for f in arr {
-                        if let Some(s) = f.as_str() {
-                            if !s.is_empty() {
-                                return Some(s.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
 }
 
 fn render_single(key: &str, value: String, _cfg: &Config) -> ModuleOutput {

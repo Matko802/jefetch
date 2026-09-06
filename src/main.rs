@@ -25,6 +25,19 @@ info (uptime/memory/swap/...) refreshes every second, config hot-reloads.
 Piped output stays one-shot.
 "#;
 
+struct TtyGuard {
+    fd: i32,
+    orig: libc::termios,
+}
+
+impl Drop for TtyGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &self.orig);
+        }
+    }
+}
+
 fn main() {
 
     {
@@ -35,7 +48,7 @@ fn main() {
             let fd = f.as_raw_fd();
             let mut term = unsafe { std::mem::zeroed::<libc::termios>() };
             if unsafe { libc::tcgetattr(fd, &mut term) } == 0 {
-                let orig = term;
+                let guard = TtyGuard { fd, orig: term };
 
                 term.c_lflag &= !(libc::ICANON | libc::ECHO);
                 term.c_cc[libc::VMIN as usize] = 0;
@@ -50,7 +63,7 @@ fn main() {
                         break;
                     }
                 }
-                unsafe { libc::tcsetattr(fd, libc::TCSANOW, &orig); }
+                drop(guard);
             }
         }
     }

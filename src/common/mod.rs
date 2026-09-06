@@ -51,7 +51,7 @@ pub fn percent(used: u64, total: u64) -> Option<u8> {
     if total == 0 {
         return None;
     }
-    Some(((used as f64 / total as f64) * 100.0).round() as u8)
+    Some(((used as f64 / total as f64) * 100.0).round().clamp(0.0, 100.0) as u8)
 }
 
 pub fn percent_bar(used: u64, total: u64) -> String {

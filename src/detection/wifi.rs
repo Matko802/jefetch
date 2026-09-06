@@ -54,13 +54,13 @@ fn wireless_signal(ifname: &str) -> Option<u8> {
         if max <= 0.0 {
             return None;
         }
-        return Some(((cur / max) * 100.0).round() as u8);
+        return Some(((cur / max) * 100.0).round().clamp(0.0, 100.0) as u8);
     }
     None
 }
 
 fn iwgetid_ssid(ifname: &str) -> Option<String> {
-    let out = crate::detection::run_capture("iwgetid", &["-r", ifname])?;
+    let out = crate::detection::run_capture_timeout("iwgetid", &["-r", ifname], 500)?;
     if out.is_empty() {
         None
     } else {
