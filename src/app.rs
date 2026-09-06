@@ -752,18 +752,6 @@ impl App {
                         " ".repeat(padding),
                         v
                     ));
-                } else if v.starts_with("Disk (") {
-                    if let Some(colon) = v.find(": ") {
-                        lines.push(format!(
-                            "{}{}{}{}",
-                            &v[..colon],
-                            sep_render,
-                            " ".repeat(padding),
-                            &v[colon + 2..]
-                        ));
-                    } else {
-                        lines.push(v.clone());
-                    }
                 } else {
                     lines.push(format!("{}{}", " ".repeat(indent), v));
                 }

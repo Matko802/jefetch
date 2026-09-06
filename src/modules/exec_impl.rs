@@ -932,7 +932,7 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
         } else if inst.args.key.is_some() {
             values.push(format!("({}): {}", mp, v));
         } else {
-            values.push(format!("Disk ({}): {}", mp, v));
+            values.push(v);
         }
     }
     let first_mp = disks[0].mountpoint.clone();
