@@ -1276,8 +1276,16 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        let grad = if live_colors { live_grad.or(self.gradients) } else { None };
-        let flat = if live_colors && grad.is_none() { color } else { None };
+        let grad = if live_colors {
+            live_grad.or(self.gradients).or(self.last.grad)
+        } else {
+            None
+        };
+        let flat = if live_colors && grad.is_none() {
+            color.or(self.last.flat)
+        } else {
+            None
+        };
         let frame = LiveFrame {
             active: true,
             grad,
@@ -1425,7 +1433,33 @@ mod tests {
         let f = s.poll(SharkvisMode::Off, DEFAULT_BEAT_DEPTH, false);
         assert!(!f.active);
         assert!((f.speed_mult - 1.0).abs() < 1e-5);
-    }    #[test]
+    }
+
+    #[test]
+    fn tint_holds_across_state_gap() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = std::env::temp_dir().join(format!("jefetch-sharkvis-hold-{}", std::process::id()));
+        std::fs::write(&path, "color=#ff0000 energy=1 beat=1 color_low=#ff0000 color_high=#0000ff").unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::On, DEFAULT_BEAT_DEPTH, true);
+        assert!(f.active);
+        assert_eq!(f.grad, Some(((255, 0, 0), (0, 0, 255))));
+        let old = std::time::SystemTime::now() - Duration::from_secs(30);
+        let _ = filetime_set(&path, old);
+        s.last_ok = Some(Instant::now() - Duration::from_secs(5));
+        let f2 = s.poll(SharkvisMode::On, DEFAULT_BEAT_DEPTH, true);
+        assert!(f2.active);
+        assert_eq!(f2.grad, f.grad, "tint must hold across gaps, not flash native");
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn sync_on_requires_running_process() {
         let _guard = ENV_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
@@ -1573,7 +1607,7 @@ mod tests {
         assert_eq!(f.flat, Some((0, 255, 0)), "gap holds last colors");
         std::thread::sleep(Duration::from_millis(800));
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
-        assert!(f.flat.is_none(), "holdover expires");
+        assert_eq!(f.flat, Some((0, 255, 0)), "tint holds past holdover, no native flash");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
