@@ -23,7 +23,7 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
         "localip",
         "locale",
         "break",
-        "colors"
+        "colors",
     ],
     "display": {
         "separator": "->",
@@ -34,9 +34,9 @@ pub const DEFAULT_JSONC_CONFIG: &str = r#"{
         "brightColor": true
     },
     "logo": {
-        "source": "cachyos",
-        "animation": "spin speed=0 xyz",
-        "sharkvis": "return=10 boom=10 chars=blocks",
+        "source": "",
+        "animation": "speed=1 xy",
+        "sharkvis": "xzy return=10 boom=25 chars=blocks color=sharkvis",
         "padding": {
             "top": 0,
             "left": 0,
