@@ -713,6 +713,15 @@ fn parse_cells(logo: &ResolvedLogo) -> (Vec<Vec<(String, String)>>, bool, usize,
     (cells, has_ansi, rows, max_cols)
 }
 
+fn hash_unit(x: u32) -> f32 {
+    let mut x = x ^ (x >> 16);
+    x = x.wrapping_mul(0x7feb352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846ca68b);
+    x ^= x >> 16;
+    (x as f32) / (u32::MAX as f32)
+}
+
 fn build_points(
     cells: &[Vec<(String, String)>],
     has_ansi: bool,
@@ -928,10 +937,21 @@ fn build_points(
                         if points.len() >= MAX_POINTS {
                             break;
                         }
-                        let t = k as f32 / (layers - 1) as f32 - 0.5;
                         let px = ox;
                         let py = oy;
-                        let pz = t * 2.0 * zr;
+                        let pz = if k == 0 {
+                            -zr
+                        } else if k == layers - 1 {
+                            zr
+                        } else {
+                            let seed = (row as u32).wrapping_mul(73856093)
+                                ^ (col as u32).wrapping_mul(19349663)
+                                ^ (sr as u32).wrapping_mul(83492791)
+                                ^ (sc as u32).wrapping_mul(2971215073)
+                                ^ (k as u32).wrapping_mul(91138233)
+                                ^ zr.to_bits();
+                            (hash_unit(seed) - 0.5) * 2.0 * zr
+                        };
                         let col_val = if has_ansi {
                             let p = &cells[row][col].1;
                             if p.is_empty() { -1 } else { pal_pos(&palette, p) }
@@ -2004,6 +2024,17 @@ mod tests {
             let b = render_frame_with_tint(&solid_test_logo(), frame, &cfg, 36, 4, Some((1, 2, 3)));
             assert_eq!(a.lines, b.lines, "tinted cloud == frame at {}", frame);
         }
+    }
+
+    #[test]
+    fn depth_fill_is_deterministic() {
+        let _locale = LocaleGuard::pin_utf8();
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let mut c1 = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
+        let mut c2 = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
+        let a = render_cloud(&mut c1, 13.0, &cfg, 36, 4);
+        let b = render_cloud(&mut c2, 13.0, &cfg, 36, 4);
+        assert_eq!(a.lines, b.lines);
     }
 
     #[test]
