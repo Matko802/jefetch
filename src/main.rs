@@ -6,18 +6,18 @@ Usage: jefetch [options]
 
 Options:
   -h, --help                  Show this help message
-  -v, --version               Show the full version
+  -v, --version               Show the version number
   -s, --structure <modules>   Set custom `module:module:module` structure
-  -l, --logo <name>           Override logo (builtin id, e.g. "nixos") for this run
+  -l, --logo <name>           Override the logo
   -c, --config <path>         Load a custom config file
-      --no-config             Don't load config file
+      --no-config             Load without config file
       --list-modules          List all available modules
       --list-presets          List available presets
       --list-config-paths     List search paths for config files
       --list-data-paths       List search paths for presets and logos
       --list-logos            List available logos
-  -j, --json                  Enable JSON output (NYI in phase 1)
-      --static                One-shot static output (no live view) even if config has animation=spin
+  -j, --json                  List JSON output
+      --static                One shot static output
 "#;
 
 struct TtyGuard {
