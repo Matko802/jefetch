@@ -100,12 +100,16 @@ pub fn terminal_size() -> (usize, usize) {
 }
 
 pub fn colors_enabled() -> bool {
-    if let Ok(v) = std::env::var("NO_COLOR") {
+    colors_from_env(std::env::var("NO_COLOR").ok(), std::env::var("TERM").ok())
+}
+
+pub(crate) fn colors_from_env(no_color: Option<String>, term: Option<String>) -> bool {
+    if let Some(v) = no_color {
         if !v.is_empty() {
             return false;
         }
     }
-    if let Ok(term) = std::env::var("TERM") {
+    if let Some(term) = term {
         if term.eq_ignore_ascii_case("dumb") {
             return false;
         }
@@ -113,16 +117,29 @@ pub fn colors_enabled() -> bool {
     true
 }
 
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn utf8_supported() -> bool {
-    for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
-        if let Ok(v) = std::env::var(key) {
-            if v.is_empty() {
-                continue;
-            }
-            let lower = v.to_ascii_lowercase().replace(['-', '_'], "");
-            if !lower.contains("utf8") {
-                return false;
-            }
+    utf8_from_env(
+        std::env::var("LC_ALL").ok(),
+        std::env::var("LC_CTYPE").ok(),
+        std::env::var("LANG").ok(),
+    )
+}
+
+pub(crate) fn utf8_from_env(
+    lc_all: Option<String>,
+    lc_ctype: Option<String>,
+    lang: Option<String>,
+) -> bool {
+    for v in [lc_all, lc_ctype, lang].into_iter().flatten() {
+        if v.is_empty() {
+            continue;
+        }
+        let lower = v.to_ascii_lowercase().replace(['-', '_'], "");
+        if !lower.contains("utf8") {
+            return false;
         }
     }
     true
@@ -132,55 +149,22 @@ pub fn utf8_supported() -> bool {
 mod tests {
     use super::*;
 
-    fn swap_env(key: &str, val: Option<&str>) -> Option<String> {
-        let old = std::env::var(key).ok();
-        match val {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
-        old
-    }
-
-    fn restore_env(key: &str, old: Option<String>) {
-        match old {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
-    }
-
     #[test]
     fn colors_follow_no_color_and_dumb() {
-        let old_no = swap_env("NO_COLOR", None);
-        let old_term = swap_env("TERM", Some("xterm-256color"));
-        assert!(colors_enabled());
-        swap_env("NO_COLOR", Some("1"));
-        assert!(!colors_enabled());
-        swap_env("NO_COLOR", Some(""));
-        assert!(colors_enabled());
-        swap_env("NO_COLOR", None);
-        swap_env("TERM", Some("dumb"));
-        assert!(!colors_enabled());
-        swap_env("TERM", Some("DUMB"));
-        assert!(!colors_enabled());
-        restore_env("NO_COLOR", old_no);
-        restore_env("TERM", old_term);
+        assert!(colors_from_env(None, Some("xterm-256color".to_string())));
+        assert!(!colors_from_env(Some("1".to_string()), Some("xterm-256color".to_string())));
+        assert!(colors_from_env(Some(String::new()), Some("xterm-256color".to_string())));
+        assert!(!colors_from_env(None, Some("dumb".to_string())));
+        assert!(!colors_from_env(None, Some("DUMB".to_string())));
     }
 
     #[test]
     fn utf8_follows_locale() {
-        let old_all = swap_env("LC_ALL", None);
-        let old_ctype = swap_env("LC_CTYPE", None);
-        let old_lang = swap_env("LANG", Some("en_US.UTF-8"));
-        assert!(utf8_supported());
-        swap_env("LC_ALL", Some("C"));
-        assert!(!utf8_supported());
-        swap_env("LC_ALL", Some("C.UTF-8"));
-        assert!(utf8_supported());
-        swap_env("LC_ALL", None);
-        swap_env("LANG", Some("POSIX"));
-        assert!(!utf8_supported());
-        restore_env("LC_ALL", old_all);
-        restore_env("LC_CTYPE", old_ctype);
-        restore_env("LANG", old_lang);
+        let utf8 = Some("en_US.UTF-8".to_string());
+        assert!(utf8_from_env(None, None, utf8.clone()));
+        assert!(!utf8_from_env(Some("C".to_string()), None, utf8.clone()));
+        assert!(utf8_from_env(Some("C.UTF-8".to_string()), None, None));
+        assert!(!utf8_from_env(None, None, Some("POSIX".to_string())));
+        assert!(utf8_from_env(None, None, None));
     }
 }

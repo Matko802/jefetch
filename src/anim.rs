@@ -10,11 +10,11 @@ const ASCII_SHADING: &[&str] = &[".", ":", "*", "#"];
 const BASE_FPS: f32 = 12.0;
 
 pub fn default_shading() -> Vec<String> {
-    let ramp = if crate::common::utf8_supported() {
-        DEFAULT_SHADING
-    } else {
-        ASCII_SHADING
-    };
+    default_shading_for(crate::common::utf8_supported())
+}
+
+pub(crate) fn default_shading_for(utf8: bool) -> Vec<String> {
+    let ramp = if utf8 { DEFAULT_SHADING } else { ASCII_SHADING };
     ramp.iter().map(|s| s.to_string()).collect()
 }
 
@@ -1519,6 +1519,43 @@ mod tests {
     use super::*;
     use crate::app::ResolvedLogo;
 
+    struct LocaleGuard {
+        old: [Option<String>; 3],
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl LocaleGuard {
+        fn pin_utf8() -> Self {
+            let guard = crate::common::ENV_LOCK.lock().unwrap();
+            let old = [
+                std::env::var("LC_ALL").ok(),
+                std::env::var("LC_CTYPE").ok(),
+                std::env::var("LANG").ok(),
+            ];
+            std::env::remove_var("LC_ALL");
+            std::env::remove_var("LC_CTYPE");
+            std::env::set_var("LANG", "en_US.UTF-8");
+            LocaleGuard { old, _guard: guard }
+        }
+    }
+
+    impl Drop for LocaleGuard {
+        fn drop(&mut self) {
+            let [all, ctype, lang] = std::mem::take(&mut self.old);
+            match all {
+                Some(v) => std::env::set_var("LC_ALL", v),
+                None => std::env::remove_var("LC_ALL"),
+            }
+            match ctype {
+                Some(v) => std::env::set_var("LC_CTYPE", v),
+                None => std::env::remove_var("LC_CTYPE"),
+            }
+            match lang {
+                Some(v) => std::env::set_var("LANG", v),
+                None => std::env::remove_var("LANG"),
+            }
+        }
+    }
     #[test]
     fn speeds_parse_from_spin_string() {
         let cfg = AnimConfig::from_animation_str(Some("spin z speed=1.5"));
@@ -1574,27 +1611,8 @@ mod tests {
 
     #[test]
     fn default_shading_follows_locale() {
-        let old_all = std::env::var("LC_ALL").ok();
-        let old_ctype = std::env::var("LC_CTYPE").ok();
-        let old_lang = std::env::var("LANG").ok();
-        std::env::remove_var("LC_ALL");
-        std::env::remove_var("LC_CTYPE");
-        std::env::set_var("LANG", "en_US.UTF-8");
-        assert_eq!(default_shading(), vec!["░", "▒", "▓", "█"]);
-        std::env::set_var("LC_ALL", "C");
-        assert_eq!(default_shading(), vec![".", ":", "*", "#"]);
-        match old_all {
-            Some(v) => std::env::set_var("LC_ALL", v),
-            None => std::env::remove_var("LC_ALL"),
-        }
-        match old_ctype {
-            Some(v) => std::env::set_var("LC_CTYPE", v),
-            None => std::env::remove_var("LC_CTYPE"),
-        }
-        match old_lang {
-            Some(v) => std::env::set_var("LANG", v),
-            None => std::env::remove_var("LANG"),
-        }
+        assert_eq!(default_shading_for(true), vec!["░", "▒", "▓", "█"]);
+        assert_eq!(default_shading_for(false), vec![".", ":", "*", "#"]);
     }
 
     #[test]
@@ -1697,6 +1715,7 @@ mod tests {
 
     #[test]
     fn front_light_brightens_flat_faces() {
+        let _locale = LocaleGuard::pin_utf8();
         let count_full = |anim: &str| -> usize {
             let cfg = AnimConfig::from_animation_str(Some(anim));
             let out = render_frame(&solid_test_logo(), 0.0, &cfg, 36, 4);
@@ -1804,6 +1823,7 @@ mod tests {
 
     #[test]
     fn shading_ramp_draws_blocks_by_default() {
+        let _locale = LocaleGuard::pin_utf8();
         let mut cfg = AnimConfig::from_animation_str(Some("spin"));
         cfg.spin_x = false;
         cfg.spin_y = false;
@@ -1907,6 +1927,7 @@ mod tests {
 
     #[test]
     fn cloud_renders_identical_to_frame() {
+        let _locale = LocaleGuard::pin_utf8();
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
         for frame in [0.0, 7.0, 25.0] {
@@ -1975,6 +1996,7 @@ mod tests {
 
     #[test]
     fn tinted_cloud_matches_tinted_frame() {
+        let _locale = LocaleGuard::pin_utf8();
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud builds");
         for frame in [0.0, 7.0, 25.0] {
@@ -2203,6 +2225,7 @@ mod tests {
 
     #[test]
     fn custom_ramp_never_uses_quadrant_glyphs() {
+        let _locale = LocaleGuard::pin_utf8();
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         for frame in [0.0, 5.0, 13.0, 27.0] {
             let out = render_frame_with_fx(

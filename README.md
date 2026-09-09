@@ -12,7 +12,7 @@ Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](
 ## Features
 
 - Uses Fastfetch logos
-- Musl lib
+- Uses Musl lib instead of glibc
 - integrated with [sharkvis](https://github.com/Matko802/sharkvis)
 
 ## Building
@@ -69,15 +69,10 @@ Restart running copies after updating (`q` to quit, relaunch).
 ## Any distro with Nix:
 
 ```sh
-nix develop   # drop into a shell with cargo
-make          # build inside the dev shell
-```
-Or
-```sh
 nix run github:Matko802/jefetch
 ```
 
-## As a flake input
+### As flake input
 
 ```nix
 {
@@ -95,7 +90,7 @@ nix run github:Matko802/jefetch
 }
 ```
 
-## As an overlay
+### As overlay
 
 ```nix
 {
@@ -124,19 +119,6 @@ nix run github:Matko802/jefetch
       };
     };
 }
-```
-
-## Standalone build from source
-
-```sh
-nix build github:Matko802/jefetch
-nix run github:Matko802/jefetch
-```
-
-## Develop
-
-```sh
-nix develop github:Matko802/jefetch
 ```
 
 ## License
