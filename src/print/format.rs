@@ -373,6 +373,28 @@ pub fn truncate_visible(s: &str, max: usize) -> String {
     out
 }
 
+pub fn strip_sgr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == 0x1b && i + 1 < b.len() && b[i + 1] == b'[' {
+            let mut j = i + 2;
+            while j < b.len() && (b[j].is_ascii_digit() || b[j] == b';') {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'm' {
+                i = j + 1;
+                continue;
+            }
+        }
+        let len = utf8_len(b[i]);
+        out.push_str(&s[i..i + len]);
+        i += len;
+    }
+    out
+}
+
 pub fn truncate_visible_into(s: &str, max: usize, out: &mut String) {
     out.clear();
     let b = s.as_bytes();
@@ -456,5 +478,13 @@ mod tests {
             "ab\x1b[0mc\x1b[0m"
         );
         assert_eq!(visible_len(&truncate_visible("\x1b[36mOS: NixOS x86_64", 8)), 8);
+    }
+
+    #[test]
+    fn strip_sgr_keeps_cursor_codes() {
+        assert_eq!(strip_sgr("\x1b[1;31mhi\x1b[0m"), "hi");
+        assert_eq!(strip_sgr("plain"), "plain");
+        assert_eq!(strip_sgr("\x1b[H\x1b[38;2;1;2;3mX\x1b[0m\x1b[K"), "\x1b[HX\x1b[K");
+        assert_eq!(strip_sgr("\x1b[2J\x1b[3J"), "\x1b[2J\x1b[3J");
     }
 }

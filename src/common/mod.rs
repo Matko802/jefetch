@@ -92,8 +92,95 @@ pub fn terminal_size() -> (usize, usize) {
         let mut ws: libc::winsize = std::mem::zeroed();
         if libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) == 0 {
             let cols = if ws.ws_col > 0 { ws.ws_col as usize } else { 80 };
-            return (cols, ws.ws_row as usize);
+            let rows = if ws.ws_row > 0 { ws.ws_row as usize } else { 24 };
+            return (cols, rows);
         }
     }
-    (80, 0)
+    (80, 24)
+}
+
+pub fn colors_enabled() -> bool {
+    if let Ok(v) = std::env::var("NO_COLOR") {
+        if !v.is_empty() {
+            return false;
+        }
+    }
+    if let Ok(term) = std::env::var("TERM") {
+        if term.eq_ignore_ascii_case("dumb") {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn utf8_supported() -> bool {
+    for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(v) = std::env::var(key) {
+            if v.is_empty() {
+                continue;
+            }
+            let lower = v.to_ascii_lowercase().replace(['-', '_'], "");
+            if !lower.contains("utf8") {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn swap_env(key: &str, val: Option<&str>) -> Option<String> {
+        let old = std::env::var(key).ok();
+        match val {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+        old
+    }
+
+    fn restore_env(key: &str, old: Option<String>) {
+        match old {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn colors_follow_no_color_and_dumb() {
+        let old_no = swap_env("NO_COLOR", None);
+        let old_term = swap_env("TERM", Some("xterm-256color"));
+        assert!(colors_enabled());
+        swap_env("NO_COLOR", Some("1"));
+        assert!(!colors_enabled());
+        swap_env("NO_COLOR", Some(""));
+        assert!(colors_enabled());
+        swap_env("NO_COLOR", None);
+        swap_env("TERM", Some("dumb"));
+        assert!(!colors_enabled());
+        swap_env("TERM", Some("DUMB"));
+        assert!(!colors_enabled());
+        restore_env("NO_COLOR", old_no);
+        restore_env("TERM", old_term);
+    }
+
+    #[test]
+    fn utf8_follows_locale() {
+        let old_all = swap_env("LC_ALL", None);
+        let old_ctype = swap_env("LC_CTYPE", None);
+        let old_lang = swap_env("LANG", Some("en_US.UTF-8"));
+        assert!(utf8_supported());
+        swap_env("LC_ALL", Some("C"));
+        assert!(!utf8_supported());
+        swap_env("LC_ALL", Some("C.UTF-8"));
+        assert!(utf8_supported());
+        swap_env("LC_ALL", None);
+        swap_env("LANG", Some("POSIX"));
+        assert!(!utf8_supported());
+        restore_env("LC_ALL", old_all);
+        restore_env("LC_CTYPE", old_ctype);
+        restore_env("LANG", old_lang);
+    }
 }

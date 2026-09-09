@@ -261,6 +261,9 @@ impl App {
             }
         }
 
+        if !crate::common::colors_enabled() {
+            out = crate::print::format::strip_sgr(&out);
+        }
         print!("{}", out);
         0
     }
@@ -500,6 +503,9 @@ impl App {
                     }
                 }
                 out.push_str("\x1b[J");
+                if !crate::common::colors_enabled() {
+                    out = crate::print::format::strip_sgr(&out);
+                }
                 print!("{}", out);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
             } else if needs_draw {
@@ -543,6 +549,9 @@ impl App {
                     }
                 }
                 out.push_str("\x1b[J");
+                if !crate::common::colors_enabled() {
+                    out = crate::print::format::strip_sgr(&out);
+                }
                 print!("{}", out);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 needs_draw = false;

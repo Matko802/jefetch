@@ -6,7 +6,17 @@ const GAP: usize = 2;
 const MAX_POINTS: usize = 400_000;
 
 const DEFAULT_SHADING: &[&str] = &["░", "▒", "▓", "█"];
+const ASCII_SHADING: &[&str] = &[".", ":", "*", "#"];
 const BASE_FPS: f32 = 12.0;
+
+pub fn default_shading() -> Vec<String> {
+    let ramp = if crate::common::utf8_supported() {
+        DEFAULT_SHADING
+    } else {
+        ASCII_SHADING
+    };
+    ramp.iter().map(|s| s.to_string()).collect()
+}
 
 #[derive(Debug, Clone)]
 pub struct AnimConfig {
@@ -60,7 +70,7 @@ impl Default for AnimConfig {
             light_x: -0.4082,
             light_y: 0.8165,
             light_z: -0.4082,
-            shading: DEFAULT_SHADING.iter().map(|s| s.to_string()).collect(),
+            shading: default_shading(),
             flat: false,
             original_glyphs: false,
             sharkvis: crate::sharkvis::SharkvisMode::default(),
@@ -150,7 +160,7 @@ impl AnimConfig {
                 cfg.shading_explicit = true;
             } else if has_word(&low, "blocks") || has_word(&low, "block") {
                 cfg.original_glyphs = false;
-                cfg.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
+                cfg.shading = default_shading();
                 cfg.shading_explicit = true;
             }
 
@@ -322,7 +332,7 @@ impl AnimConfig {
             || l == "shaded"
         {
             self.original_glyphs = false;
-            self.shading = DEFAULT_SHADING.iter().map(|s| s.to_string()).collect();
+            self.shading = default_shading();
             return;
         }
 
@@ -1327,6 +1337,7 @@ pub fn render_cloud_with_fx(
         _ => &config.shading,
     };
     let custom_ramp = fx.shading.as_deref().is_some_and(|s| !s.is_empty());
+    let use_quadrant = !custom_ramp && crate::common::utf8_supported();
     let scount = shading.len().max(1);
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
@@ -1476,7 +1487,7 @@ pub fn render_cloud_with_fx(
                 ci = smax;
             }
 
-            let glyph: &str = if !custom_ramp
+            let glyph: &str = if use_quadrant
                 && mask != full_mask
                 && (coverage - ink).abs() <= ((ci as f32 + 1.0) / scount as f32 - ink).abs()
             {
@@ -1559,6 +1570,31 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("spin xyz speed_y=-1"));
         assert!((cfg.speed - 2.0).abs() < 1e-4, "speed={}", cfg.speed);
         assert!((cfg.speed_y - (-1.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn default_shading_follows_locale() {
+        let old_all = std::env::var("LC_ALL").ok();
+        let old_ctype = std::env::var("LC_CTYPE").ok();
+        let old_lang = std::env::var("LANG").ok();
+        std::env::remove_var("LC_ALL");
+        std::env::remove_var("LC_CTYPE");
+        std::env::set_var("LANG", "en_US.UTF-8");
+        assert_eq!(default_shading(), vec!["░", "▒", "▓", "█"]);
+        std::env::set_var("LC_ALL", "C");
+        assert_eq!(default_shading(), vec![".", ":", "*", "#"]);
+        match old_all {
+            Some(v) => std::env::set_var("LC_ALL", v),
+            None => std::env::remove_var("LC_ALL"),
+        }
+        match old_ctype {
+            Some(v) => std::env::set_var("LC_CTYPE", v),
+            None => std::env::remove_var("LC_CTYPE"),
+        }
+        match old_lang {
+            Some(v) => std::env::set_var("LANG", v),
+            None => std::env::remove_var("LANG"),
+        }
     }
 
     #[test]
