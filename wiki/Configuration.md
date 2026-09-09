@@ -1,15 +1,6 @@
 # Configuration
 
-Everything lives in one `config.jsonc` file. Plain JSON, but you can use
-`//` comments and trailing commas.
-
-jefetch looks for it here, in order:
-
-1. `-c /path/to/config.jsonc`
-2. `~/.config/jefetch/config.jsonc` (created for you on first run)
-3. Built-in defaults
-
-Messed it up? `rm ~/.config/jefetch/config.jsonc && jefetch` starts over.
+Config is located in `~/.config/jefetch/config.jsonc`
 
 ## Example
 
