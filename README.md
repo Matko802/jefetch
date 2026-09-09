@@ -31,40 +31,17 @@ cd jefetch && git pull && sudo make install
 ```
 ## Usage
 
+Its everything here
 ```sh
-jefetch
-jefetch --static
-jefetch --logo arch
-jefetch --list-logos
 jefetch --help
 ```
+Config file is located in `~/.config/jefetch/config.jsonc`
 
-| Option | Description |
-| ------ | ----------- |
-| `--help` | show help |
-| `--static` | force static (no animation) |
-| `--logo <name>` | override logo for one run |
-| `--list-logos` | show all logos |
-| `--list-modules` | list of available modules |
-
-The config file is located in `~/.config/jefetch/config.jsonc`
-
-## Update
-
-Nix flake:
-
-```sh
-cd ~/fish-flake
-nix flake update jefetch; nh os switch -H machine1
-```
-
-Standalone:
+## Updating
 
 ```sh
 cd jefetch && git pull && sudo make install
 ```
-
-Restart running copies after updating (`q` to quit, relaunch).
 
 ## Any distro with Nix:
 
