@@ -116,8 +116,8 @@ The logo actually rotates in 3D. Static output and the animation print the
 same text, so nothing breaks when you pipe it.
 
 ```jsonc
-"animation": "spin y speed=2.0"               // gentle default
-"animation": "spin xyz speed=2.5 speed_z=-1"  // tumble with Z reversed
+"animation": "spin y speed=2.0"           
+"animation": "spin xyz speed=2.5 speed_z=-1"  
 "animation": "spin z speed=1.5 flat chars=ascii"
 ```
 
