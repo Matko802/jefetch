@@ -31,6 +31,10 @@ cd jefetch && git pull && sudo make install
 ```
 ## Usage
 
+<div align="center">
+  <a href="./wiki/Configuration.md"><b>📖 Configuration wiki</b></a>
+</div>
+
 Its everything here
 ```sh
 jefetch --help
