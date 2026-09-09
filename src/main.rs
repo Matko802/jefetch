@@ -1,8 +1,7 @@
 use jefetch::app::{App, CliOptions};
 use jefetch::modules;
 
-const USAGE: &str = r#"jefetch
-
+const USAGE: &str = r#"
 Usage: jefetch [options]
 
 Options:
