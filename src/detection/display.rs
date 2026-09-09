@@ -1,4 +1,5 @@
 use crate::detection::read_file;
+use crate::detection::wayland::WlOutput;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DisplayInfo {
@@ -12,6 +13,7 @@ pub struct DisplayInfo {
 
 pub fn detect() -> Vec<DisplayInfo> {
     let mut out = Vec::new();
+    let live = crate::detection::wayland::query_outputs();
     let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
         return out;
     };
@@ -49,7 +51,20 @@ pub fn detect() -> Vec<DisplayInfo> {
         }
         let connector = connector_name(&dir_name);
         let edid = std::fs::read(path.join("edid")).unwrap_or_default();
-        let (refresh, size_in) = edid_timing(&edid, width, height);
+        let (mut width, mut height) = (width, height);
+        let mut refresh = 0;
+        if let Some(wl) = match_live_output(&live, &connector, &edid) {
+            if wl.width > 0 && wl.height > 0 {
+                width = wl.width;
+                height = wl.height;
+            }
+            refresh = wl.refresh_hz();
+        }
+        let (_, size_in) = edid_timing(&edid, width, height);
+        if refresh == 0 {
+            let (max_refresh, _) = edid_timing(&edid, width, height);
+            refresh = max_refresh;
+        }
         out.push(DisplayInfo {
             width,
             height,
@@ -68,6 +83,81 @@ fn connector_name(dir_name: &str) -> String {
         Some(sep) => rest[sep + 1..].to_string(),
         None => rest.to_string(),
     }
+}
+
+fn edid_make_model(edid: &[u8]) -> (String, String) {
+    let mut make = String::new();
+    if edid.len() >= 10 {
+        let word = u16::from_be_bytes([edid[8], edid[9]]) as u32;
+        let mut code = String::new();
+        for shift in [10u32, 5, 0] {
+            let v = ((word >> shift) & 31) as u8;
+            if v >= 1 && v <= 26 {
+                code.push((b'A' + v - 1) as char);
+            }
+        }
+        make = code;
+    }
+    let mut model = String::new();
+    for k in 0..4 {
+        let o = 54 + k * 18;
+        if edid.len() < o + 18 {
+            break;
+        }
+        let d = &edid[o..o + 18];
+        if d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0xfc {
+            model = String::from_utf8_lossy(&d[5..18])
+                .trim_matches(|c: char| c == '\n' || c == '\r' || c == ' ' || c == '\0')
+                .to_string();
+            if !model.is_empty() {
+                break;
+            }
+        }
+    }
+    (make, model)
+}
+
+fn match_live_output<'a>(
+    live: &'a [WlOutput],
+    connector: &str,
+    edid: &[u8],
+) -> Option<&'a WlOutput> {
+    if live.is_empty() {
+        return None;
+    }
+    if let Some(hit) = live.iter().find(|o| !o.name.is_empty() && o.name == connector) {
+        return Some(hit);
+    }
+    let (make, model) = edid_make_model(edid);
+    let mut best: Option<&'a WlOutput> = None;
+    let mut best_score = 0u32;
+    for o in live {
+        let mut score = 0u32;
+        let (omake, omodel) = (o.make.to_lowercase(), o.model.to_lowercase());
+        if !make.is_empty() {
+            let mk = make.to_lowercase();
+            if omake.contains(&mk) || mk.contains(omake.as_str()) && !omake.is_empty() {
+                score += 2;
+            }
+        }
+        if !model.is_empty() {
+            let md = model.to_lowercase();
+            if omodel.contains(&md) || md.contains(omodel.as_str()) && !omodel.is_empty() {
+                score += 3;
+            }
+        }
+        if score > best_score {
+            best_score = score;
+            best = Some(o);
+        }
+    }
+    if best.is_some() {
+        return best;
+    }
+    if live.len() == 1 {
+        return Some(&live[0]);
+    }
+    None
 }
 
 fn connector_type(connector: &str) -> String {
@@ -173,5 +263,82 @@ mod tests {
         assert_eq!(connector_type("eDP-1"), "Internal");
         assert_eq!(connector_type("LVDS-1"), "Internal");
         assert_eq!(connector_name("card1-DP-2"), "DP-2");
+    }
+
+    fn live_output(name: &str, w: u32, h: u32, mhz: u32) -> WlOutput {
+        WlOutput {
+            name: name.to_string(),
+            make: "DEL".to_string(),
+            model: "DELL S2721DGF".to_string(),
+            width: w,
+            height: h,
+            refresh_mhz: mhz,
+        }
+    }
+
+    fn dell_edid() -> Vec<u8> {
+        let mut edid = vec![0u8; 128];
+        edid[8] = 0x10;
+        edid[9] = 0xAC;
+        let o = 54;
+        edid[o] = 0;
+        edid[o + 1] = 0;
+        edid[o + 2] = 0;
+        edid[o + 3] = 0xfc;
+        edid[o + 4] = 0;
+        let text = b"DELL S2721DGF\n";
+        edid[o + 5..o + 5 + text.len()].copy_from_slice(text);
+        edid
+    }
+
+    #[test]
+    fn live_match_prefers_connector_name() {
+        let live = vec![
+            live_output("HDMI-A-1", 2560, 1440, 60000),
+            live_output("DP-1", 1920, 1080, 143976),
+        ];
+        let hit = match_live_output(&live, "DP-1", &[]).unwrap();
+        assert_eq!(hit.refresh_hz(), 144);
+        assert_eq!((hit.width, hit.height), (1920, 1080));
+    }
+
+    #[test]
+    fn live_match_falls_back_to_edid_model() {
+        let other = WlOutput {
+            name: "X".to_string(),
+            make: "XXX".to_string(),
+            model: "YYY".to_string(),
+            width: 800,
+            height: 600,
+            refresh_mhz: 60000,
+        };
+        let mut second = live_output("", 1920, 1080, 143976);
+        second.make = String::new();
+        second.model = "DELL S2721DGF".to_string();
+        let live = vec![other, second];
+        let hit = match_live_output(&live, "DP-9", &dell_edid()).unwrap();
+        assert_eq!(hit.refresh_hz(), 144);
+    }
+
+    #[test]
+    fn live_match_single_output_wins_without_names() {
+        let live = vec![live_output("", 1920, 1080, 143976)];
+        let hit = match_live_output(&live, "DP-9", &[]).unwrap();
+        assert_eq!(hit.refresh_hz(), 144);
+    }
+
+    #[test]
+    fn live_match_empty_means_edid_fallback() {
+        assert!(match_live_output(&[], "DP-1", &dell_edid()).is_none());
+        let live = vec![live_output("A", 800, 600, 60000), live_output("B", 800, 600, 60000)];
+        assert!(match_live_output(&live, "DP-9", &[]).is_none());
+    }
+
+    #[test]
+    fn edid_make_model_parses() {
+        let (make, model) = edid_make_model(&dell_edid());
+        assert_eq!(make, "DEL");
+        assert_eq!(model, "DELL S2721DGF");
+        assert_eq!(edid_make_model(&[]), (String::new(), String::new()));
     }
 }

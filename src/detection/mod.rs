@@ -21,6 +21,7 @@ pub mod theme;
 pub mod uptime;
 pub mod user;
 pub mod users;
+pub mod wayland;
 pub mod wifi;
 pub mod wm;
 
