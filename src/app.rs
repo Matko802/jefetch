@@ -745,6 +745,26 @@ impl App {
             if !out.supported || out.values.is_empty() {
                 continue;
             }
+            if let Some(pv_keys) = &out.per_value_keys {
+                if pv_keys.len() == out.values.len() {
+                    let padding = cfg.display.padding;
+                    let sep_render = separator_colored(cfg.display.separator.as_str(), cfg);
+                    for (k, v) in pv_keys.iter().zip(out.values.iter()) {
+                        if crate::print::format::visible_len(k) == 0 {
+                            lines.push(v.clone());
+                        } else {
+                            lines.push(format!(
+                                "{}{}{}{}",
+                                k,
+                                sep_render,
+                                " ".repeat(padding),
+                                v
+                            ));
+                        }
+                    }
+                    continue;
+                }
+            }
             let key_visible = crate::print::format::visible_len(&out.key);
             if key_visible == 0 {
                 for v in &out.values {

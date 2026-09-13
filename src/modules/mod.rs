@@ -115,6 +115,7 @@ pub struct ModuleOutput {
 
     pub blank: bool,
     pub repeat_key: bool,
+    pub per_value_keys: Option<Vec<String>>,
 }
 
 impl ModuleOutput {
@@ -125,6 +126,7 @@ impl ModuleOutput {
             supported: true,
             blank: false,
             repeat_key: false,
+            per_value_keys: None,
         }
     }
     pub fn blank() -> Self {
@@ -134,6 +136,7 @@ impl ModuleOutput {
             supported: true,
             blank: true,
             repeat_key: false,
+            per_value_keys: None,
         }
     }
     pub fn unsupported() -> Self {
@@ -143,6 +146,7 @@ impl ModuleOutput {
             supported: false,
             blank: false,
             repeat_key: false,
+            per_value_keys: None,
         }
     }
 }

@@ -26,6 +26,41 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
         base.values.clone()
     };
 
+    let has_custom_key = inst.args.key.is_some();
+    // Per-monitor keys (e.g. Display (model)): use them when no custom key overrides.
+    if !has_custom_key {
+        if let Some(pv) = base.per_value_keys.clone() {
+            if pv.len() == values.len() {
+                let colored: Vec<String> = pv
+                    .into_iter()
+                    .map(|k| {
+                        if k.contains('\x1b') {
+                            return k;
+                        }
+                        if let Some(c) = inst
+                            .args
+                            .key_color
+                            .as_deref()
+                            .or(cfg.display.key_color.as_deref())
+                        {
+                            if let crate::print::color::ApplyResult::Ansi { start, end } =
+                                crate::print::color::color_code_to_ansi(c)
+                            {
+                                return format!("{}{}{}", start, k, end);
+                            }
+                        }
+                        k
+                    })
+                    .collect();
+                let mut out = super::ModuleOutput::supported("", values);
+                out.key = String::new();
+                out.repeat_key = true;
+                out.per_value_keys = Some(colored);
+                return Some(out);
+            }
+        }
+    }
+
     let raw_key = inst
         .args
         .key

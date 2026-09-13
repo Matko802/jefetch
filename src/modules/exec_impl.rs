@@ -680,8 +680,15 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
         return None;
     }
     let mut values = Vec::new();
+    let mut keys = Vec::new();
     for d in &ds {
-        let mut v = format!("{}x{}", d.width, d.height);
+        let scale = d.scale_or_default();
+        let mut v = format!(
+            "{}x{} @ {}x",
+            d.width,
+            d.height,
+            crate::detection::display::format_scale(scale)
+        );
         if d.size_in > 0 {
             v.push_str(&format!(" in {}\"", d.size_in));
         }
@@ -692,8 +699,42 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
             v.push_str(&format!(" [{}]", d.dtype));
         }
         values.push(v);
+        keys.push(format!("Display ({})", d.display_name()));
     }
-    Some(ModuleOutput::supported("Display", values))
+    let mut out = ModuleOutput::supported("Display", values);
+    out.per_value_keys = Some(keys);
+    Some(out)
+}
+
+#[cfg(test)]
+mod display_format_tests {
+    use super::*;
+
+    #[test]
+    fn display_value_matches_requested_format() {
+        let d = crate::detection::display::DisplayInfo {
+            width: 2560,
+            height: 1440,
+            refresh_rate: 200,
+            size_in: 27,
+            dtype: "External".to_string(),
+            name: "card1-DP-2".to_string(),
+            model: "MyMonitor".to_string(),
+            scale: 1.2,
+        };
+        let scale = d.scale_or_default();
+        let v = format!(
+            "{}x{} @ {}x in {}\", {} Hz [{}]",
+            d.width,
+            d.height,
+            crate::detection::display::format_scale(scale),
+            d.size_in,
+            d.refresh_rate,
+            d.dtype
+        );
+        assert_eq!(v, "2560x1440 @ 1.2x in 27\", 200 Hz [External]");
+        assert_eq!(format!("Display ({})", d.display_name()), "Display (MyMonitor)");
+    }
 }
 
 fn pct_colored(pct_val: u8) -> String {
@@ -1314,6 +1355,13 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
                 return None;
             }
             Some(J::Arr(ds.into_iter().map(|d| {
+                let scale = if d.scale > 0.1 && d.scale < 10.0 {
+                    d.scale
+                } else {
+                    1.0
+                };
+                let scaled_w = ((d.width as f64 / scale).round() as u64).max(1);
+                let scaled_h = ((d.height as f64 / scale).round() as u64).max(1);
                 jobj(vec![
                     ("id", J::Null),
                     ("name", J::Str(d.name.clone())),
@@ -1331,8 +1379,8 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
                     (
                         "scaled",
                         jobj(vec![
-                            ("width", J::Uint(d.width as u64)),
-                            ("height", J::Uint(d.height as u64)),
+                            ("width", J::Uint(scaled_w)),
+                            ("height", J::Uint(scaled_h)),
                         ]),
                     ),
                     (

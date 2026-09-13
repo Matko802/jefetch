@@ -1,7 +1,7 @@
 use crate::detection::read_file;
 use crate::detection::wayland::WlOutput;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct DisplayInfo {
     pub width: u32,
     pub height: u32,
@@ -9,6 +9,42 @@ pub struct DisplayInfo {
     pub size_in: u32,
     pub dtype: String,
     pub name: String,
+    pub model: String,
+    pub scale: f64,
+}
+
+impl DisplayInfo {
+    pub fn display_name(&self) -> &str {
+        if !self.model.is_empty() {
+            &self.model
+        } else {
+            &self.name
+        }
+    }
+
+    pub fn scale_or_default(&self) -> f64 {
+        if self.scale > 0.1 && self.scale < 10.0 {
+            self.scale
+        } else {
+            1.0
+        }
+    }
+}
+
+pub fn format_scale(scale: f64) -> String {
+    let mut s = format!("{:.2}", scale);
+    while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
+        if s.ends_with('0') {
+            s.pop();
+        } else if s.ends_with('.') {
+            s.pop();
+            break;
+        }
+    }
+    if s.is_empty() {
+        s = "1".to_string();
+    }
+    s
 }
 
 pub fn detect() -> Vec<DisplayInfo> {
@@ -53,12 +89,31 @@ pub fn detect() -> Vec<DisplayInfo> {
         let edid = std::fs::read(path.join("edid")).unwrap_or_default();
         let (mut width, mut height) = (width, height);
         let mut refresh = 0;
+        let mut model = String::new();
+        let mut scale = 1.0;
         if let Some(wl) = match_live_output(&live, &connector, &edid) {
             if wl.width > 0 && wl.height > 0 {
                 width = wl.width;
                 height = wl.height;
             }
             refresh = wl.refresh_hz();
+            if !wl.model.is_empty() {
+                model = wl.model.clone();
+            } else if !wl.make.is_empty() {
+                model = wl.make.clone();
+            }
+            scale = wl.scale_factor();
+        }
+        if model.is_empty() {
+            let (make, edid_model) = edid_make_model(&edid);
+            if !edid_model.is_empty() {
+                model = edid_model;
+            } else if !make.is_empty() {
+                model = make;
+            }
+        }
+        if model.is_empty() {
+            model = connector.clone();
         }
         let (_, size_in) = edid_timing(&edid, width, height);
         if refresh == 0 {
@@ -72,6 +127,8 @@ pub fn detect() -> Vec<DisplayInfo> {
             size_in,
             dtype: connector_type(&connector),
             name: dir_name,
+            model,
+            scale,
         });
     }
     out
@@ -273,6 +330,7 @@ mod tests {
             width: w,
             height: h,
             refresh_mhz: mhz,
+            ..Default::default()
         }
     }
 
@@ -303,6 +361,15 @@ mod tests {
     }
 
     #[test]
+    fn formats_scale_trimming_zeros() {
+        assert_eq!(format_scale(1.0), "1");
+        assert_eq!(format_scale(1.2), "1.2");
+        assert_eq!(format_scale(1.25), "1.25");
+        assert_eq!(format_scale(2.0), "2");
+        assert_eq!(format_scale(1.50), "1.5");
+    }
+
+    #[test]
     fn live_match_falls_back_to_edid_model() {
         let other = WlOutput {
             name: "X".to_string(),
@@ -311,6 +378,7 @@ mod tests {
             width: 800,
             height: 600,
             refresh_mhz: 60000,
+            ..Default::default()
         };
         let mut second = live_output("", 1920, 1080, 143976);
         second.make = String::new();
