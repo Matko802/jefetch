@@ -1319,9 +1319,9 @@ pub fn is_live_color_name(s: &str) -> bool {
 }
 
 /// Single live RGB for text (keys / separator / title).
+/// Static gradient midpoint — not reactive to volume/beats.
 /// - flat single color wins when present
-/// - otherwise lerp low→high by energy so text pulses with volume
-/// - kicks pop via max(energy, beat*0.8)
+/// - otherwise mid of low→high
 pub fn live_text_rgb(frame: &LiveFrame) -> Option<Rgb> {
     if !frame.active {
         return None;
@@ -1330,8 +1330,7 @@ pub fn live_text_rgb(frame: &LiveFrame) -> Option<Rgb> {
         return Some(c);
     }
     if let Some((lo, hi)) = frame.grad {
-        let t = frame.energy.max(frame.beat * 0.8).clamp(0.0, 1.0);
-        return Some(lerp_rgb(lo, hi, t));
+        return Some(lerp_rgb(lo, hi, 0.5));
     }
     None
 }

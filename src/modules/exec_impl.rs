@@ -708,8 +708,6 @@ fn render_display(_cfg: &Config) -> Option<ModuleOutput> {
 
 #[cfg(test)]
 mod display_format_tests {
-    use super::*;
-
     #[test]
     fn display_value_matches_requested_format() {
         let d = crate::detection::display::DisplayInfo {

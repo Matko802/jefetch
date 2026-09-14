@@ -94,7 +94,7 @@ jefetch --structure "os:kernel:uptime:break:colors"
 | `separator` | `": "` | Sits between key and value |
 | `keyColor` / `titleColor` | bold cyan / blue | Colors for keys and the `user@host` line |
 | `separatorColor` | unset | Color for the separator |
-| `keyColor` / `titleColor` / `separatorColor` | | `"sharkvis"` follows the music (live `color` → gradient by volume, plain when idle) |
+| `keyColor` / `titleColor` / `separatorColor` | | `"sharkvis"` uses the sharkvis gradient midpoint (plain when idle) |
 | `padding` | `0` | Left padding |
 | `brightColor` | `true` | Bright/bold text |
 
