@@ -459,6 +459,11 @@ impl App {
                             fx.grad = Some((c, c));
                         }
                     }
+                    // Live charset only when following it (`chars=sharkvis`);
+                    // explicit charsets and ascii mode keep their own glyphs.
+                    if !cfg.original_glyphs && !cfg.shading_explicit {
+                        fx.shading = shark_live.glyphs.clone();
+                    }
                     let (yaw_step, pitch_step) =
                         crate::anim::stereo_spin(shark_live.left, shark_live.right);
                     let fx_now = std::time::Instant::now();
@@ -1449,6 +1454,7 @@ mod tests {
         assert!((base.speed - 2.0).abs() < 1e-4);
         assert!(base.spin_z && !base.spin_x && !base.spin_y);
         assert!(base.flat);
+        assert!(!base.shading_explicit);
         assert!((active.speed - 0.0).abs() < 1e-4);
         assert!(active.spin_y && !active.spin_x && !active.spin_z);
         assert!(!active.flat);

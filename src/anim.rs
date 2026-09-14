@@ -48,6 +48,7 @@ pub struct AnimConfig {
     pub beat_depth: f32,
     pub grow: f32,
     pub boom: Option<f32>,
+    pub shading_explicit: bool,
     pub return_secs: Option<f32>,
 }
 
@@ -78,6 +79,7 @@ impl Default for AnimConfig {
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
+            shading_explicit: false,
             return_secs: None,
         }
     }
@@ -149,12 +151,16 @@ impl AnimConfig {
             if let Some(v) = chars_opt {
                 // Only the keywords mean anything now; custom ramps are
                 // ignored and render as plain blocks like fetch.
+                // `chars=sharkvis` follows the live charset instead.
                 cfg.apply_chars_value(&v);
+                cfg.shading_explicit = !Self::is_sharkvis_chars_value(&v);
             } else if has_word(&low, "ascii") || has_word(&low, "original") {
                 cfg.original_glyphs = true;
+                cfg.shading_explicit = true;
             } else if has_word(&low, "blocks") || has_word(&low, "block") {
                 cfg.original_glyphs = false;
                 cfg.shading = default_shading();
+                cfg.shading_explicit = true;
             }
 
             if has_word(&low, "no-sharkvis") || has_word(&low, "nosharkvis") {
@@ -301,12 +307,23 @@ impl AnimConfig {
         None
     }
 
+    pub(crate) fn is_sharkvis_chars_value(v: &str) -> bool {
+        v.trim().eq_ignore_ascii_case("sharkvis")
+    }
+
     fn apply_chars_value(&mut self, v: &str) {
         let t = v.trim();
         if t.is_empty() {
             return;
         }
         let l = t.to_ascii_lowercase();
+        if l == "sharkvis" {
+            // Follow sharkvis's `chars` charset while it runs;
+            // default blocks otherwise (live shading fills in per-frame).
+            self.original_glyphs = false;
+            self.shading = default_shading();
+            return;
+        }
         if l == "ascii"
             || l == "original"
             || l == "keep"
@@ -332,6 +349,7 @@ impl AnimConfig {
         }
         if let Some(c) = &logo.chars {
             self.apply_chars_value(c);
+            self.shading_explicit = !Self::is_sharkvis_chars_value(c);
         }
     }
 }
@@ -1081,6 +1099,7 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
 
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
+    pub shading: Option<Vec<String>>,
     pub scale: f32,
     pub audio: [f32; 3],
 }
@@ -1095,6 +1114,7 @@ impl RenderFx {
     pub fn none() -> RenderFx {
         RenderFx {
             grad: None,
+            shading: None,
             scale: 1.0,
             audio: [0.0, 0.0, 0.0],
         }
@@ -1102,6 +1122,7 @@ impl RenderFx {
 
     pub fn is_none(&self) -> bool {
         self.grad.is_none()
+            && self.shading.is_none()
             && (self.scale - 1.0).abs() < 1e-6
             && self.audio.iter().all(|a| a.abs() < 1e-6)
     }
@@ -1127,6 +1148,7 @@ pub fn render_frame_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
+        shading: None,
         scale: 1.0,
         audio: [0.0, 0.0, 0.0],
     };
@@ -1169,6 +1191,7 @@ pub fn render_cloud_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
+        shading: None,
         scale: 1.0,
         audio: [0.0, 0.0, 0.0],
     };
@@ -1327,7 +1350,12 @@ pub fn render_cloud_with_fx(
         }
     }
 
-    let shading: &[String] = &config.shading;
+    // Live sharkvis charset wins when the profile follows it
+    // (`chars=sharkvis`); otherwise plain shade blocks like fetch.
+    let shading: &[String] = match fx.shading.as_deref() {
+        Some(s) if !s.is_empty() => s,
+        _ => &config.shading,
+    };
     let scount = shading.len().max(1);
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
@@ -1580,19 +1608,25 @@ mod tests {
     }
 
     #[test]
-    fn chars_keywords_parse() {
-        // Custom ramps are ignored: everything non-keyword is plain blocks.
+    fn live_chars_opt_in() {
+        // `chars=sharkvis` follows the live charset; custom ramps are
+        // ignored and render as plain blocks like fetch.
         let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=sharkvis"));
         assert!(!cfg.original_glyphs);
+        assert!(!cfg.shading_explicit, "live charset must stay follow-mode");
         assert_eq!(cfg.shading, default_shading());
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 CHARS=SharkVis"));
+        assert!(!cfg.shading_explicit);
         let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=.,-~:;=!*#$@"));
         assert!(!cfg.original_glyphs);
         assert_eq!(cfg.shading, default_shading());
+        assert!(cfg.shading_explicit, "ignored ramps stay explicit blocks");
         let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=ascii"));
         assert!(cfg.original_glyphs);
+        assert!(cfg.shading_explicit);
         let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=blocks"));
         assert!(!cfg.original_glyphs);
-        assert_eq!(cfg.shading, default_shading());
+        assert!(cfg.shading_explicit);
     }
 
     #[test]
@@ -2015,6 +2049,7 @@ mod tests {
         assert!((cfg.speed - 0.0).abs() < 1e-4);
         assert!((cfg.boom.unwrap() - 0.3).abs() < 1e-4);
         assert!(cfg.original_glyphs);
+        assert!(cfg.shading_explicit);
         assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Off);
         assert!(!cfg.sharkvis_set, "mode resolved by the app, not the parser");
     }
@@ -2053,6 +2088,7 @@ mod tests {
     fn grow_and_explicit_chars_parse() {
         let cfg = AnimConfig::from_animation_str(Some("spin y"));
         assert!((cfg.grow - crate::sharkvis::DEFAULT_GROW).abs() < 1e-5);
+        assert!(!cfg.shading_explicit);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y grow=0.2"));
         assert!((cfg.grow - 0.2).abs() < 1e-4);
@@ -2069,14 +2105,17 @@ mod tests {
 
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
         assert!(cfg.original_glyphs);
+        assert!(cfg.shading_explicit);
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=.,-~"));
         assert!(!cfg.original_glyphs);
         assert_eq!(cfg.shading, default_shading());
+        assert!(cfg.shading_explicit);
     }
 
     fn fx_grad() -> RenderFx {
         RenderFx {
             grad: Some(((255, 0, 0), (0, 0, 255))),
+            shading: None,
             scale: 1.0,
             audio: [0.0, 0.0, 0.0],
         }
@@ -2212,6 +2251,7 @@ mod tests {
             4,
             &RenderFx {
                 grad: None,
+                shading: None,
                 scale: 1.2,
                 audio: [0.0, 0.0, 0.0],
             },
@@ -2244,5 +2284,32 @@ mod tests {
                 raw
             );
         }
+    }
+
+    #[test]
+    fn live_shading_override_redraws_logo() {
+        // Live sharkvis charset wins over the default blocks ramp.
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let plain = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
+        let live = render_frame_with_fx(
+            &solid_test_logo(),
+            9.0,
+            &cfg,
+            36,
+            4,
+            &RenderFx {
+                grad: None,
+                shading: Some(vec!["@".to_string()]),
+                scale: 1.0,
+                audio: [0.0, 0.0, 0.0],
+            },
+        );
+        assert_ne!(plain.lines, live.lines, "live charset redraws the logo");
+        let raw = live.lines.join("\n");
+        assert!(
+            crate::app::strip_ansi(&raw).contains('@'),
+            "live charset glyph shows, got:\n{}",
+            crate::app::strip_ansi(&raw)
+        );
     }
 }

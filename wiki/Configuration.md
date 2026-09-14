@@ -141,9 +141,11 @@ right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 
 Colors stay the logo's own unless you add `color=sharkvis`, which hands them
 over to sharkvis's `gradient_low` → `gradient_high` from
-`~/.config/sharkvis/config.toml`. The logo itself always renders as
-shade blocks (`░▒▓█`), like fetch — custom charsets are gone, only
-`chars=ascii` keeps the logo's original glyphs.
+`~/.config/sharkvis/config.toml`. Same deal with characters:
+`chars=sharkvis` mimics sharkvis's `chars` charset while it plays
+(blocks otherwise). Custom `chars=` ramps are ignored — the logo
+renders shade blocks (`░▒▓█`) like fetch, unless `chars=ascii` keeps
+its original glyphs.
 
 The rotation always keeps winding up while there's sound. `return=N`
 eases the logo back to its root position after `N` seconds of silence.
@@ -159,6 +161,7 @@ Without it the logo stays where the music left it.
 | `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take colors from sharkvis, otherwise the logo keeps its own |
+| `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |
 | `grow=N` | Pulse strength, `0`–`0.3` (default `0.12`, `0` turns it off) |

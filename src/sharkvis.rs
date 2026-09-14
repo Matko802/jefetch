@@ -44,6 +44,7 @@ pub struct LiveFrame {
     pub active: bool,
     pub grad: Option<(Rgb, Rgb)>,
     pub flat: Option<Rgb>,
+    pub glyphs: Option<Vec<String>>,
     pub energy: f32,
     pub beat: f32,
     pub bass: f32,
@@ -58,6 +59,7 @@ impl LiveFrame {
             active: false,
             grad: None,
             flat: None,
+            glyphs: None,
             energy: 0.0,
             beat: 0.0,
             bass: 0.0,
@@ -130,14 +132,68 @@ pub fn gradient_colors() -> Option<(Rgb, Rgb)> {
     gradient_colors_from_paths(&config_paths())
 }
 
-fn visual_from_paths(paths: &[String]) -> Option<(Rgb, Rgb)> {
+pub fn glyph_ramp() -> Option<Vec<String>> {
+    for p in config_paths() {
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            if let Some(g) = parse_sharkvis_glyphs(&text) {
+                return Some(g);
+            }
+        }
+    }
+    None
+}
+
+fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String>>) {
+    let mut grad: Option<(Rgb, Rgb)> = None;
+    let mut glyphs: Option<Vec<String>> = None;
     for p in paths {
         let Ok(text) = std::fs::read_to_string(p) else {
             continue;
         };
-        if let Some(grad) = parse_sharkvis_config(&text) {
-            return Some(grad);
+        if grad.is_none() {
+            grad = parse_sharkvis_config(&text);
         }
+        if glyphs.is_none() {
+            glyphs = parse_sharkvis_glyphs(&text);
+        }
+        if grad.is_some() && glyphs.is_some() {
+            break;
+        }
+    }
+    (grad, glyphs)
+}
+
+fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
+    let mut section = String::from("general");
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            if let Some(end) = line.find(']') {
+                section = line[1..end].trim().to_ascii_lowercase();
+            }
+            continue;
+        }
+        if section != "visualizer" {
+            continue;
+        }
+        let eq = match line.find('=') {
+            Some(i) => i,
+            None => continue,
+        };
+        if line[..eq].trim().to_ascii_lowercase() != "chars" {
+            continue;
+        }
+        let ramp: Vec<String> = line[eq + 1..].trim().chars().map(|c| c.to_string()).collect();
+        if ramp.is_empty() {
+            return None;
+        }
+        if ramp.iter().all(|s| s.trim().is_empty()) {
+            return None;
+        }
+        return Some(if ramp.len() > 64 { ramp[..64].to_vec() } else { ramp });
     }
     None
 }
@@ -1125,6 +1181,7 @@ pub struct Sync {
     running: bool,
     running_at: Option<Instant>,
     gradients: Option<(Rgb, Rgb)>,
+    glyphs: Option<Vec<String>>,
     visual_at: Option<Instant>,
     monitor: Option<BeatMonitor>,
     last: LiveFrame,
@@ -1138,6 +1195,7 @@ impl Sync {
             running: false,
             running_at: None,
             gradients: None,
+            glyphs: None,
             visual_at: None,
             monitor: None,
             last: LiveFrame::inactive(),
@@ -1163,7 +1221,9 @@ impl Sync {
             return self.last.clone();
         }
         if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
-            self.gradients = visual_from_paths(&config_paths());
+            let (grad, glyphs) = visual_from_paths(&config_paths());
+            self.gradients = grad;
+            self.glyphs = glyphs;
             self.visual_at = Some(now);
         }
 
@@ -1230,6 +1290,7 @@ impl Sync {
             active: true,
             grad,
             flat,
+            glyphs: self.glyphs.clone(),
             energy,
             beat,
             bass: bass.unwrap_or(energy).clamp(0.0, 1.0),
@@ -1508,6 +1569,19 @@ mod tests {
     }
 
     #[test]
+    fn glyphs_parse_from_config() {
+        let cfg = "[general]\nbars = 0\n[visualizer]\nmode = bars\nchars = 1234567\n";
+        assert_eq!(
+            parse_sharkvis_glyphs(cfg),
+            Some(vec!["1", "2", "3", "4", "5", "6", "7"].into_iter().map(str::to_string).collect::<Vec<_>>())
+        );
+        let blocks = "[visualizer]\nchars = ▁▂▃▄▅▆▇█\n";
+        assert_eq!(parse_sharkvis_glyphs(blocks).map(|v| v.len()), Some(8));
+        assert_eq!(parse_sharkvis_glyphs("[general]\n"), None);
+        assert_eq!(parse_sharkvis_glyphs("[visualizer]\nmode = bars\n"), None);
+    }
+
+    #[test]
     fn sync_poll_uses_state_file_when_running() {
         let _guard = ENV_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-live-{}", std::process::id()));
@@ -1693,6 +1767,10 @@ mod tests {
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 0), (255, 0, 0))), "both gradient ends");
         assert_eq!(f.flat, None);
+        assert_eq!(
+            f.glyphs,
+            Some(vec!["1".to_string(), "2".to_string(), "3".to_string()])
+        );
         assert!((f.beat - 0.0).abs() < 1e-5);
         assert!((f.speed_mult - 1.0).abs() < 1e-5, "full speed between beats");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
