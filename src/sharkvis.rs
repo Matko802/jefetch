@@ -1318,11 +1318,12 @@ pub fn is_live_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
-/// Single live RGB for text (keys / separator / title).
-/// Static gradient midpoint — not reactive to volume/beats.
-/// - flat single color wins when present
-/// - otherwise mid of low→high
-pub fn live_text_rgb(frame: &LiveFrame) -> Option<Rgb> {
+/// Live RGB for one text row (keys / separator / title).
+/// Vertical gradient top→bottom, matching the logo tint:
+/// first row = gradient_high, last row = gradient_low.
+/// - flat single color wins when present (same for every row)
+/// - inactive frame → None
+pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> {
     if !frame.active {
         return None;
     }
@@ -1330,9 +1331,19 @@ pub fn live_text_rgb(frame: &LiveFrame) -> Option<Rgb> {
         return Some(c);
     }
     if let Some((lo, hi)) = frame.grad {
-        return Some(lerp_rgb(lo, hi, 0.5));
+        let t = if total > 1 {
+            (total - 1 - idx.min(total - 1)) as f32 / (total - 1) as f32
+        } else {
+            0.5
+        };
+        return Some(lerp_rgb(lo, hi, t));
     }
     None
+}
+
+/// Whether the frame yields any display color (for redraw decisions).
+pub fn has_display_color(frame: &LiveFrame) -> bool {
+    frame.active && (frame.flat.is_some() || frame.grad.is_some())
 }
 
 pub fn rgb_ansi_start(rgb: Rgb) -> String {
@@ -1357,6 +1368,26 @@ pub fn swap_display_lines(lines: &[String], live: Option<Rgb>) -> Vec<String> {
     lines
         .iter()
         .map(|l| swap_display_placeholders(l, live))
+        .collect()
+}
+
+/// Row-aware swap: gradient top→bottom across the whole text block.
+/// Falls back to plain when the frame yields no color.
+pub fn swap_display_placeholders_row(
+    s: &str,
+    frame: &LiveFrame,
+    idx: usize,
+    total: usize,
+) -> String {
+    swap_display_placeholders(s, grad_for_row(frame, idx, total))
+}
+
+pub fn swap_display_lines_frame(lines: &[String], frame: &LiveFrame) -> Vec<String> {
+    let total = lines.len();
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| swap_display_placeholders_row(l, frame, i, total))
         .collect()
 }
 

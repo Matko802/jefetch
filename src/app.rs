@@ -407,7 +407,7 @@ impl App {
             }
             // Single poll per frame feeds both the logo and `display: sharkvis`.
             // Display-only mode must still get live colors without tinting the logo.
-            let mut frame_live_rgb: Option<(u8, u8, u8)> = None;
+            // Text uses a vertical gradient top→bottom, same orientation as the logo.
             if animated || display_live {
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
                     let want =
@@ -428,8 +428,7 @@ impl App {
                     shark_live = shark_sync.last();
                 }
                 if display_live {
-                    frame_live_rgb = crate::sharkvis::live_text_rgb(&shark_live);
-                    if !animated && shark_live.active && frame_live_rgb.is_some() {
+                    if !animated && crate::sharkvis::has_display_color(&shark_live) {
                         needs_draw = true;
                     }
                 }
@@ -526,10 +525,14 @@ impl App {
                         let raw =
                             base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or("");
                         if display_live {
-                            line.push_str(&crate::sharkvis::swap_display_placeholders(
-                                raw,
-                                frame_live_rgb,
-                            ));
+                            line.push_str(
+                                &crate::sharkvis::swap_display_placeholders_row(
+                                    raw,
+                                    &shark_live,
+                                    info_row as usize,
+                                    info_count,
+                                ),
+                            );
                         } else {
                             line.push_str(raw);
                         }
@@ -583,10 +586,14 @@ impl App {
                         let raw =
                             base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or("");
                         if display_live {
-                            line.push_str(&crate::sharkvis::swap_display_placeholders(
-                                raw,
-                                frame_live_rgb,
-                            ));
+                            line.push_str(
+                                &crate::sharkvis::swap_display_placeholders_row(
+                                    raw,
+                                    &shark_live,
+                                    info_row as usize,
+                                    info_count,
+                                ),
+                            );
                         } else {
                             line.push_str(raw);
                         }
@@ -928,8 +935,7 @@ impl App {
         };
         let mut sync = crate::sharkvis::Sync::new();
         let frame = sync.poll(poll_mode, active.beat_depth.max(base.beat_depth), true);
-        let live = crate::sharkvis::live_text_rgb(&frame);
-        crate::sharkvis::swap_display_lines(&lines, live)
+        crate::sharkvis::swap_display_lines_frame(&lines, &frame)
     }
 }
 
