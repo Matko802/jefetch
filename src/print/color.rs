@@ -1,5 +1,15 @@
 pub const RESET: &str = "\x1b[0m";
 
+/// Placeholder SGR emitted when a display color is `"sharkvis"`.
+/// Background rendering bakes this in, then `app.rs` swaps it per-frame
+/// for the live sharkvis color (or strips it when inactive).
+/// Value 1,2,3 is near-black and vanishingly unlikely as a real user color.
+pub const SHARKVIS_PLACEHOLDER_START: &str = "\x1b[38;2;1;2;3m";
+
+pub fn is_sharkvis_color_name(s: &str) -> bool {
+    s.trim().eq_ignore_ascii_case("sharkvis")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyResult {
 
@@ -9,6 +19,12 @@ pub enum ApplyResult {
 }
 
 pub fn color_code_to_ansi(color: &str) -> ApplyResult {
+    if is_sharkvis_color_name(color) {
+        return ApplyResult::Ansi {
+            start: SHARKVIS_PLACEHOLDER_START.to_string(),
+            end: RESET.to_string(),
+        };
+    }
     if let Some(sgr) = named_color_sgr(color) {
         return ApplyResult::Ansi {
             start: sgr,
@@ -38,6 +54,9 @@ pub fn color_code_to_ansi(color: &str) -> ApplyResult {
 }
 
 pub fn named_color_sgr(name: &str) -> Option<String> {
+    if is_sharkvis_color_name(name) {
+        return Some(SHARKVIS_PLACEHOLDER_START.to_string());
+    }
     let n = name.trim();
     if n.is_empty() || n == "reset" || n == "reset_default" || n == "#" {
         return Some(RESET.to_string());

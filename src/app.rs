@@ -221,6 +221,7 @@ impl App {
         }
 
         let lines = self.render_modules(&entries);
+        let lines = Self::apply_display_sharkvis_static(&self.config, &entries, lines);
 
         let logo_pad = self
             .logo
@@ -274,6 +275,7 @@ impl App {
         let mut base_lines = self.render_modules(&entries);
 
         let (mut base_cfg, mut active_cfg, mut mode) = self.anim_configs();
+        let mut display_live = display_wants_sharkvis(&self.config, &entries);
         let mut base_cloud = base_logo
             .as_ref()
             .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
@@ -282,7 +284,7 @@ impl App {
             .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
         let mut using_active = false;
         let mut shark_sync = crate::sharkvis::Sync::new();
-        let mut shark_live: crate::sharkvis::LiveFrame;
+        let mut shark_live = crate::sharkvis::LiveFrame::inactive();
         let mut shark_polled = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
@@ -355,6 +357,7 @@ impl App {
                             base_cfg = cfgs.0;
                             active_cfg = cfgs.1;
                             mode = cfgs.2;
+                            display_live = display_wants_sharkvis(&self.config, &entries);
                             base_cloud = base_logo
                                 .as_ref()
                                 .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
@@ -402,16 +405,43 @@ impl App {
             if rows > 0 {
                 render_height = render_height.min(rows.max(1));
             }
-            if animated {
-
+            // Single poll per frame feeds both the logo and `display: sharkvis`.
+            // Display-only mode must still get live colors without tinting the logo.
+            let mut frame_live_rgb: Option<(u8, u8, u8)> = None;
+            if animated || display_live {
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
-                    shark_live = shark_sync.poll(mode, active_cfg.beat_depth, active_cfg.live_colors);
+                    let want =
+                        base_cfg.live_colors || active_cfg.live_colors || display_live;
+                    // Display wants live even when the logo mode is Off
+                    // (e.g. logo none / no animation) — poll with Auto then.
+                    let poll_mode = if display_live
+                        && mode == crate::sharkvis::SharkvisMode::Off
+                    {
+                        crate::sharkvis::SharkvisMode::Auto
+                    } else {
+                        mode
+                    };
+                    shark_live =
+                        shark_sync.poll(poll_mode, active_cfg.beat_depth, want);
                     shark_polled = std::time::Instant::now();
                 } else {
                     shark_live = shark_sync.last();
                 }
-                if shark_live.active != using_active {
-                    using_active = shark_live.active;
+                if display_live {
+                    frame_live_rgb = crate::sharkvis::live_text_rgb(&shark_live);
+                    if !animated && shark_live.active && frame_live_rgb.is_some() {
+                        needs_draw = true;
+                    }
+                }
+            }
+            if animated {
+
+                // Logo follows its own mode only — display-only polling must
+                // not flip the logo into its sharkvis profile.
+                let logo_active =
+                    mode != crate::sharkvis::SharkvisMode::Off && shark_live.active;
+                if logo_active != using_active {
+                    using_active = logo_active;
                 }
                 let (cfg, cloud) = if using_active {
                     (&active_cfg, &mut active_cloud)
@@ -420,11 +450,15 @@ impl App {
                 };
                 spin_phase += f64::from(shark_live.speed_mult);
                 let mut fx = crate::anim::RenderFx::none();
-                if shark_live.active {
-                    if let Some(g) = shark_live.grad {
-                        fx.grad = Some(g);
-                    } else if let Some(c) = shark_live.flat {
-                        fx.grad = Some((c, c));
+                if using_active {
+                    // Logo tint only when the active profile opts in with
+                    // `color=sharkvis` — display-only mode must not tint it.
+                    if cfg.live_colors {
+                        if let Some(g) = shark_live.grad {
+                            fx.grad = Some(g);
+                        } else if let Some(c) = shark_live.flat {
+                            fx.grad = Some((c, c));
+                        }
                     }
                     if !cfg.original_glyphs && !cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
@@ -489,7 +523,16 @@ impl App {
                     let info_row = row as isize - 1;
                     if info_row >= 0 && (info_row as usize) < info_count {
                         line.push_str(&" ".repeat(GAP));
-                        line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
+                        let raw =
+                            base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or("");
+                        if display_live {
+                            line.push_str(&crate::sharkvis::swap_display_placeholders(
+                                raw,
+                                frame_live_rgb,
+                            ));
+                        } else {
+                            line.push_str(raw);
+                        }
                     }
                     crate::print::format::truncate_visible_into(
                         line.trim_end(),
@@ -537,7 +580,16 @@ impl App {
                         if base_logo.is_some() {
                             line.push_str(&" ".repeat(logo_gap));
                         }
-                        line.push_str(base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or(""));
+                        let raw =
+                            base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or("");
+                        if display_live {
+                            line.push_str(&crate::sharkvis::swap_display_placeholders(
+                                raw,
+                                frame_live_rgb,
+                            ));
+                        } else {
+                            line.push_str(raw);
+                        }
                     }
                     out.push_str(&crate::print::format::truncate_visible(
                         line.trim_end(),
@@ -822,6 +874,62 @@ fn separator_colored(_sep: &str, cfg: &crate::config::configfile::Config) -> Str
             _ => s,
         },
         None => s,
+    }
+}
+
+fn display_wants_sharkvis(cfg: &Config, entries: &[ModuleEntry]) -> bool {
+    use crate::sharkvis::is_live_color_name;
+    if let Some(c) = &cfg.display.separator_color {
+        if is_live_color_name(c) {
+            return true;
+        }
+    }
+    if let Some(c) = &cfg.display.key_color {
+        if is_live_color_name(c) {
+            return true;
+        }
+    }
+    if let Some(c) = &cfg.display.title_color {
+        if is_live_color_name(c) {
+            return true;
+        }
+    }
+    for e in entries {
+        if let ModuleEntry::Object { args, .. } = e {
+            if let Some(c) = &args.key_color {
+                if is_live_color_name(c) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+impl App {
+    fn apply_display_sharkvis_static(
+        cfg: &Config,
+        entries: &[ModuleEntry],
+        lines: Vec<String>,
+    ) -> Vec<String> {
+        if !display_wants_sharkvis(cfg, entries) {
+            return lines;
+        }
+        // One-shot poll so `--static` / piped output still follows the music.
+        // Display-only mode (logo none / no animation) still works: when the
+        // logo mode is Off but display wants sharkvis, poll with Auto.
+        let mut tmp = App::new(CliOptions::default());
+        tmp.config = cfg.clone();
+        let (base, active, mode) = tmp.anim_configs();
+        let poll_mode = if mode == crate::sharkvis::SharkvisMode::Off {
+            crate::sharkvis::SharkvisMode::Auto
+        } else {
+            mode
+        };
+        let mut sync = crate::sharkvis::Sync::new();
+        let frame = sync.poll(poll_mode, active.beat_depth.max(base.beat_depth), true);
+        let live = crate::sharkvis::live_text_rgb(&frame);
+        crate::sharkvis::swap_display_lines(&lines, live)
     }
 }
 

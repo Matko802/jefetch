@@ -1313,6 +1313,54 @@ impl Default for Sync {
     }
 }
 
+/// True when a display color string opts into live sharkvis colors.
+pub fn is_live_color_name(s: &str) -> bool {
+    s.trim().eq_ignore_ascii_case("sharkvis")
+}
+
+/// Single live RGB for text (keys / separator / title).
+/// - flat single color wins when present
+/// - otherwise lerp low→high by energy so text pulses with volume
+/// - kicks pop via max(energy, beat*0.8)
+pub fn live_text_rgb(frame: &LiveFrame) -> Option<Rgb> {
+    if !frame.active {
+        return None;
+    }
+    if let Some(c) = frame.flat {
+        return Some(c);
+    }
+    if let Some((lo, hi)) = frame.grad {
+        let t = frame.energy.max(frame.beat * 0.8).clamp(0.0, 1.0);
+        return Some(lerp_rgb(lo, hi, t));
+    }
+    None
+}
+
+pub fn rgb_ansi_start(rgb: Rgb) -> String {
+    format!("\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2)
+}
+
+/// Swap placeholder SGRs baked by `print::color` for the live color.
+/// When `live` is None (sharkvis inactive) placeholders are stripped
+/// so text falls back to plain (no color).
+pub fn swap_display_placeholders(s: &str, live: Option<Rgb>) -> String {
+    let ph = crate::print::color::SHARKVIS_PLACEHOLDER_START;
+    if !s.contains(ph) {
+        return s.to_string();
+    }
+    match live {
+        Some(c) => s.replace(ph, &rgb_ansi_start(c)),
+        None => s.replace(ph, ""),
+    }
+}
+
+pub fn swap_display_lines(lines: &[String], live: Option<Rgb>) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| swap_display_placeholders(l, live))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
