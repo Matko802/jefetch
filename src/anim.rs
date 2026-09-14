@@ -48,7 +48,6 @@ pub struct AnimConfig {
     pub beat_depth: f32,
     pub grow: f32,
     pub boom: Option<f32>,
-    pub shading_explicit: bool,
     pub return_secs: Option<f32>,
 }
 
@@ -79,7 +78,6 @@ impl Default for AnimConfig {
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
-            shading_explicit: false,
             return_secs: None,
         }
     }
@@ -90,10 +88,6 @@ const OPTION_KEYS: &[&str] = &[
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
     "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
     "no-sharkvis", "beat", "grow", "boom", "return",
-];
-
-const QUADRANT_GLYPHS: &[&str] = &[
-    " ", "▘", "▝", "▀", "▖", "▌", "▞", "▛", "▗", "▚", "▐", "▜", "▄", "▙", "▟", "█",
 ];
 
 impl AnimConfig {
@@ -153,15 +147,14 @@ impl AnimConfig {
                 }
             }
             if let Some(v) = chars_opt {
+                // Only the keywords mean anything now; custom ramps are
+                // ignored and render as plain blocks like fetch.
                 cfg.apply_chars_value(&v);
-                cfg.shading_explicit = true;
             } else if has_word(&low, "ascii") || has_word(&low, "original") {
                 cfg.original_glyphs = true;
-                cfg.shading_explicit = true;
             } else if has_word(&low, "blocks") || has_word(&low, "block") {
                 cfg.original_glyphs = false;
                 cfg.shading = default_shading();
-                cfg.shading_explicit = true;
             }
 
             if has_word(&low, "no-sharkvis") || has_word(&low, "nosharkvis") {
@@ -325,22 +318,10 @@ impl AnimConfig {
             self.original_glyphs = true;
             return;
         }
-        if l == "blocks"
-            || l == "block"
-            || l == "solid"
-            || l == "default"
-            || l == "shaded"
-        {
-            self.original_glyphs = false;
-            self.shading = default_shading();
-            return;
-        }
-
-        let ramp: Vec<String> = t.chars().map(|c| c.to_string()).collect();
-        if !ramp.is_empty() {
-            self.original_glyphs = false;
-            self.shading = ramp;
-        }
+        // Everything else (blocks, custom ramps, sharkvis) renders as
+        // plain shade blocks like fetch.
+        self.original_glyphs = false;
+        self.shading = default_shading();
     }
 
     pub fn apply_style_chars(&mut self, logo: &crate::config::configfile::LogoConfig) {
@@ -351,7 +332,6 @@ impl AnimConfig {
         }
         if let Some(c) = &logo.chars {
             self.apply_chars_value(c);
-            self.shading_explicit = true;
         }
     }
 }
@@ -1101,7 +1081,6 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
 
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
-    pub shading: Option<Vec<String>>,
     pub scale: f32,
     pub audio: [f32; 3],
 }
@@ -1116,7 +1095,6 @@ impl RenderFx {
     pub fn none() -> RenderFx {
         RenderFx {
             grad: None,
-            shading: None,
             scale: 1.0,
             audio: [0.0, 0.0, 0.0],
         }
@@ -1124,7 +1102,6 @@ impl RenderFx {
 
     pub fn is_none(&self) -> bool {
         self.grad.is_none()
-            && self.shading.is_none()
             && (self.scale - 1.0).abs() < 1e-6
             && self.audio.iter().all(|a| a.abs() < 1e-6)
     }
@@ -1150,7 +1127,6 @@ pub fn render_frame_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
-        shading: None,
         scale: 1.0,
         audio: [0.0, 0.0, 0.0],
     };
@@ -1193,7 +1169,6 @@ pub fn render_cloud_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
-        shading: None,
         scale: 1.0,
         audio: [0.0, 0.0, 0.0],
     };
@@ -1352,16 +1327,10 @@ pub fn render_cloud_with_fx(
         }
     }
 
-    let shading: &[String] = match fx.shading.as_deref() {
-        Some(s) if !s.is_empty() => s,
-        _ => &config.shading,
-    };
-    let custom_ramp = fx.shading.as_deref().is_some_and(|s| !s.is_empty());
-    let use_quadrant = !custom_ramp && crate::common::utf8_supported();
+    let shading: &[String] = &config.shading;
     let scount = shading.len().max(1);
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
-    let full_mask = (1u32 << total_sub) - 1;
 
     let tint_key_now = Some((fx.grad, h));
     if *tint_key != tint_key_now {
@@ -1441,8 +1410,6 @@ pub fn render_cloud_with_fx(
                 line.push(glyphbuf[idx]);
                 continue;
             }
-            let mut mask = 0u32;
-            let mut bit = 0u32;
             let mut n = 0usize;
             let mut lsum = 0.0f32;
             let mut vc = [-2i32; 4];
@@ -1454,7 +1421,6 @@ pub fn render_cloud_with_fx(
                     let idx = (row * sub_rows + sr) * sw + (col * sub_cols + sc);
                     let z = zbuf[idx];
                     if z > 0.0 {
-                        mask |= 1 << bit;
                         lsum += lumbuf[idx];
                         n += 1;
                         let cc = colorbuf[idx];
@@ -1478,7 +1444,6 @@ pub fn render_cloud_with_fx(
                             }
                         }
                     }
-                    bit += 1;
                 }
             }
             let mut best_c = 0i32;
@@ -1507,14 +1472,7 @@ pub fn render_cloud_with_fx(
                 ci = smax;
             }
 
-            let glyph: &str = if use_quadrant
-                && mask != full_mask
-                && (coverage - ink).abs() <= ((ci as f32 + 1.0) / scount as f32 - ink).abs()
-            {
-                QUADRANT_GLYPHS[mask as usize]
-            } else {
-                &shading[ci]
-            };
+            let glyph: &str = &shading[ci];
             let row_esc = tint_rows.get(row).map(|s| s.as_str());
             push_color(&mut line, palette_ansi, has_ansi, best_c, &mut prev_color, row_esc);
             line.push_str(glyph);
@@ -1622,6 +1580,22 @@ mod tests {
     }
 
     #[test]
+    fn chars_keywords_parse() {
+        // Custom ramps are ignored: everything non-keyword is plain blocks.
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=sharkvis"));
+        assert!(!cfg.original_glyphs);
+        assert_eq!(cfg.shading, default_shading());
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=.,-~:;=!*#$@"));
+        assert!(!cfg.original_glyphs);
+        assert_eq!(cfg.shading, default_shading());
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=ascii"));
+        assert!(cfg.original_glyphs);
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=blocks"));
+        assert!(!cfg.original_glyphs);
+        assert_eq!(cfg.shading, default_shading());
+    }
+
+    #[test]
     fn generic_speed_not_clobbered_by_per_axis() {
 
         let cfg = AnimConfig::from_animation_str(Some("spin xyz speed_y=-1"));
@@ -1649,9 +1623,7 @@ mod tests {
 
         let cfg = AnimConfig::from_animation_str(Some("spin z chars=.,-~:;=!*#$@"));
         assert!(!cfg.original_glyphs);
-        assert_eq!(cfg.shading.len(), 12);
-        assert_eq!(cfg.shading[0], ".");
-        assert_eq!(cfg.shading[11], "@");
+        assert_eq!(cfg.shading, default_shading());
 
         let cfg = AnimConfig::from_animation_str(Some("spin z ascii"));
         assert!(cfg.original_glyphs);
@@ -2043,7 +2015,6 @@ mod tests {
         assert!((cfg.speed - 0.0).abs() < 1e-4);
         assert!((cfg.boom.unwrap() - 0.3).abs() < 1e-4);
         assert!(cfg.original_glyphs);
-        assert!(cfg.shading_explicit);
         assert_eq!(cfg.sharkvis, crate::sharkvis::SharkvisMode::Off);
         assert!(!cfg.sharkvis_set, "mode resolved by the app, not the parser");
     }
@@ -2082,7 +2053,6 @@ mod tests {
     fn grow_and_explicit_chars_parse() {
         let cfg = AnimConfig::from_animation_str(Some("spin y"));
         assert!((cfg.grow - crate::sharkvis::DEFAULT_GROW).abs() < 1e-5);
-        assert!(!cfg.shading_explicit);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y grow=0.2"));
         assert!((cfg.grow - 0.2).abs() < 1e-4);
@@ -2098,15 +2068,15 @@ mod tests {
         assert!((cfg.boom.unwrap() - 0.5).abs() < 1e-4);
 
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
-        assert!(cfg.shading_explicit);
+        assert!(cfg.original_glyphs);
         let cfg = AnimConfig::from_animation_str(Some("spin y chars=.,-~"));
-        assert!(cfg.shading_explicit);
+        assert!(!cfg.original_glyphs);
+        assert_eq!(cfg.shading, default_shading());
     }
 
     fn fx_grad() -> RenderFx {
         RenderFx {
             grad: Some(((255, 0, 0), (0, 0, 255))),
-            shading: None,
             scale: 1.0,
             audio: [0.0, 0.0, 0.0],
         }
@@ -2242,7 +2212,6 @@ mod tests {
             4,
             &RenderFx {
                 grad: None,
-                shading: None,
                 scale: 1.2,
                 audio: [0.0, 0.0, 0.0],
             },
@@ -2255,62 +2224,25 @@ mod tests {
     ];
 
     #[test]
-    fn custom_ramp_never_uses_quadrant_glyphs() {
+    fn blocks_render_without_quadrant_glyphs() {
         let _locale = LocaleGuard::pin_utf8();
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         for frame in [0.0, 5.0, 13.0, 27.0] {
-            let out = render_frame_with_fx(
-                &solid_test_logo(),
-                frame,
-                &cfg,
-                36,
-                4,
-                &RenderFx {
-                    grad: None,
-                    shading: Some(vec!["0".to_string()]),
-                    scale: 1.0,
-                    audio: [0.0, 0.0, 0.0],
-                },
-            );
+            let out = render_frame(&solid_test_logo(), frame, &cfg, 36, 4);
             let text = joined_text(&out);
+            let raw = crate::app::strip_ansi(&text);
             assert!(
-                !text.chars().any(|c| QUADRANT_CHARS.contains(&c)),
-                "no quadrant leaks with custom ramp at frame {}, got:\n{}",
+                !raw.chars().any(|c| QUADRANT_CHARS.contains(&c)),
+                "no quadrant leaks at frame {}, got:\n{}",
                 frame,
-                text
+                raw
+            );
+            assert!(
+                raw.chars().all(|c| c == ' ' || c == '\n' || "░▒▓█".contains(c)),
+                "only shade blocks at frame {}, got:\n{}",
+                frame,
+                raw
             );
         }
-        let plain = joined_text(&render_frame(&solid_test_logo(), 5.0, &cfg, 36, 4));
-        assert!(
-            plain.chars().any(|c| QUADRANT_CHARS.contains(&c)),
-            "default ramp keeps quadrant partials, got:\n{}",
-            plain
-        );
-    }
-
-    #[test]
-    fn shading_override_uses_custom_ramp() {
-        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let plain = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
-        let custom = render_frame_with_fx(
-            &solid_test_logo(),
-            9.0,
-            &cfg,
-            36,
-            4,
-            &RenderFx {
-                grad: None,
-                shading: Some(vec!["@".to_string()]),
-                scale: 1.0,
-                audio: [0.0, 0.0, 0.0],
-            },
-        );
-        assert_ne!(plain.lines, custom.lines, "custom ramp redraws the logo");
-        let raw = custom.lines.join("\n");
-        assert!(
-            crate::app::strip_ansi(&raw).contains('@'),
-            "custom ramp glyph shows, got:\n{}",
-            crate::app::strip_ansi(&raw)
-        );
     }
 }

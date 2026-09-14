@@ -107,7 +107,7 @@ jefetch --structure "os:kernel:uptime:break:colors"
 | `color` | `"red"`, or per-line like `{ "1": "green", "2-4": "blue" }` (`$N` slots just work) |
 | `padding` | `4`, or `{ top, left, right }` (`right` defaults to `4`) |
 | `animation` | Needs an explicit `speed` or the logo won't move; `off` turns it off |
-| `style` / `chars` | `"flat"` or `"3d"`; `"ascii"`, `"blocks"`, or your own ramp. These beat `animation` |
+| `style` / `chars` | `"flat"` or `"3d"`; `"ascii"` keeps the logo's own glyphs, anything else is shade blocks like fetch. These beat `animation` |
 | `sharkvis` | Its own profile for when sharkvis is running (own speed and axes). Base `animation` is ignored meanwhile |
 
 `jefetch --logo arch` swaps the logo for one run.
@@ -140,8 +140,10 @@ right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 `boom=N` makes it swell with volume.
 
 Colors stay the logo's own unless you add `color=sharkvis`, which hands them
-over to sharkvis's `gradient_low` → `gradient_high`. Same deal with
-characters: sharkvis's charset loses if you set your own.
+over to sharkvis's `gradient_low` → `gradient_high` from
+`~/.config/sharkvis/config.toml`. The logo itself always renders as
+shade blocks (`░▒▓█`), like fetch — custom charsets are gone, only
+`chars=ascii` keeps the logo's original glyphs.
 
 The rotation always keeps winding up while there's sound. `return=N`
 eases the logo back to its root position after `N` seconds of silence.
