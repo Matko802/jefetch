@@ -79,7 +79,9 @@ Two special cases:
 - `colors`: same options as fastfetch — `"symbol"` (`background` default,
   `block`, `circle`, `diamond`, `triangle`, `square`, `star`),
   `"brightness"` (`default`, `normal`, `light`), `"paddingLeft"`, and
-  `"block": { "width": 3, "range": [0, 15] }`.
+  `"block": { "width": 3, "range": [0, 15] }`. While
+  [sharkvis](https://github.com/Matko802/sharkvis) plays, the blocks take
+  the live sharkvis color (static palette when idle).
 
 You can also reorder at runtime without touching the file:
 
@@ -92,9 +94,8 @@ jefetch --structure "os:kernel:uptime:break:colors"
 | Key | Default | What it does |
 |-----|---------|--------------|
 | `separator` | `": "` | Sits between key and value |
-| `keyColor` / `titleColor` | bold cyan / blue | Colors for keys and the `user@host` line |
+| `keyColor` / `titleColor` | bold cyan / blue | Colors for keys and the `user@host` line; `"sharkvis"` follows the live gradient only with `textcolor=sharkvis` in the animation profile, otherwise it behaves as unset |
 | `separatorColor` | unset | Color for the separator |
-| `keyColor` / `titleColor` / `separatorColor` | | `"sharkvis"` paints the sharkvis gradient top→bottom like the logo (plain when idle) |
 | `padding` | `0` | Left padding |
 | `brightColor` | `true` | Bright/bold text |
 
@@ -141,7 +142,9 @@ right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 
 Colors stay the logo's own unless you add `color=sharkvis`, which hands them
 over to sharkvis's `gradient_low` → `gradient_high` from
-`~/.config/sharkvis/config.toml`. Same deal with characters:
+`~/.config/sharkvis/config.toml`. Add `textcolor=sharkvis` and the text
+(keys/title/separator with empty colors) follows the same gradient while
+it plays, plain otherwise. Same deal with characters:
 `chars=sharkvis` mimics sharkvis's `chars` charset while it plays
 (blocks otherwise). Custom `chars=` ramps are ignored — the logo
 renders shade blocks (`░▒▓█`) like fetch, unless `chars=ascii` keeps
@@ -160,7 +163,8 @@ Without it the logo stays where the music left it.
 |-------|--------------|
 | `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
-| `color=sharkvis` | Take colors from sharkvis, otherwise the logo keeps its own |
+| `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
+| `textcolor=sharkvis` | Text (keys/title/separator with empty colors) follows sharkvis too |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |

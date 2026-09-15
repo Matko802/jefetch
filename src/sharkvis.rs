@@ -1350,17 +1350,26 @@ pub fn rgb_ansi_start(rgb: Rgb) -> String {
     format!("\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2)
 }
 
+pub fn rgb_ansi_start_bg(rgb: Rgb) -> String {
+    format!("\x1b[48;2;{};{};{}m", rgb.0, rgb.1, rgb.2)
+}
+
 /// Swap placeholder SGRs baked by `print::color` for the live color.
-/// When `live` is None (sharkvis inactive) placeholders are stripped
-/// so text falls back to plain (no color).
+/// Foreground (`38;2;1;2;3`) and background (`48;2;1;2;3`) sentinels are
+/// each replaced with the matching live SGR. When `live` is None
+/// (sharkvis inactive) placeholders are stripped so rows fall back to
+/// their static colors.
 pub fn swap_display_placeholders(s: &str, live: Option<Rgb>) -> String {
     let ph = crate::print::color::SHARKVIS_PLACEHOLDER_START;
-    if !s.contains(ph) {
+    let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
+    if !s.contains(ph) && !s.contains(bg) {
         return s.to_string();
     }
     match live {
-        Some(c) => s.replace(ph, &rgb_ansi_start(c)),
-        None => s.replace(ph, ""),
+        Some(c) => s
+            .replace(ph, &rgb_ansi_start(c))
+            .replace(bg, &rgb_ansi_start_bg(c)),
+        None => s.replace(ph, "").replace(bg, ""),
     }
 }
 
@@ -1392,10 +1401,16 @@ pub fn swap_display_lines_frame(lines: &[String], frame: &LiveFrame) -> Vec<Stri
 }
 
 #[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    // Process env is global: tests across modules that stub
+    // JEFETCH_SHARKVIS_* vars serialize on this one lock.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn mode_values_parse() {
@@ -1454,6 +1469,20 @@ mod tests {
     }
 
     #[test]
+    fn swap_handles_fg_and_bg_placeholders() {
+        let fg = crate::print::color::SHARKVIS_PLACEHOLDER_START;
+        let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
+        let s = format!("{fg}text\x1b[0m \x1b[44m{bg}   \x1b[m");
+        let live = swap_display_placeholders(&s, Some((10, 20, 30)));
+        assert!(live.contains("\x1b[38;2;10;20;30mtext"), "fg swapped, got {:?}", live);
+        assert!(live.contains("\x1b[48;2;10;20;30m   "), "bg swapped, got {:?}", live);
+        assert!(!live.contains("1;2;3"), "no sentinel remains");
+        let plain = swap_display_placeholders(&s, None);
+        assert!(!plain.contains("1;2;3"), "stripped when idle");
+        assert!(plain.contains("\x1b[44m   "), "static bg kept, got {:?}", plain);
+    }
+
+    #[test]
     fn lerp_and_beat_math() {
         assert_eq!(lerp_rgb((0, 0, 0), (255, 255, 255), 0.5), (128, 128, 128));
         assert_eq!(lerp_rgb((0, 0, 0), (255, 0, 0), 0.0), (0, 0, 0));
@@ -1466,7 +1495,7 @@ mod tests {
 
     #[test]
     fn stale_state_file_ignored() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1").unwrap();
         let old = std::time::SystemTime::now() - Duration::from_secs(30);
@@ -1497,7 +1526,7 @@ mod tests {
 
     #[test]
     fn running_override_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         assert!(is_running());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
@@ -1515,7 +1544,7 @@ mod tests {
 
     #[test]
     fn tint_holds_across_state_gap() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-hold-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1 color_low=#ff0000 color_high=#0000ff").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
@@ -1539,7 +1568,7 @@ mod tests {
 
     #[test]
     fn sync_on_requires_running_process() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
@@ -1558,7 +1587,7 @@ mod tests {
 
     #[test]
     fn sync_auto_inactive_without_process() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         let mut s = Sync::new();
@@ -1583,7 +1612,7 @@ mod tests {
 
     #[test]
     fn sync_poll_uses_state_file_when_running() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-live-{}", std::process::id()));
         std::fs::write(&path, "color=#ff8800 energy=0.6 beat=1").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
@@ -1642,7 +1671,7 @@ mod tests {
 
     #[test]
     fn sync_prefers_live_gradients() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-prio-{}", std::process::id()));
         std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = 111111\n").unwrap();
@@ -1669,7 +1698,7 @@ mod tests {
 
     #[test]
     fn sync_holds_last_frame_across_gaps() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gap-{}", std::process::id()));
         std::fs::write(&path, "color=#00ff00 energy=0.5 beat=0").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
@@ -1694,7 +1723,7 @@ mod tests {
 
     #[test]
     fn sync_gates_colors_behind_opt_in() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
         std::fs::write(&cfg_path, "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n").unwrap();
@@ -1722,7 +1751,7 @@ mod tests {
 
     #[test]
     fn sync_picks_up_theme_edits_promptly() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-reload-{}", std::process::id()));
         std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = 111111\n").unwrap();
@@ -1748,7 +1777,7 @@ mod tests {
 
     #[test]
     fn sync_poll_reports_gradient_and_glyphs() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-cfg-{}", std::process::id()));
         std::fs::write(

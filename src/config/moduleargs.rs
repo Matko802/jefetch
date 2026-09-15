@@ -26,7 +26,10 @@ impl ModuleArgs {
         }
         if let Some(v) = obj.get("keyColor") {
             if let Some(s) = v.as_str() {
-                a.key_color = Some(s.to_string());
+                // Text no longer follows sharkvis (see display.rs): unset.
+                if !s.trim().eq_ignore_ascii_case("sharkvis") {
+                    a.key_color = Some(s.to_string());
+                }
             }
         }
         if let Some(v) = obj.get("format") {
@@ -65,5 +68,24 @@ impl ModuleArgs {
 
     pub fn type_or(&self) -> &str {
         self.r#type.as_deref().unwrap_or("")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sharkvis_key_color_becomes_unset() {
+        let a = ModuleArgs::parse(&JsonValue::Obj(vec![(
+            "keyColor".to_string(),
+            JsonValue::Str("sharkvis".to_string()),
+        )]));
+        assert_eq!(a.key_color, None);
+        let a = ModuleArgs::parse(&JsonValue::Obj(vec![(
+            "keyColor".to_string(),
+            JsonValue::Str("cyan".to_string()),
+        )]));
+        assert_eq!(a.key_color.as_deref(), Some("cyan"));
     }
 }

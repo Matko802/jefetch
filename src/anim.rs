@@ -45,6 +45,10 @@ pub struct AnimConfig {
     pub sharkvis: crate::sharkvis::SharkvisMode,
     pub sharkvis_set: bool,
     pub live_colors: bool,
+    /// `textcolor=sharkvis`: text (keys/title/separator) follows the live
+    /// gradient too. Separate from `live_colors` (logo) so each can opt in
+    /// on its own.
+    pub text_live_colors: bool,
     pub beat_depth: f32,
     pub grow: f32,
     pub boom: Option<f32>,
@@ -76,6 +80,7 @@ impl Default for AnimConfig {
             sharkvis: crate::sharkvis::SharkvisMode::default(),
             sharkvis_set: false,
             live_colors: false,
+            text_live_colors: false,
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
@@ -88,7 +93,7 @@ impl Default for AnimConfig {
 const OPTION_KEYS: &[&str] = &[
     "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height",
     "style", "mode", "characters", "chars", "glyphs", "glyph", "shading",
-    "symbols", "symbol", "ramp", "color", "light", "sharkvis", "nosharkvis",
+    "symbols", "symbol", "ramp", "color", "textcolor", "light", "sharkvis", "nosharkvis",
     "no-sharkvis", "beat", "grow", "boom", "return",
 ];
 
@@ -128,6 +133,11 @@ impl AnimConfig {
             if let Some(v) = extract_word(&low, raw, "color", true) {
                 if v.trim().eq_ignore_ascii_case("sharkvis") {
                     cfg.live_colors = true;
+                }
+            }
+            if let Some(v) = extract_word(&low, raw, "textcolor", true) {
+                if v.trim().eq_ignore_ascii_case("sharkvis") {
+                    cfg.text_live_colors = true;
                 }
             }
 
@@ -1605,6 +1615,24 @@ mod tests {
         assert!(!cfg.live_colors);
         let cfg = AnimConfig::from_animation_str(Some("boom=10 color=red"));
         assert!(!cfg.live_colors);
+    }
+
+    #[test]
+    fn text_live_colors_opt_in() {
+        let cfg = AnimConfig::from_animation_str(Some("boom=10 textcolor=sharkvis"));
+        assert!(cfg.text_live_colors);
+        assert!(!cfg.live_colors, "logo tint stays off");
+        // The `x` in `textcolor` must not enable x-spin, and a bare
+        // `textcolor` value must not trip the `color` matcher either way.
+        // (spin_y is default-on; only x/z must stay off.)
+        assert!(!cfg.spin_x && !cfg.spin_z, "{:?}", cfg);
+        let cfg = AnimConfig::from_animation_str(Some("textcolor=red"));
+        assert!(!cfg.text_live_colors);
+        let cfg = AnimConfig::from_animation_str(Some("boom=10"));
+        assert!(!cfg.text_live_colors);
+        let cfg = AnimConfig::from_animation_str(Some("color=sharkvis"));
+        assert!(cfg.live_colors);
+        assert!(!cfg.text_live_colors, "logo opt-in stays logo-only");
     }
 
     #[test]

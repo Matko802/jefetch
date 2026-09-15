@@ -128,6 +128,12 @@ fn render_colors(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
 
 fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
     let pad = " ".repeat(opts.pad);
+    // Each block carries its static color plus a live-color placeholder
+    // *after* it, so an active sharkvis frame overrides per row while an
+    // idle one strips back to exactly these static bytes. Foreground
+    // blocks take the fg sentinel, background blocks the bg sentinel.
+    let fg = crate::print::color::SHARKVIS_PLACEHOLDER_START;
+    let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
     match opts.symbol {
         ColorsSymbol::Block | ColorsSymbol::Background => {
             let mut rows = Vec::new();
@@ -135,10 +141,10 @@ fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
                 let mut row = String::new();
                 for i in opts.range.0..=opts.range.1.min(7) {
                     if opts.symbol == ColorsSymbol::Block {
-                        row.push_str(&format!("\x1b[3{i}m"));
+                        row.push_str(&format!("\x1b[3{i}m{fg}"));
                         row.push_str(&"█".repeat(opts.width));
                     } else {
-                        row.push_str(&format!("\x1b[4{i}m"));
+                        row.push_str(&format!("\x1b[4{i}m{bg}"));
                         row.push_str(&" ".repeat(opts.width));
                     }
                 }
@@ -154,10 +160,10 @@ fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
                 }
                 for i in opts.range.0.max(8)..=opts.range.1 {
                     if opts.symbol == ColorsSymbol::Block {
-                        row.push_str(&format!("\x1b[9{}m", i - 8));
+                        row.push_str(&format!("\x1b[9{}m{fg}", i - 8));
                         row.push_str(&"█".repeat(opts.width));
                     } else {
-                        row.push_str(&format!("\x1b[10{}m", i - 8));
+                        row.push_str(&format!("\x1b[10{}m{bg}", i - 8));
                         row.push_str(&" ".repeat(opts.width));
                     }
                 }
@@ -181,12 +187,12 @@ fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
             let mut row = String::new();
             if opts.brightness == ColorsBrightness::Default {
                 for i in (1..=8).rev() {
-                    row.push_str(&format!("\x1b[38;5;{i}m{glyph}"));
+                    row.push_str(&format!("\x1b[38;5;{i}m{fg}{glyph}"));
                 }
             } else {
                 let prefix = if opts.brightness == ColorsBrightness::Normal { '3' } else { '9' };
                 for i in 0..=7 {
-                    row.push_str(&format!("\x1b[{prefix}{i}m{glyph}"));
+                    row.push_str(&format!("\x1b[{prefix}{i}m{fg}{glyph}"));
                 }
             }
             while row.ends_with(' ') {
@@ -1645,31 +1651,67 @@ mod tests {
 
     #[test]
     fn colors_default_matches_fastfetch() {
+        let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
         let opts = ColorsOpts::default();
         let rows = colors_rows(&opts);
         assert_eq!(rows.len(), 2);
         let mut normal = String::new();
-        for bg in 40..=47 {
-            normal.push_str(&format!("\x1b[{bg}m   "));
+        for code in 40..=47 {
+            normal.push_str(&format!("\x1b[{code}m{bg}   "));
         }
         normal.push_str("\x1b[m");
         assert_eq!(rows[0], normal);
         assert!(rows[1].ends_with("\x1b[m"));
-        assert!(rows[1].contains("\x1b[100m   "));
-        assert!(rows[1].contains("\x1b[107m   "));
+        assert!(rows[1].contains(&format!("\x1b[100m{bg}   ")));
+        assert!(rows[1].contains(&format!("\x1b[107m{bg}   ")));
+        // Idle (no live color) strips back to exactly the static palette.
+        let plain = crate::sharkvis::swap_display_lines(&rows, None);
+        let mut static_row = String::new();
+        for code in 40..=47 {
+            static_row.push_str(&format!("\x1b[{code}m   "));
+        }
+        static_row.push_str("\x1b[m");
+        assert_eq!(plain[0], static_row);
+        assert!(!plain[0].contains("1;2;3"), "no sentinel leaks when idle");
+    }
+
+    #[test]
+    fn colors_follow_live_frame() {
+        let frame = crate::sharkvis::LiveFrame {
+            active: true,
+            grad: Some(((10, 20, 30), (200, 210, 220))),
+            flat: None,
+            glyphs: None,
+            energy: 0.5,
+            beat: 0.0,
+            bass: 0.5,
+            left: 0.5,
+            right: 0.5,
+            speed_mult: 1.0,
+        };
+        let rows = colors_rows(&ColorsOpts::default());
+        let live = crate::sharkvis::swap_display_lines_frame(&rows, &frame);
+        for row in &live {
+            assert!(!row.contains("1;2;3"), "sentinel swapped, got {:?}", row);
+        }
+        // Row gradient top→bottom: first row takes the high end as bg.
+        assert!(live[0].contains("\x1b[48;2;200;210;220m"), "got {:?}", live[0]);
+        assert!(live[0].contains("\x1b[40m"), "static code kept underneath");
     }
 
     #[test]
     fn colors_symbols_and_brightness() {
+        let fg = crate::print::color::SHARKVIS_PLACEHOLDER_START;
+        let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
         let mut opts = ColorsOpts::default();
         opts.symbol = ColorsSymbol::Square;
         let rows = colors_rows(&opts);
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].starts_with("\x1b[38;5;8m■ "));
-        assert!(rows[0].contains("\x1b[38;5;1m■\x1b[m"));
+        assert!(rows[0].starts_with(&format!("\x1b[38;5;8m{fg}■ ")));
+        assert!(rows[0].contains(&format!("\x1b[38;5;1m{fg}■\x1b[m")));
         opts.brightness = ColorsBrightness::Normal;
         let rows = colors_rows(&opts);
-        assert!(rows[0].starts_with("\x1b[30m■ "));
+        assert!(rows[0].starts_with(&format!("\x1b[30m{fg}■ ")));
         opts.brightness = ColorsBrightness::Light;
         opts.symbol = ColorsSymbol::Background;
         opts.range = (0, 7);
@@ -1678,7 +1720,7 @@ mod tests {
         opts.brightness = ColorsBrightness::Normal;
         let rows = colors_rows(&opts);
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].starts_with("\x1b[40m   "));
+        assert!(rows[0].starts_with(&format!("\x1b[40m{bg}   ")));
     }
 
     #[test]

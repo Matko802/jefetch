@@ -1,5 +1,16 @@
 use super::json::JsonValue;
 
+/// Text no longer follows sharkvis (the live reaction lives in the
+/// `colors` module now), so `"sharkvis"` here behaves as unset and the
+/// logo-derived defaults apply.
+fn text_color_opt(s: &str) -> Option<String> {
+    if s.trim().eq_ignore_ascii_case("sharkvis") {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DisplayConfig {
     pub separator: String,
@@ -64,17 +75,17 @@ impl DisplayConfig {
                     }
                     "separatorColor" => {
                         if let Some(s) = v.as_str() {
-                            d.separator_color = Some(s.to_string());
+                            d.separator_color = text_color_opt(s);
                         }
                     }
                     "keyColor" => {
                         if let Some(s) = v.as_str() {
-                            d.key_color = Some(s.to_string());
+                            d.key_color = text_color_opt(s);
                         }
                     }
                     "titleColor" => {
                         if let Some(s) = v.as_str() {
-                            d.title_color = Some(s.to_string());
+                            d.title_color = text_color_opt(s);
                         }
                     }
                     "keyWidth" => {
@@ -134,5 +145,51 @@ impl DisplayConfig {
             }
         }
         d
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn display_of(pairs: Vec<(&str, JsonValue)>) -> DisplayConfig {
+        let root = JsonValue::Obj(vec![(
+            "display".to_string(),
+            JsonValue::Obj(
+                pairs
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+            ),
+        )]);
+        DisplayConfig::parse(&root)
+    }
+
+    fn s(v: &str) -> JsonValue {
+        JsonValue::Str(v.to_string())
+    }
+
+    #[test]
+    fn sharkvis_text_colors_become_unset() {
+        let d = display_of(vec![
+            ("keyColor", s("sharkvis")),
+            ("titleColor", s("SHARKVIS")),
+            ("separatorColor", s("sharkvis")),
+        ]);
+        assert_eq!(d.key_color, None);
+        assert_eq!(d.title_color, None);
+        assert_eq!(d.separator_color, None);
+    }
+
+    #[test]
+    fn ordinary_text_colors_still_parse() {
+        let d = display_of(vec![
+            ("keyColor", s("bold cyan")),
+            ("titleColor", s("blue")),
+            ("separatorColor", s("red")),
+        ]);
+        assert_eq!(d.key_color.as_deref(), Some("bold cyan"));
+        assert_eq!(d.title_color.as_deref(), Some("blue"));
+        assert_eq!(d.separator_color.as_deref(), Some("red"));
     }
 }
