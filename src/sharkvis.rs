@@ -306,6 +306,9 @@ pub struct LiveState {
     pub bass: Option<f32>,
     pub left: Option<f32>,
     pub right: Option<f32>,
+    /// Session id (`started=` millis): with several live sessions only the
+    /// newest one is followed, older ones are ignored.
+    pub started: Option<u64>,
 }
 
 pub fn read_live_state() -> Option<LiveState> {
@@ -315,10 +318,39 @@ pub fn read_live_state() -> Option<LiveState> {
 type StateSig = (String, std::time::SystemTime, u64);
 
 fn read_live_state_sig(known: Option<&(StateSig, LiveState)>) -> Option<(LiveState, StateSig)> {
-    let stale = stale_after();
-    for p in state_paths() {
-        let meta = std::fs::metadata(&p).ok()?;
-        let mtime = meta.modified().ok()?;
+    select_state(&state_paths(), stale_after(), known)
+}
+
+fn state_is_live(st: &LiveState) -> bool {
+    st.color.is_some()
+        || st.energy.is_some()
+        || st.beat.is_some()
+        || st.glow.is_some()
+        || st.ghigh.is_some()
+        || st.bass.is_some()
+        || st.left.is_some()
+        || st.right.is_some()
+}
+
+/// Pick the state to follow out of every candidate file. Fresh,
+/// parseable files compete on `started` (newest session wins, older ones
+/// are ignored); files without it (legacy singletons) count as oldest.
+/// Missing/unreadable/stale/empty files are skipped, never fatal.
+fn select_state(
+    paths: &[String],
+    stale: Duration,
+    known: Option<&(StateSig, LiveState)>,
+) -> Option<(LiveState, StateSig)> {
+    let mut best: Option<(LiveState, StateSig, u64)> = None;
+    for p in paths {
+        let meta = match std::fs::metadata(p) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let mtime = match meta.modified() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
         let fresh = mtime
             .elapsed()
             .ok()
@@ -329,28 +361,29 @@ fn read_live_state_sig(known: Option<&(StateSig, LiveState)>) -> Option<(LiveSta
         let sig = (p.clone(), mtime, meta.len());
         if let Some((known_sig, known_state)) = known {
             if *known_sig == sig {
-                return Some((known_state.clone(), sig));
-            }
-        }
-        if let Ok(text) = std::fs::read_to_string(&p) {
-            if text.trim().is_empty() {
+                let started = known_state.started.unwrap_or(0);
+                if best.as_ref().is_none_or(|(_, _, b)| started > *b) {
+                    best = Some((known_state.clone(), sig, started));
+                }
                 continue;
             }
-            let st = parse_state_text(&text);
-            if st.color.is_some()
-                || st.energy.is_some()
-                || st.beat.is_some()
-                || st.glow.is_some()
-                || st.ghigh.is_some()
-                || st.bass.is_some()
-                || st.left.is_some()
-                || st.right.is_some()
-            {
-                return Some((st, sig));
+        }
+        let text = match std::fs::read_to_string(p) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        let st = parse_state_text(&text);
+        if state_is_live(&st) {
+            let started = st.started.unwrap_or(0);
+            if best.as_ref().is_none_or(|(_, _, b)| started > *b) {
+                best = Some((st, sig, started));
             }
         }
     }
-    None
+    best.map(|(st, sig, _)| (st, sig))
 }
 
 fn stale_after() -> Duration {
@@ -370,12 +403,23 @@ fn state_paths() -> Vec<String> {
     }
     let mut out = Vec::new();
     let uid = unsafe { libc::getuid() };
+    // Per-session directories first (preferred): at most one entry each,
+    // then every live `state-<pid>` session file inside.
+    let mut dirs: Vec<String> = Vec::new();
     if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
         if !rt.is_empty() {
-            out.push(format!("{}/sharkvis/state", rt.trim_end_matches('/')));
+            dirs.push(format!("{}/sharkvis", rt.trim_end_matches('/')));
         }
     }
-    out.push(format!("/run/user/{}/sharkvis/state", uid));
+    let run_dir = format!("/run/user/{}/sharkvis", uid);
+    if !dirs.iter().any(|d| d == &run_dir) {
+        dirs.push(run_dir);
+    }
+    for dir in &dirs {
+        out.push(format!("{}/state", dir));
+        append_session_files(dir, &mut out);
+    }
+    // Legacy singletons.
     if let Ok(tmp) = std::env::var("TMPDIR") {
         if !tmp.is_empty() {
             out.push(format!("{}/sharkvis-{}.state", tmp.trim_end_matches('/'), uid));
@@ -384,6 +428,24 @@ fn state_paths() -> Vec<String> {
     out.push(format!("/tmp/sharkvis-{}.state", uid));
     out.push("/tmp/sharkvis.state".to_string());
     out
+}
+
+/// Every live `state-<pid>` session file in `dir`, name-sorted for a
+/// deterministic order (`*.tmp` scratch files never qualify).
+fn append_session_files(dir: &str, out: &mut Vec<String>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("state-") && !n.ends_with(".tmp"))
+        .collect();
+    names.sort();
+    for n in names {
+        out.push(format!("{}/{}", dir.trim_end_matches('/'), n));
+    }
 }
 
 pub fn parse_state_text(text: &str) -> LiveState {
@@ -483,6 +545,11 @@ pub fn parse_state_text(text: &str) -> LiveState {
             "beat" | "kick" | "onset" => {
                 if let Some(b) = parse_beat(&v) {
                     st.beat = Some(b);
+                }
+            }
+            "started" | "session" | "session_started" => {
+                if let Ok(ms) = v.parse::<u64>() {
+                    st.started = Some(ms);
                 }
             }
             _ => {}
@@ -1350,26 +1417,17 @@ pub fn rgb_ansi_start(rgb: Rgb) -> String {
     format!("\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2)
 }
 
-pub fn rgb_ansi_start_bg(rgb: Rgb) -> String {
-    format!("\x1b[48;2;{};{};{}m", rgb.0, rgb.1, rgb.2)
-}
-
 /// Swap placeholder SGRs baked by `print::color` for the live color.
-/// Foreground (`38;2;1;2;3`) and background (`48;2;1;2;3`) sentinels are
-/// each replaced with the matching live SGR. When `live` is None
-/// (sharkvis inactive) placeholders are stripped so rows fall back to
-/// their static colors.
+/// When `live` is None (sharkvis inactive) placeholders are stripped
+/// so text falls back to plain (no color).
 pub fn swap_display_placeholders(s: &str, live: Option<Rgb>) -> String {
     let ph = crate::print::color::SHARKVIS_PLACEHOLDER_START;
-    let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
-    if !s.contains(ph) && !s.contains(bg) {
+    if !s.contains(ph) {
         return s.to_string();
     }
     match live {
-        Some(c) => s
-            .replace(ph, &rgb_ansi_start(c))
-            .replace(bg, &rgb_ansi_start_bg(c)),
-        None => s.replace(ph, "").replace(bg, ""),
+        Some(c) => s.replace(ph, &rgb_ansi_start(c)),
+        None => s.replace(ph, ""),
     }
 }
 
@@ -1469,17 +1527,68 @@ mod tests {
     }
 
     #[test]
-    fn swap_handles_fg_and_bg_placeholders() {
-        let fg = crate::print::color::SHARKVIS_PLACEHOLDER_START;
-        let bg = crate::print::color::SHARKVIS_PLACEHOLDER_BG;
-        let s = format!("{fg}text\x1b[0m \x1b[44m{bg}   \x1b[m");
-        let live = swap_display_placeholders(&s, Some((10, 20, 30)));
-        assert!(live.contains("\x1b[38;2;10;20;30mtext"), "fg swapped, got {:?}", live);
-        assert!(live.contains("\x1b[48;2;10;20;30m   "), "bg swapped, got {:?}", live);
-        assert!(!live.contains("1;2;3"), "no sentinel remains");
-        let plain = swap_display_placeholders(&s, None);
-        assert!(!plain.contains("1;2;3"), "stripped when idle");
-        assert!(plain.contains("\x1b[44m   "), "static bg kept, got {:?}", plain);
+    fn state_text_parses_started() {
+        let st = parse_state_text("color=#ff8800 energy=0.5 started=123456 pid=42");
+        assert_eq!(st.started, Some(123456));
+        assert_eq!(st.color, Some((255, 136, 0)));
+        let st = parse_state_text("color=#ff8800");
+        assert_eq!(st.started, None, "legacy files count as oldest");
+    }
+
+    fn write_state(dir: &std::path::Path, name: &str, body: &str) -> String {
+        let p = dir.join(name);
+        std::fs::write(&p, body).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn select_newest_session_wins() {
+        let dir = std::env::temp_dir().join(format!("jefetch-sess-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stale = Duration::from_millis(1000);
+        let old = write_state(&dir, "state-100", "color=#ff0000 energy=1 started=1000");
+        let new = write_state(&dir, "state-200", "color=#0000ff energy=1 started=2000");
+        let paths = vec![old.clone(), new.clone()];
+        let (st, sig) = select_state(&paths, stale, None).expect("a session reads");
+        assert_eq!(st.color, Some((0, 0, 255)), "newest session only");
+        assert!(sig.0.ends_with("state-200"));
+        // A stale newest session falls back to the older live one.
+        let past = std::time::SystemTime::now() - Duration::from_secs(30);
+        filetime_set(std::path::Path::new(&new), past).unwrap();
+        let (st, _) = select_state(&paths, stale, None).expect("older live session");
+        assert_eq!(st.color, Some((255, 0, 0)));
+        // Nothing live at all.
+        filetime_set(std::path::Path::new(&old), past).unwrap();
+        assert!(select_state(&paths, stale, None).is_none());
+        let _ = std::fs::remove_file(&old);
+        let _ = std::fs::remove_file(&new);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn select_legacy_loses_to_session() {
+        let dir = std::env::temp_dir().join(format!("jefetch-sess-leg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stale = Duration::from_millis(1000);
+        // Legacy singleton listed first still loses to any session file.
+        let leg = write_state(&dir, "state", "color=#00ff00 energy=1");
+        let sess = write_state(&dir, "state-300", "color=#0000ff energy=1 started=5");
+        let (st, _) = select_state(&[leg.clone(), sess.clone()], stale, None).expect("reads");
+        assert_eq!(st.color, Some((0, 0, 255)));
+        // ...and carries the day alone when no session file exists.
+        let (st, _) = select_state(&[leg.clone()], stale, None).expect("legacy works");
+        assert_eq!(st.color, Some((0, 255, 0)));
+        // Missing/empty candidates never abort the scan.
+        let (st, _) = select_state(
+            &[dir.join("nope").to_string_lossy().into_owned(), leg.clone()],
+            stale,
+            None,
+        )
+        .expect("missing skipped");
+        assert_eq!(st.color, Some((0, 255, 0)));
+        let _ = std::fs::remove_file(&leg);
+        let _ = std::fs::remove_file(&sess);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]

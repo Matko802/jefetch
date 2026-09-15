@@ -6,11 +6,6 @@ pub const RESET: &str = "\x1b[0m";
 /// Value 1,2,3 is near-black and vanishingly unlikely as a real user color.
 pub const SHARKVIS_PLACEHOLDER_START: &str = "\x1b[38;2;1;2;3m";
 
-/// Background-variant placeholder for palette blocks: same sentinel in the
-/// 48;2 (background) slot so `swap_display_placeholders` can tint block
-/// backgrounds the same way it tints foreground text.
-pub const SHARKVIS_PLACEHOLDER_BG: &str = "\x1b[48;2;1;2;3m";
-
 pub fn is_sharkvis_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }

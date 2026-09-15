@@ -79,9 +79,7 @@ Two special cases:
 - `colors`: same options as fastfetch — `"symbol"` (`background` default,
   `block`, `circle`, `diamond`, `triangle`, `square`, `star`),
   `"brightness"` (`default`, `normal`, `light`), `"paddingLeft"`, and
-  `"block": { "width": 3, "range": [0, 15] }`. While
-  [sharkvis](https://github.com/Matko802/sharkvis) plays, the blocks take
-  the live sharkvis color (static palette when idle).
+  `"block": { "width": 3, "range": [0, 15] }`.
 
 You can also reorder at runtime without touching the file:
 
@@ -133,7 +131,9 @@ prints a single frame. Saving `config.jsonc` applies while it runs.
 
 Put `sharkvis` in `animation` (or fill in the `"sharkvis"` key) and the logo
 dances while [sharkvis](https://github.com/Matko802/sharkvis) plays, using
-that profile only. Your base `animation` sits out meanwhile.
+that profile only. Your base `animation` sits out meanwhile. With several
+sharkvis sessions running, only the newest one is followed and older ones
+are ignored.
 
 Only the axes you enabled respond to audio: heavy right channel yaws `y`
 right, heavy left yaws it left, matched stereo pitches `x`, energy rolls

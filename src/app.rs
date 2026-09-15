@@ -407,9 +407,8 @@ impl App {
             if rows > 0 {
                 render_height = render_height.min(rows.max(1));
             }
-            // Single poll per frame feeds both the logo and the `colors`
-            // palette module. Display-only mode must still get live colors
-            // without tinting the logo.
+            // Single poll per frame feeds both the logo and live text.
+            // Display-only mode must still get live colors without tinting the logo.
             if animated || display_live {
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
                     let want =
@@ -889,9 +888,8 @@ fn separator_colored(_sep: &str, cfg: &crate::config::configfile::Config) -> Str
 }
 
 fn display_wants_sharkvis(cfg: &Config, entries: &[ModuleEntry]) -> bool {
-    // Text slots only carry "sharkvis" when the profile opts in (see
-    // apply_textcolor_optin); the `colors` palette module reacts whenever
-    // it is present.
+    // Text slots only carry "sharkvis" via the profile opt-in
+    // (apply_textcolor_optin injects them when `textcolor=sharkvis`).
     use crate::sharkvis::is_live_color_name;
     if let Some(c) = &cfg.display.separator_color {
         if is_live_color_name(c) {
@@ -917,9 +915,7 @@ fn display_wants_sharkvis(cfg: &Config, entries: &[ModuleEntry]) -> bool {
             }
         }
     }
-    entries
-        .iter()
-        .any(|e| e.module().eq_ignore_ascii_case("colors"))
+    false
 }
 
 /// Profile-level opt-in for live text: `textcolor=sharkvis` in the base
@@ -1504,10 +1500,10 @@ mod tests {
     }
 
     #[test]
-    fn display_follows_colors_module_or_text_optin() {
+    fn display_follows_text_optin_only() {
         let cfg = Config::default();
         let colors = vec![ModuleEntry::Name("colors".to_string())];
-        assert!(display_wants_sharkvis(&cfg, &colors));
+        assert!(!display_wants_sharkvis(&cfg, &colors), "palette never opts in");
         let other = vec![ModuleEntry::Name("os".to_string())];
         assert!(!display_wants_sharkvis(&cfg, &other));
         // Text slots only carry "sharkvis" via the profile opt-in
