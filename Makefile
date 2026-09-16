@@ -1,22 +1,24 @@
 VERSION ?= 0.1.0
 PREFIX ?= /usr/local
 
-MUSL_TARGET := $(shell m=$$(uname -m); case "$$m" in x86_64) echo x86_64-unknown-linux-musl;; aarch64|arm64) echo aarch64-unknown-linux-musl;; armv7*|armv6*) echo armv7-unknown-linux-musleabihf;; *) echo "";; esac)
+musl_for_host = case "$$(uname -m)" in x86_64) echo x86_64-unknown-linux-musl;; aarch64|arm64) echo aarch64-unknown-linux-musl;; armv7*|armv6*) echo armv7-unknown-linux-musleabihf;; esac
 
 # Static musl when the toolchain knows the host musl target,
 # otherwise plain `cargo build --release` (Arch, Arch ARM, vanilla rust).
 # On NixOS, run inside `nix develop` or use `nix build`.
 all:
-	@if [ -n "$(MUSL_TARGET)" ] && rustc --print target-list 2>/dev/null | grep -q "^$(MUSL_TARGET)$$"; then \
-		cargo build --release --target $(MUSL_TARGET); \
+	@MUSL_TARGET=$$($(musl_for_host)); \
+	if [ -n "$$MUSL_TARGET" ] && rustup target list --installed 2>/dev/null | grep -q "^$$MUSL_TARGET"; then \
+		cargo build --release --target $$MUSL_TARGET; \
 	else \
 		cargo build --release; \
 	fi
 
 install: all
-	@BIN=""; \
-	if [ -n "$(MUSL_TARGET)" ] && [ -f "target/$(MUSL_TARGET)/release/jefetch" ]; then \
-		BIN="target/$(MUSL_TARGET)/release/jefetch"; \
+	@MUSL_TARGET=$$($(musl_for_host)); \
+	BIN=""; \
+	if [ -n "$$MUSL_TARGET" ] && [ -f "target/$$MUSL_TARGET/release/jefetch" ]; then \
+		BIN="target/$$MUSL_TARGET/release/jefetch"; \
 	elif [ -f "target/release/jefetch" ]; then \
 		BIN="target/release/jefetch"; \
 	else \
@@ -54,9 +56,10 @@ deps:
 		echo "Unsupported package manager. Install cargo and rustc."; \
 	fi
 	@if command -v rustup >/dev/null 2>&1; then \
-		if [ -n "$(MUSL_TARGET)" ] && ! rustup target list --installed 2>/dev/null | grep -q "^$(MUSL_TARGET)"; then \
-			echo "Adding musl target $(MUSL_TARGET)..."; \
-			rustup target add $(MUSL_TARGET) || true; \
+		MUSL_TARGET=$$($(musl_for_host)); \
+		if [ -n "$$MUSL_TARGET" ] && ! rustup target list --installed 2>/dev/null | grep -q "^$$MUSL_TARGET"; then \
+			echo "Adding musl target $$MUSL_TARGET..."; \
+			rustup target add $$MUSL_TARGET || true; \
 		fi; \
 	elif command -v cargo >/dev/null 2>&1; then \
 		echo "Using system cargo (no rustup) — will build dynamic binary if musl target missing"; \
