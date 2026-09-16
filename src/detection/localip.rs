@@ -179,9 +179,9 @@ fn mac_for(ifname: &str) -> String {
     if fd < 0 {
         return String::new();
     }
-    let mut namebuf = [0i8; libc::IFNAMSIZ];
+    let mut namebuf = [0 as libc::c_char; libc::IFNAMSIZ];
     for (dst, src) in namebuf.iter_mut().zip(ifname.as_bytes()) {
-        *dst = *src as i8;
+        *dst = *src as libc::c_char;
     }
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
     ifr.ifr_name = namebuf;
@@ -206,9 +206,9 @@ fn mtu_for(ifname: &str) -> u64 {
     if fd < 0 {
         return 0;
     }
-    let mut namebuf = [0i8; libc::IFNAMSIZ];
+    let mut namebuf = [0 as libc::c_char; libc::IFNAMSIZ];
     for (dst, src) in namebuf.iter_mut().zip(ifname.as_bytes()) {
-        *dst = *src as i8;
+        *dst = *src as libc::c_char;
     }
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
     ifr.ifr_name = namebuf;
@@ -245,9 +245,9 @@ fn speed_mbps(ifname: &str) -> u64 {
     if fd < 0 {
         return 0;
     }
-    let mut namebuf = [0i8; libc::IFNAMSIZ];
+    let mut namebuf = [0 as libc::c_char; libc::IFNAMSIZ];
     for (dst, src) in namebuf.iter_mut().zip(ifname.as_bytes()) {
-        *dst = *src as i8;
+        *dst = *src as libc::c_char;
     }
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
     ifr.ifr_name = namebuf;
@@ -271,9 +271,9 @@ fn flags_for(ifname: &str) -> String {
     if fd < 0 {
         return String::new();
     }
-    let mut namebuf = [0i8; libc::IFNAMSIZ];
+    let mut namebuf = [0 as libc::c_char; libc::IFNAMSIZ];
     for (dst, src) in namebuf.iter_mut().zip(ifname.as_bytes()) {
-        *dst = *src as i8;
+        *dst = *src as libc::c_char;
     }
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
     ifr.ifr_name = namebuf;

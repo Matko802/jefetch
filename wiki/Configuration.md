@@ -92,7 +92,7 @@ jefetch --structure "os:kernel:uptime:break:colors"
 | Key | Default | What it does |
 |-----|---------|--------------|
 | `separator` | `": "` | Sits between key and value |
-| `keyColor` / `titleColor` | bold cyan / blue | Colors for keys and the `user@host` line; `"sharkvis"` follows the live gradient only with `textcolor=sharkvis` in the animation profile, otherwise it behaves as unset |
+| `keyColor` / `titleColor` | bold cyan / blue | Colors for keys and the `user@host` line; with `textcolor=sharkvis` in the animation profile the live gradient always overrides them and they only show when idle |
 | `separatorColor` | unset | Color for the separator |
 | `padding` | `0` | Left padding |
 | `brightColor` | `true` | Bright/bold text |
@@ -143,8 +143,9 @@ right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 Colors stay the logo's own unless you add `color=sharkvis`, which hands them
 over to sharkvis's `gradient_low` → `gradient_high` from
 `~/.config/sharkvis/config.toml`. Add `textcolor=sharkvis` and the text
-(keys/title/separator with empty colors) follows the same gradient while
-it plays, plain otherwise. Same deal with characters:
+(keys/title/separator) follows the same gradient while
+it plays, always overriding their normal colors (which only show when
+idle). Same deal with characters:
 `chars=sharkvis` mimics sharkvis's `chars` charset while it plays
 (blocks otherwise). Custom `chars=` ramps are ignored — the logo
 renders shade blocks (`░▒▓█`) like fetch, unless `chars=ascii` keeps
@@ -164,7 +165,7 @@ Without it the logo stays where the music left it.
 | `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
-| `textcolor=sharkvis` | Text (keys/title/separator with empty colors) follows sharkvis too |
+| `textcolor=sharkvis` | Text follows the live gradient too, overriding normal colors (shown when idle) |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |

@@ -10,6 +10,19 @@ pub fn is_sharkvis_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
+/// Live suffix for text colors: the placeholder when the animation profile
+/// opts in (`textcolor=sharkvis`, plumbed as `DisplayConfig::text_live`),
+/// empty otherwise. Text renders as `normal + placeholder`, so the live
+/// gradient always overrides while active and the normal color only shows
+/// when idle.
+pub fn live_text_suffix(text_live: bool) -> &'static str {
+    if text_live {
+        SHARKVIS_PLACEHOLDER_START
+    } else {
+        ""
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyResult {
 

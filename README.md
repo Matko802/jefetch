@@ -24,6 +24,23 @@ make deps
 make
 sudo make install
 ```
+
+## Arch Linux (AUR)
+
+`jefetch-git` builds on `x86_64`, `aarch64` and `armv7h`
+(Arch Linux ARM included):
+
+```sh
+yay -S jefetch-git
+```
+
+or manually:
+
+```sh
+git clone https://github.com/Matko802/jefetch.git
+cd jefetch
+makepkg -si
+```
 ## Updating it
 
 ```sh

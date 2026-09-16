@@ -67,7 +67,8 @@ impl<'a> ModuleRender<'a> {
                     ApplyResult::Ansi { start, end } => (start, end),
                     _ => (String::new(), String::new()),
                 };
-                format!("{}{}{}", s, key, end)
+                let live = color::live_text_suffix(self.display.text_live);
+                format!("{}{}{}{}", s, live, key, end)
             }
         }
     }
@@ -79,7 +80,10 @@ impl<'a> ModuleRender<'a> {
                 ApplyResult::Ansi {
                     start,
                     end,
-                } => format!("{}{}{}", start, s, end),
+                } => {
+                    let live = color::live_text_suffix(self.display.text_live);
+                    format!("{}{}{}{}", start, live, s, end)
+                }
                 _ => s.to_string(),
             },
             None => s.to_string(),

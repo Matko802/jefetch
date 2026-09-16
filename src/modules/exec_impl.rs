@@ -342,7 +342,9 @@ fn render_title(cfg: &Config) -> Option<ModuleOutput> {
         match &cfg.display.title_color {
             Some(c) => match crate::print::color::color_code_to_ansi(c) {
                 crate::print::color::ApplyResult::Ansi { start, end } => {
-                    format!("{}{}{}", start, s, end)
+                    let live =
+                        crate::print::color::live_text_suffix(cfg.display.text_live);
+                    format!("{}{}{}{}", start, live, s, end)
                 }
                 _ => s,
             },
@@ -593,9 +595,7 @@ fn render_board(_cfg: &Config) -> Option<ModuleOutput> {
 }
 
 fn render_host(_cfg: &Config) -> Option<ModuleOutput> {
-    let name = crate::detection::read_file("/sys/class/dmi/id/product_name")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+    let name = crate::detection::board::product_name();
 
     let is_generic = |s: &str| {
         let l = s.to_ascii_lowercase();
@@ -1248,10 +1248,7 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
             ]))
         }
         "host" => {
-            let name = crate::detection::read_file("/sys/class/dmi/id/product_name")
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+            let name = crate::detection::board::product_name();
             if name.is_empty() {
                 return None;
             }

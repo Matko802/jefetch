@@ -63,11 +63,51 @@ fn detect_uncached() -> OSInfo {
 }
 
 pub fn arch() -> String {
-    let a = std::env::consts::ARCH;
+    normalize_arch(&uname_machine().unwrap_or_else(|| std::env::consts::ARCH.to_string()))
+}
 
+fn uname_machine() -> Option<String> {
+    unsafe {
+        let mut u: libc::utsname = std::mem::zeroed();
+        if libc::uname(&mut u) != 0 {
+            return None;
+        }
+        let raw = &u.machine as *const libc::c_char as *const u8;
+        let len = libc::strlen(raw as *const libc::c_char);
+        let bytes = std::slice::from_raw_parts(raw, len);
+        std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+    }
+}
+
+fn normalize_arch(a: &str) -> String {
     match a {
-        "x86_64" => "x86_64".to_string(),
-        "aarch64" => "aarch64".to_string(),
+        "x86_64" | "x86-64" | "amd64" => "x86_64".to_string(),
+        "aarch64" | "arm64" | "aarch64_be" => "aarch64".to_string(),
+        "armv7l" | "armv7b" | "armv7hl" => "armv7l".to_string(),
+        "armv6l" => "armv6l".to_string(),
+        "arm" | "armv5tel" | "armv5tejl" | "armv8l" => "arm".to_string(),
+        "i386" | "i486" | "i586" | "i686" | "x86" => "i686".to_string(),
+        "riscv64" => "riscv64".to_string(),
+        "loongarch64" => "loongarch64".to_string(),
+        "ppc64le" | "ppc64" | "powerpc64le" => "ppc64le".to_string(),
+        "s390x" => "s390x".to_string(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arch_normalizes_common_machines() {
+        assert_eq!(normalize_arch("x86_64"), "x86_64");
+        assert_eq!(normalize_arch("amd64"), "x86_64");
+        assert_eq!(normalize_arch("aarch64"), "aarch64");
+        assert_eq!(normalize_arch("arm64"), "aarch64");
+        assert_eq!(normalize_arch("armv7l"), "armv7l");
+        assert_eq!(normalize_arch("armv6l"), "armv6l");
+        assert_eq!(normalize_arch("i686"), "i686");
+        assert_eq!(normalize_arch("riscv64"), "riscv64");
     }
 }

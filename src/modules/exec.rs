@@ -19,7 +19,7 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
         } else {
             base.values
                 .iter()
-                .map(|v| render(fmt_str, inst, v))
+                .map(|v| render(fmt_str, inst, v, cfg.display.text_live))
                 .collect()
         }
     } else {
@@ -46,7 +46,10 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
                             if let crate::print::color::ApplyResult::Ansi { start, end } =
                                 crate::print::color::color_code_to_ansi(c)
                             {
-                                return format!("{}{}{}", start, k, end);
+                                let live = crate::print::color::live_text_suffix(
+                                    cfg.display.text_live,
+                                );
+                                return format!("{}{}{}{}", start, live, k, end);
                             }
                         }
                         k
@@ -66,7 +69,7 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
         .key
         .clone()
         .unwrap_or_else(|| base.key.clone());
-    let key_rendered = render_key(&raw_key, &base.key, inst);
+    let key_rendered = render_key(&raw_key, &base.key, inst, cfg.display.text_live);
 
     let mut out = super::ModuleOutput::supported("", values);
     out.key = key_rendered;
@@ -82,7 +85,9 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
             if let crate::print::color::ApplyResult::Ansi { start, end } =
                 crate::print::color::color_code_to_ansi(c)
             {
-                out.key = format!("{}{}{}", start, out.key, end);
+                let live =
+                    crate::print::color::live_text_suffix(cfg.display.text_live);
+                out.key = format!("{}{}{}{}", start, live, out.key, end);
             }
         }
     }
@@ -90,14 +95,22 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     Some(out)
 }
 
-fn render_key(raw_key: &str, base_key: &str, inst: &ModuleInstance) -> String {
-    let r = format::format(raw_key, &KeyResolver { base_key, inst });
+fn render_key(raw_key: &str, base_key: &str, inst: &ModuleInstance, text_live: bool) -> String {
+    let r = format::format(
+        raw_key,
+        &KeyResolver {
+            base_key,
+            inst,
+            text_live,
+        },
+    );
     r.text
 }
 
 struct KeyResolver<'a> {
     base_key: &'a str,
     inst: &'a ModuleInstance,
+    text_live: bool,
 }
 
 impl<'a> Resolver for KeyResolver<'a> {
@@ -114,13 +127,14 @@ impl<'a> Resolver for KeyResolver<'a> {
 
         if name == "keys" {
             let c = self.inst.args.key_color.as_deref().unwrap_or("");
-            return crate::print::color::named_color_sgr(c);
+            let live = crate::print::color::live_text_suffix(self.text_live);
+            return crate::print::color::named_color_sgr(c).map(|s| format!("{s}{live}"));
         }
         None
     }
 }
 
-fn render(fmt_str: &str, inst: &ModuleInstance, value: &str) -> String {
+fn render(fmt_str: &str, inst: &ModuleInstance, value: &str, text_live: bool) -> String {
     let value_s = value.to_string();
     let key_s = inst.args.key.clone().unwrap_or_default();
     let placeholders: &[(&str, String)] = &[("value", value_s), ("title", key_s.clone())];
@@ -130,6 +144,7 @@ fn render(fmt_str: &str, inst: &ModuleInstance, value: &str) -> String {
             key_name: &key_s,
             values: placeholders,
             inst,
+            text_live,
         },
     );
     r.text
@@ -139,6 +154,7 @@ struct ValueResolver<'a> {
     key_name: &'a str,
     values: &'a [(&'a str, String)],
     inst: &'a ModuleInstance,
+    text_live: bool,
 }
 
 impl<'a> Resolver for ValueResolver<'a> {
@@ -171,7 +187,8 @@ impl<'a> Resolver for ValueResolver<'a> {
     fn get_color(&self, name: &str) -> Option<String> {
         if name == "keys" {
             let c = self.inst.args.key_color.as_deref().unwrap_or("");
-            return crate::print::color::named_color_sgr(c);
+            let live = crate::print::color::live_text_suffix(self.text_live);
+            return crate::print::color::named_color_sgr(c).map(|s| format!("{s}{live}"));
         }
         None
     }

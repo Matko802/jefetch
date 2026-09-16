@@ -202,7 +202,7 @@ impl App {
             self.ensure_default_config();
         }
 
-        apply_textcolor_optin(&mut self.config);
+        self.config.display.text_live = profile_text_live(&self.config.logo);
         self.apply_logo_overrides();
         self.pick_logo();
 
@@ -350,7 +350,7 @@ impl App {
                         last_stamp = stamp;
                         if let Some(cfg) = load_config_file(path) {
                             self.config = cfg;
-                            apply_textcolor_optin(&mut self.config);
+                            self.config.display.text_live = profile_text_live(&self.config.logo);
                             self.apply_logo_overrides();
                             self.pick_logo();
                             base_logo = self.logo.clone();
@@ -880,64 +880,33 @@ fn separator_colored(_sep: &str, cfg: &crate::config::configfile::Config) -> Str
     let s = cfg.display.separator.clone();
     match &cfg.display.separator_color {
         Some(c) => match color::color_code_to_ansi(c) {
-            color::ApplyResult::Ansi { start, end } => format!("{}{}{}", start, s, end),
+            color::ApplyResult::Ansi { start, end } => {
+                let live = color::live_text_suffix(cfg.display.text_live);
+                format!("{}{}{}{}", start, live, s, end)
+            }
             _ => s,
         },
         None => s,
     }
 }
 
-fn display_wants_sharkvis(cfg: &Config, entries: &[ModuleEntry]) -> bool {
-    // Text slots only carry "sharkvis" via the profile opt-in
-    // (apply_textcolor_optin injects them when `textcolor=sharkvis`).
-    use crate::sharkvis::is_live_color_name;
-    if let Some(c) = &cfg.display.separator_color {
-        if is_live_color_name(c) {
-            return true;
-        }
-    }
-    if let Some(c) = &cfg.display.key_color {
-        if is_live_color_name(c) {
-            return true;
-        }
-    }
-    if let Some(c) = &cfg.display.title_color {
-        if is_live_color_name(c) {
-            return true;
-        }
-    }
-    for e in entries {
-        if let ModuleEntry::Object { args, .. } = e {
-            if let Some(c) = &args.key_color {
-                if is_live_color_name(c) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+fn display_wants_sharkvis(cfg: &Config, _entries: &[ModuleEntry]) -> bool {
+    // Live text is profile-gated (`textcolor=sharkvis`); the slots
+    // themselves just carry normal colors (or placeholders via injection).
+    profile_text_live(&cfg.logo)
 }
 
-/// Profile-level opt-in for live text: `textcolor=sharkvis` in the base
-/// animation or the sharkvis profile lets empty/unset text slots follow
-/// the music. Explicit colors always win. The injected `"sharkvis"` values
-/// flow through the normal placeholder machinery, so text tints per frame
-/// while active and falls back when idle.
-fn apply_textcolor_optin(cfg: &mut Config) {
-    let base = crate::anim::AnimConfig::from_animation_str(cfg.logo.animation.as_deref());
-    let active = crate::anim::AnimConfig::from_animation_str(cfg.logo.sharkvis.as_deref());
-    if !(base.text_live_colors || active.text_live_colors) {
-        return;
+/// Whether the animation profile opts text into live colors:
+/// `textcolor=sharkvis` in the base animation or the sharkvis profile.
+/// When true, text renders as `normal color + live placeholder`, so the
+/// gradient always overrides while active and the normal color only shows
+/// when idle.
+fn profile_text_live(logo: &LogoConfig) -> bool {
+    let base = crate::anim::AnimConfig::from_animation_str(logo.animation.as_deref());
+    if base.text_live_colors {
+        return true;
     }
-    for slot in [
-        &mut cfg.display.key_color,
-        &mut cfg.display.title_color,
-        &mut cfg.display.separator_color,
-    ] {
-        if slot.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true) {
-            *slot = Some("sharkvis".to_string());
-        }
-    }
+    crate::anim::AnimConfig::from_animation_str(logo.sharkvis.as_deref()).text_live_colors
 }
 
 impl App {
@@ -1500,46 +1469,33 @@ mod tests {
     }
 
     #[test]
-    fn display_follows_text_optin_only() {
-        let cfg = Config::default();
-        let colors = vec![ModuleEntry::Name("colors".to_string())];
-        assert!(!display_wants_sharkvis(&cfg, &colors), "palette never opts in");
+    fn display_follows_profile_optin() {
         let other = vec![ModuleEntry::Name("os".to_string())];
+        let mut cfg = Config::default();
         assert!(!display_wants_sharkvis(&cfg, &other));
-        // Text slots only carry "sharkvis" via the profile opt-in
-        // (apply_textcolor_optin); hand-built here to cover the trigger.
-        let mut text_cfg = Config::default();
-        text_cfg.display.key_color = Some("sharkvis".to_string());
-        assert!(display_wants_sharkvis(&text_cfg, &other));
+        cfg.logo.sharkvis = Some("xyz textcolor=sharkvis".to_string());
+        assert!(display_wants_sharkvis(&cfg, &other));
+        cfg.logo.sharkvis = Some("xyz color=sharkvis".to_string());
+        assert!(!display_wants_sharkvis(&cfg, &other), "logo-only leaves text alone");
         let empty: Vec<ModuleEntry> = vec![];
-        assert!(!display_wants_sharkvis(&cfg, &empty));
+        assert!(!display_wants_sharkvis(&Config::default(), &empty));
     }
 
     #[test]
-    fn textcolor_optin_fills_only_empty_slots() {
-        let mut cfg = Config::default();
-        cfg.logo.animation = Some("spin y speed=1 textcolor=sharkvis".to_string());
-        cfg.display.key_color = Some("red".to_string());
-        cfg.display.title_color = None;
-        cfg.display.separator_color = Some("".to_string());
-        apply_textcolor_optin(&mut cfg);
-        assert_eq!(cfg.display.key_color.as_deref(), Some("red"), "explicit wins");
-        assert_eq!(cfg.display.title_color.as_deref(), Some("sharkvis"));
-        assert_eq!(cfg.display.separator_color.as_deref(), Some("sharkvis"));
+    fn profile_text_live_flags() {
+        let mut logo = crate::config::configfile::LogoConfig::default();
+        assert!(!profile_text_live(&logo));
+        logo.animation = Some("spin y speed=1 textcolor=sharkvis".to_string());
+        assert!(profile_text_live(&logo));
+        logo.animation = Some("spin y speed=1 color=sharkvis".to_string());
+        assert!(!profile_text_live(&logo));
+        logo.animation = None;
+        logo.sharkvis = Some("xyz textcolor=sharkvis".to_string());
+        assert!(profile_text_live(&logo));
     }
 
     #[test]
-    fn textcolor_optin_needs_the_keyword() {
-        let mut cfg = Config::default();
-        cfg.logo.animation = Some("spin y speed=1 color=sharkvis".to_string());
-        apply_textcolor_optin(&mut cfg);
-        assert_eq!(cfg.display.key_color, None, "logo-only opt-in leaves text alone");
-        assert_eq!(cfg.display.title_color, None);
-        assert_eq!(cfg.display.separator_color, None);
-    }
-
-    #[test]
-    fn static_path_tints_text_with_profile_optin() {
+    fn static_path_overrides_normal_with_live() {
         let _g = crate::sharkvis::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-textopt-{}.state", std::process::id()));
         // Note: no color_low/high here — those would win as the live
@@ -1559,22 +1515,23 @@ mod tests {
         let entries = vec![ModuleEntry::Name("title".to_string())];
         let mut cfg = Config::default();
         cfg.logo.sharkvis = Some("xyz textcolor=sharkvis".to_string());
-        apply_textcolor_optin(&mut cfg);
-        assert_eq!(cfg.display.title_color.as_deref(), Some("sharkvis"));
+        // Explicit normal color underneath, like run() leaves it.
+        cfg.display.title_color = Some("red".to_string());
+        cfg.display.text_live = profile_text_live(&cfg.logo);
         let lines = App::render_modules_with(&cfg, &[], &entries);
         assert!(!lines.is_empty());
         let out = App::apply_display_sharkvis_static(&cfg, &entries, lines);
         assert!(
-            out.iter().any(|l| l.contains("\x1b[38;2;128;0;128m")),
-            "live text tint, got {:?}",
+            out.iter().any(|l| l.contains("\x1b[31m\x1b[38;2;128;0;128m")),
+            "live overrides normal, got {:?}",
             out
         );
 
-        // Same setup without the keyword: text stays static.
+        // Same setup without the keyword: normal color only, no placeholder.
         let mut plain_cfg = Config::default();
         plain_cfg.logo.sharkvis = Some("xyz color=sharkvis".to_string());
-        apply_textcolor_optin(&mut plain_cfg);
-        assert_eq!(plain_cfg.display.title_color, None);
+        plain_cfg.display.title_color = Some("red".to_string());
+        plain_cfg.display.text_live = profile_text_live(&plain_cfg.logo);
         let lines = App::render_modules_with(&plain_cfg, &[], &entries);
         let out = App::apply_display_sharkvis_static(&plain_cfg, &entries, lines);
         assert!(
@@ -1594,7 +1551,7 @@ mod tests {
     fn static_path_stays_plain_when_sharkvis_down() {
         let _g = crate::sharkvis::test_env_lock();
         // Stale state + no process: even with the textcolor opt-in and a
-        // colors module present, nothing may resolve to live colors.
+        // colors module present, only normal colors may resolve.
         let path = std::env::temp_dir().join(format!("jefetch-textoff-{}.state", std::process::id()));
         std::fs::write(&path, "color=#ff8800 energy=0.9 beat=1").unwrap();
         let f = std::fs::File::options().write(true).open(&path).unwrap();
@@ -1610,7 +1567,8 @@ mod tests {
         ];
         let mut cfg = Config::default();
         cfg.logo.sharkvis = Some("xyz textcolor=sharkvis".to_string());
-        apply_textcolor_optin(&mut cfg);
+        cfg.display.title_color = Some("red".to_string());
+        cfg.display.text_live = profile_text_live(&cfg.logo);
         let lines = App::render_modules_with(&cfg, &[], &entries);
         let out = App::apply_display_sharkvis_static(&cfg, &entries, lines);
         let joined = out.join("\n");
@@ -1618,6 +1576,7 @@ mod tests {
         assert!(!joined.contains("48;2"), "no live bg when down, got {:?}", out);
         assert!(!joined.contains("1;2;3"), "no sentinel leaks, got {:?}", out);
         assert!(joined.contains("\x1b[40m"), "static palette kept, got {:?}", out);
+        assert!(joined.contains("\x1b[31m"), "normal color shows when off, got {:?}", out);
 
         let _ = std::fs::remove_file(&path);
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");

@@ -48,7 +48,7 @@ fn getpwuid_name() -> Option<String> {
 }
 
 fn get_hostname_syscall() -> Option<String> {
-    let mut buf = [0i8; 256];
+    let mut buf = [0 as libc::c_char; 256];
     let ret = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
     if ret == 0 {
         let s = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };

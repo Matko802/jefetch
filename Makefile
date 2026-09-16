@@ -1,25 +1,29 @@
 VERSION ?= 0.1.0
 PREFIX ?= /usr/local
 
-# Static musl via rustup if available, otherwise plain `cargo build --release`
-# (works with vanilla rust). On NixOS, run inside `nix develop` or use `nix build`.
+MUSL_TARGET := $(shell m=$$(uname -m); case "$$m" in x86_64) echo x86_64-unknown-linux-musl;; aarch64|arm64) echo aarch64-unknown-linux-musl;; armv7*|armv6*) echo armv7-unknown-linux-musleabihf;; *) echo "";; esac)
+
+# Static musl when the toolchain knows the host musl target,
+# otherwise plain `cargo build --release` (Arch, Arch ARM, vanilla rust).
+# On NixOS, run inside `nix develop` or use `nix build`.
 all:
-	@if [ -x "$$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" ] && \
-		"$$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc" --print target-list 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then \
-		TC="$$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu"; \
-		RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTC="$$TC/bin/rustc" "$$TC/bin/cargo" build --release --target x86_64-unknown-linux-musl; \
+	@if [ -n "$(MUSL_TARGET)" ] && rustc --print target-list 2>/dev/null | grep -q "^$(MUSL_TARGET)$$"; then \
+		cargo build --release --target $(MUSL_TARGET); \
 	else \
 		cargo build --release; \
 	fi
 
 install: all
-	@if [ -f target/x86_64-unknown-linux-musl/release/jefetch ]; then \
-		install -Dm755 target/x86_64-unknown-linux-musl/release/jefetch $(DESTDIR)$(PREFIX)/bin/jefetch; \
-	elif [ -f target/release/jefetch ]; then \
-		install -Dm755 target/release/jefetch $(DESTDIR)$(PREFIX)/bin/jefetch; \
+	@BIN=""; \
+	if [ -n "$(MUSL_TARGET)" ] && [ -f "target/$(MUSL_TARGET)/release/jefetch" ]; then \
+		BIN="target/$(MUSL_TARGET)/release/jefetch"; \
+	elif [ -f "target/release/jefetch" ]; then \
+		BIN="target/release/jefetch"; \
 	else \
-		echo "No binary found. Run 'make' first." >&2; exit 1; \
-	fi
+		BIN=$$(ls -t target/*/release/jefetch 2>/dev/null | head -n1); \
+	fi; \
+	if [ -z "$$BIN" ]; then echo "No binary found. Run 'make' first." >&2; exit 1; fi; \
+	install -Dm755 "$$BIN" "$(DESTDIR)$(PREFIX)/bin/jefetch"
 
 clean:
 	cargo clean
@@ -50,9 +54,9 @@ deps:
 		echo "Unsupported package manager. Install cargo and rustc."; \
 	fi
 	@if command -v rustup >/dev/null 2>&1; then \
-		if ! rustup target list --installed 2>/dev/null | grep -q "x86_64-unknown-linux-musl"; then \
-			echo "Adding musl target..."; \
-			rustup target add x86_64-unknown-linux-musl || true; \
+		if [ -n "$(MUSL_TARGET)" ] && ! rustup target list --installed 2>/dev/null | grep -q "^$(MUSL_TARGET)"; then \
+			echo "Adding musl target $(MUSL_TARGET)..."; \
+			rustup target add $(MUSL_TARGET) || true; \
 		fi; \
 	elif command -v cargo >/dev/null 2>&1; then \
 		echo "Using system cargo (no rustup) — will build dynamic binary if musl target missing"; \

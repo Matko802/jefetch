@@ -122,6 +122,19 @@ fn gpu_type(base: &std::path::Path, vendor: &str, driver: &str) -> String {
     if vendor.eq_ignore_ascii_case("0x10de") {
         return "Discrete".to_string();
     }
+    if vendor.eq_ignore_ascii_case("0x13b5")
+        || driver == "panfrost"
+        || driver == "panthor"
+        || driver == "lima"
+        || driver == "v3d"
+        || driver == "vc4"
+        || driver == "etnaviv"
+        || driver == "freedreno"
+        || driver == "adreno"
+        || driver == "msm"
+    {
+        return "Integrated".to_string();
+    }
     String::new()
 }
 
