@@ -7,6 +7,8 @@ license = "MIT"
 
 [dependencies]
 libc = "0.2"
+# Image logos (type = "image"): decode only, no encoders, no rayon.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "pnm", "qoi", "tga"] }
 
 [profile.release]
 opt-level = 3

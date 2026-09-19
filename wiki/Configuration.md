@@ -101,15 +101,38 @@ jefetch --structure "os:kernel:uptime:break:colors"
 
 | Key | Notes |
 |-----|-------|
-| `source` | Builtin id (see `jefetch --list-logos`), or `""` to autodetect |
-| `type` | `"builtin"` / `"none"` / `"file"` (with `"source": "~/logo.txt"`) |
+| `source` | Builtin id (see `jefetch --list-logos`), a `"~/logo.txt"` file, an image path (see below), or `""` to autodetect |
+| `type` | `"builtin"` / `"none"` / `"file"` (with `"source": "~/logo.txt"`) / `"image"` (with `"source": "~/pic.png"`) |
 | `color` | `"red"`, or per-line like `{ "1": "green", "2-4": "blue" }` (`$N` slots just work) |
-| `padding` | `4`, or `{ top, left, right }` (`right` defaults to `4`) |
+| `padding` | `4`, or `{ top, left, right }` (`right` defaults to `4`; images default to `2`) |
+| `width` / `height` | Image logos only: target size in terminal columns / rows (default fits 48 columns, aspect kept). Set one side and the other follows the aspect; set both to stretch |
 | `animation` | Needs an explicit `speed` or the logo won't move; `off` turns it off |
 | `style` / `chars` | `"flat"` or `"3d"`; `"ascii"` keeps the logo's own glyphs, anything else is shade blocks like fetch. These beat `animation` |
 | `sharkvis` | Its own profile for when sharkvis is running (own speed and axes). Base `animation` is ignored meanwhile |
 
-`jefetch --logo arch` swaps the logo for one run.
+`jefetch --logo arch` swaps the logo for one run. Point `--logo` at an
+image file (`jefetch --logo ~/pic.png`) for a one-run image logo.
+
+## Image logos
+
+```jsonc
+{ "logo": { "type": "image", "source": "~/Pictures/logo.png", "width": 40 } }
+```
+
+Supported formats: png, jpeg, gif (first frame), bmp, pnm, qoi, tga.
+Transparency is honored — translucent pixels stay empty so the
+background shows through.
+
+- **Static (non-3D)**: the image renders as truecolor half-blocks
+  (`▀`/`▄`, two image rows per terminal row), so it works in any
+  terminal with no graphics protocols needed.
+- **3D / animated**: the same pixels feed the rotating point cloud —
+  per-pixel truecolor plus a luminance heightmap, so photos get real
+  depth while spinning. `chars=ascii` renders the cells as a luminance
+  ramp instead of solid blocks.
+
+With no `type` set, a `source` pointing at an image file is picked up
+as an image automatically.
 
 ## Animation
 
@@ -177,7 +200,7 @@ Without it the logo stays where the music left it.
 | Flag | What it does |
 |------|--------------|
 | `-c <path>` | Use this config file |
-| `--logo <name>` | Different logo for one run |
+| `--logo <name\|path>` | Different logo for one run (builtin id or image file) |
 | `--no-config` | Skip configs entirely |
 | `--static` | Print once, no animation |
 | `--structure "os:kernel:"` | Reorder modules for one run |

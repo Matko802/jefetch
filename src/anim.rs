@@ -730,8 +730,27 @@ fn hash_unit(x: u32) -> f32 {
     (x as f32) / (u32::MAX as f32)
 }
 
+fn height_map_from_cells(
+    cells: &[Vec<(String, String)>],
+    rows: usize,
+    cols: usize,
+) -> Vec<Vec<f32>> {
+    let mut hmap = vec![vec![0.0f32; cols]; rows];
+    for r in 0..rows {
+        for c in 0..cols {
+            hmap[r][c] = if c < cells[r].len() {
+                char_weight_utf8(&cells[r][c].0)
+            } else {
+                0.0
+            };
+        }
+    }
+    hmap
+}
+
 fn build_points(
     cells: &[Vec<(String, String)>],
+    hmap: &[Vec<f32>],
     has_ansi: bool,
     config: &AnimConfig,
     rows: usize,
@@ -756,17 +775,6 @@ fn build_points(
     const SY: f32 = 0.14;
     let cx = (cols as f32 - 1.0) * 0.5;
     let cy = (rows as f32 - 1.0) * 0.5;
-
-    let mut hmap = vec![vec![0.0f32; cols]; rows];
-    for r in 0..rows {
-        for c in 0..cols {
-            hmap[r][c] = if c < cells[r].len() {
-                char_weight_utf8(&cells[r][c].0)
-            } else {
-                0.0
-            };
-        }
-    }
 
     let mut effective_depth = config.depth;
     if !config.depth_user_set {
@@ -1044,7 +1052,66 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
     if rows == 0 || cols == 0 {
         return None;
     }
-    let (points, palette) = build_points(&cells, has_ansi, config, rows, cols);
+    let hmap = height_map_from_cells(&cells, rows, cols);
+    let (points, palette) = build_points(&cells, &hmap, has_ansi, config, rows, cols);
+    finish_cloud(points, palette, has_ansi, config)
+}
+
+/// 3D point cloud from an image logo: per-cell truecolor plus a
+/// luminance heightmap, so photos get real depth instead of the flat
+/// card that glyph weights would give. Transparent cells emit no
+/// points. With `chars=ascii` the cells render as a luminance ramp,
+/// otherwise as solid blocks.
+pub fn build_cloud_from_image(
+    img: &crate::logo::image::LogoImage,
+    config: &AnimConfig,
+) -> Option<LogoCloud> {
+    use crate::logo::image::ALPHA_CUT;
+    let rows = img.rows;
+    let cols = img.cols;
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    const ASCII_RAMP: &[&str] = &[" ", ".", ":", "-", "=", "+", "*", "#", "%", "@"];
+    let ascii = config.original_glyphs;
+    let cells_data = img.cells();
+    let mut cells: Vec<Vec<(String, String)>> = Vec::with_capacity(rows);
+    let mut hmap: Vec<Vec<f32>> = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut row: Vec<(String, String)> = Vec::with_capacity(cols);
+        let mut hrow: Vec<f32> = Vec::with_capacity(cols);
+        for c in 0..cols {
+            let cell = cells_data[r * cols + c];
+            if cell.a <= ALPHA_CUT {
+                row.push((" ".to_string(), String::new()));
+                hrow.push(0.0);
+                continue;
+            }
+            let glyph = if ascii {
+                let idx = (cell.lum * (ASCII_RAMP.len() - 1) as f32).round() as usize;
+                ASCII_RAMP[idx.min(ASCII_RAMP.len() - 1)].to_string()
+            } else {
+                "█".to_string()
+            };
+            row.push((
+                glyph,
+                format!("38;2;{};{};{}", cell.r, cell.g, cell.b),
+            ));
+            hrow.push(cell.lum);
+        }
+        cells.push(row);
+        hmap.push(hrow);
+    }
+    let (points, palette) = build_points(&cells, &hmap, true, config, rows, cols);
+    finish_cloud(points, palette, true, config)
+}
+
+fn finish_cloud(
+    points: Vec<Point>,
+    palette: Vec<String>,
+    has_ansi: bool,
+    config: &AnimConfig,
+) -> Option<LogoCloud> {
     if points.is_empty() {
         return None;
     }
@@ -2312,6 +2379,81 @@ mod tests {
                 raw
             );
         }
+    }
+
+    fn solid_test_image() -> crate::logo::image::LogoImage {
+        // 8 cols x 4 rows, top half white, bottom half dark red.
+        let mut rgba = Vec::new();
+        for y in 0..8 {
+            for _ in 0..8 {
+                if y < 4 {
+                    rgba.extend_from_slice(&[255, 255, 255, 255]);
+                } else {
+                    rgba.extend_from_slice(&[128, 0, 0, 255]);
+                }
+            }
+        }
+        crate::logo::image::LogoImage { cols: 8, rows: 4, rgba }
+    }
+
+    #[test]
+    fn image_cloud_builds_with_truecolor_palette() {
+        let _locale = LocaleGuard::pin_utf8();
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let cloud = build_cloud_from_image(&solid_test_image(), &cfg).expect("image cloud builds");
+        assert!(!cloud.points.is_empty());
+        assert!(
+            cloud.palette_ansi.iter().any(|p| p.contains("38;2;255;255;255")),
+            "white payload kept, got {:?}",
+            cloud.palette_ansi
+        );
+        assert!(
+            cloud.palette_ansi.iter().any(|p| p.contains("38;2;128;0;0")),
+            "red payload kept, got {:?}",
+            cloud.palette_ansi
+        );
+    }
+
+    #[test]
+    fn image_cloud_renders_and_rotates() {
+        let _locale = LocaleGuard::pin_utf8();
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let mut cloud = build_cloud_from_image(&solid_test_image(), &cfg).expect("image cloud builds");
+        let a = render_cloud(&mut cloud, 0.0, &cfg, 36, 4);
+        let raw = a.lines.join("\n");
+        assert!(
+            raw.contains("38;2;"),
+            "truecolor escapes in output, got:\n{}",
+            crate::app::strip_ansi(&raw)
+        );
+        let b = render_cloud(&mut cloud, 25.0, &cfg, 36, 4);
+        assert_ne!(a.lines, b.lines, "rotation changes the frame");
+    }
+
+    #[test]
+    fn image_cloud_skips_transparency() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let empty = crate::logo::image::LogoImage {
+            cols: 4,
+            rows: 2,
+            rgba: vec![0u8; 4 * 4 * 4],
+        };
+        assert!(build_cloud_from_image(&empty, &cfg).is_none());
+    }
+
+    #[test]
+    fn image_cloud_ascii_keeps_ramp_glyphs() {
+        let _locale = LocaleGuard::pin_utf8();
+        let cfg = AnimConfig::from_animation_str(Some("spin y chars=ascii"));
+        let mut cloud =
+            build_cloud_from_image(&solid_test_image(), &cfg).expect("image cloud builds");
+        let out = render_cloud(&mut cloud, 0.0, &cfg, 36, 4);
+        let text = crate::app::strip_ansi(&joined_text(&out));
+        assert!(
+            text.chars().any(|c| "@%#".contains(c)),
+            "bright cells use dense ramp chars, got:\n{}",
+            text
+        );
     }
 
     #[test]
