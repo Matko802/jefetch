@@ -174,6 +174,12 @@ impl App {
         }
     }
 
+    /// Native image display is allowed for image logos unless `chars`
+    /// forces a conversion style (e.g. `chars=ascii`).
+    fn native_image_allowed(&self) -> bool {
+        self.image.is_some() && self.config.logo.chars.is_none()
+    }
+
     fn apply_logo_overrides(&mut self) {
         if let Some(name) = self.options.logo_name.clone() {
             // A `--logo` value pointing at a real file is an image (or a
@@ -240,6 +246,29 @@ impl App {
 
         let lines = self.render_modules(&entries);
         let lines = Self::apply_display_sharkvis_static(&self.config, &entries, lines);
+
+        // Native terminal image (kitty/sixel/iTerm2) when supported and
+        // no `chars` override forces block conversion. Falls back to
+        // the half-block render below on any failure.
+        if self.native_image_allowed() {
+            if let (Some(img), Some(path)) =
+                (&self.image, self.config.logo.source.clone())
+            {
+                let logo = self.logo.as_ref();
+                let spec = crate::logo::graphics::NativeSpec {
+                    path,
+                    cols: img.cols,
+                    rows: img.rows,
+                    gap: logo.map(|l| l.padding_right).unwrap_or(2),
+                    pad_left: self.config.logo.padding_left.unwrap_or(0),
+                    pad_top: self.config.logo.padding_top.unwrap_or(0),
+                    text: lines.clone(),
+                };
+                if crate::logo::graphics::display_native(&spec) {
+                    return 0;
+                }
+            }
+        }
 
         let logo_pad = self
             .logo
@@ -999,7 +1028,8 @@ fn image_logo_from_config(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "image logo needs a \"source\" path".to_string())?;
     let img = crate::logo::image::LogoImage::load(&src, lc.width, lc.height)?;
-    let mut logo = img.to_resolved(lc.padding_right.unwrap_or(2));
+    let style = crate::logo::image::LogoImage::static_style(lc.chars.as_deref());
+    let mut logo = img.to_resolved_styled(lc.padding_right.unwrap_or(2), style);
     if let Some(top) = lc.padding_top {
         for _ in 0..top {
             logo.lines.insert(0, String::new());
@@ -1842,6 +1872,35 @@ mod tests {
         let _ = std::fs::remove_file(&p);
         assert!(app.image.is_some(), "pixel source stored");
         assert!(app.logo.map(|l| !l.lines.is_empty()).unwrap_or(false));
+    }
+
+    #[test]
+    fn image_chars_ascii_forces_conversion() {
+        let p = solid_bmp_tmp("asciicfg", 8, 8, 255, 255, 255);
+        let mut cfg = image_test_config(&p);
+        cfg.logo.chars = Some("ascii".to_string());
+        let (logo, image) = resolve_logo(&cfg);
+        let _ = std::fs::remove_file(&p);
+        let logo = logo.expect("resolves");
+        assert!(image.is_some());
+        let flat: String = logo.lines.join("\n");
+        assert!(flat.contains('@'), "ascii ramp, got {:?}", logo.lines);
+        assert!(!flat.contains('▀'), "no half-blocks, got {:?}", logo.lines);
+    }
+
+    #[test]
+    fn native_image_only_without_chars_override() {
+        let p = solid_bmp_tmp("nativegate", 4, 4, 255, 0, 0);
+        let mut app = App::new(CliOptions::default());
+        app.config = image_test_config(&p);
+        app.pick_logo();
+        let _ = std::fs::remove_file(&p);
+        assert!(app.native_image_allowed());
+        app.config.logo.chars = Some("ascii".to_string());
+        assert!(!app.native_image_allowed());
+        app.image = None;
+        app.config.logo.chars = None;
+        assert!(!app.native_image_allowed());
     }
 
     #[test]

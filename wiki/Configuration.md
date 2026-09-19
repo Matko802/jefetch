@@ -123,9 +123,13 @@ Supported formats: png, jpeg, gif (first frame), bmp, pnm, qoi, tga.
 Transparency is honored — translucent pixels stay empty so the
 background shows through.
 
-- **Static (non-3D)**: the image renders as truecolor half-blocks
-  (`▀`/`▄`, two image rows per terminal row), so it works in any
-  terminal with no graphics protocols needed.
+- **Static (non-3D)**: with `chars` unset, the image prints as a real
+  image when the terminal supports it — kitty graphics, sixel, then
+  iTerm2 inline images, auto-detected. Otherwise (unsupported
+  terminal, piped output, or `chars=ascii`) it converts to blocks:
+  truecolor half-blocks (`▀`/`▄`, two image rows per terminal row),
+  or a colored ascii luminance ramp with `chars=ascii`. No graphics
+  protocols needed for the fallback.
 - **3D / animated**: the same pixels feed the rotating point cloud —
   per-pixel truecolor plus a luminance heightmap, so photos get real
   depth while spinning. `chars=ascii` renders the cells as a luminance

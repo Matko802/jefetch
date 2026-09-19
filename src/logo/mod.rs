@@ -1,3 +1,4 @@
+pub mod graphics;
 pub mod image;
 
 #[derive(Debug, Clone)]

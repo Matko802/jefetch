@@ -39,6 +39,15 @@ pub struct LogoImage {
     pub rgba: Vec<u8>,
 }
 
+/// Static conversion method: half-blocks (default) or a colored
+/// ascii luminance ramp (`chars=ascii`, which also forces conversion
+/// instead of a native terminal image).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaticStyle {
+    HalfBlock,
+    Ascii,
+}
+
 /// One terminal cell of the logo grid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImageCell {
@@ -245,9 +254,24 @@ impl LogoImage {
         out
     }
 
+    /// Conversion method for static (non-3D) rendering. `chars=ascii`
+    /// forces [`StaticStyle::Ascii`]; anything else (or unset) uses
+    /// half-blocks, and unsets also allow native terminal images.
+    pub fn static_style(chars: Option<&str>) -> StaticStyle {
+        if chars.is_some_and(|c| c.eq_ignore_ascii_case("ascii")) {
+            StaticStyle::Ascii
+        } else {
+            StaticStyle::HalfBlock
+        }
+    }
+
     /// Static (non-3D) render: truecolor half-blocks, two pixels per
     /// terminal row. Fully transparent pairs become plain spaces.
     pub fn to_resolved(&self, padding_right: usize) -> ResolvedLogo {
+        self.to_resolved_styled(padding_right, StaticStyle::HalfBlock)
+    }
+
+    pub fn to_resolved_styled(&self, padding_right: usize, style: StaticStyle) -> ResolvedLogo {
         let mut lines: Vec<String> = Vec::with_capacity(self.rows);
         let mut width = 0usize;
         for r in 0..self.rows {
@@ -267,6 +291,34 @@ impl LogoImage {
                 let (r1, g1, b1, a1) = self.pixel(c, r * 2 + 1);
                 let top = a0 > ALPHA_CUT;
                 let bot = a1 > ALPHA_CUT;
+                if style == StaticStyle::Ascii {
+                    // Luminance ramp shared with the 3D ascii cells.
+                    const RAMP: &[char] = &[' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
+                    let lum = if top || bot {
+                        let (r, g, b) = if top && bot {
+                            (
+                                ((r0 as u32 + r1 as u32) / 2) as u8,
+                                ((g0 as u32 + g1 as u32) / 2) as u8,
+                                ((b0 as u32 + b1 as u32) / 2) as u8,
+                            )
+                        } else if top {
+                            (r0, g0, b0)
+                        } else {
+                            (r1, g1, b1)
+                        };
+                        luminance(r, g, b)
+                    } else {
+                        0.0
+                    };
+                    let ch = RAMP[(lum * (RAMP.len() - 1) as f32).round() as usize];
+                    if ch == ' ' {
+                        line.push(' ');
+                    } else {
+                        let (r, g, b) = if top { (r0, g0, b0) } else { (r1, g1, b1) };
+                        line.push_str(&format!("\x1b[38;2;{};{};{}m{}", r, g, b, ch));
+                    }
+                    continue;
+                }
                 match (top, bot) {
                     (false, false) => line.push(' '),
                     (true, false) => {
@@ -473,6 +525,28 @@ mod tests {
         assert_eq!((cells[0].r, cells[0].g, cells[0].b), (128, 128, 128));
         assert_eq!(cells[0].a, 255);
         assert!((cells[0].lum - 0.5).abs() < 0.02, "lum {}", cells[0].lum);
+    }
+
+    #[test]
+    fn ascii_style_uses_ramp_not_blocks() {
+        // White pair -> '@', black pair -> space.
+        let img = LogoImage {
+            cols: 2,
+            rows: 1,
+            rgba: vec![
+                255, 255, 255, 255, 0, 0, 0, 255, //
+                255, 255, 255, 255, 0, 0, 0, 255,
+            ],
+        };
+        let logo = img.to_resolved_styled(2, StaticStyle::Ascii);
+        let line = &logo.lines[0];
+        assert!(line.contains('@'), "bright ramp char, got {:?}", line);
+        assert!(!line.contains('▀') && !line.contains('▄'), "no half-blocks, got {:?}", line);
+        assert_eq!(crate::print::format::visible_len(line), 2);
+        assert_eq!(LogoImage::static_style(None), StaticStyle::HalfBlock);
+        assert_eq!(LogoImage::static_style(Some("ascii")), StaticStyle::Ascii);
+        assert_eq!(LogoImage::static_style(Some("ASCII")), StaticStyle::Ascii);
+        assert_eq!(LogoImage::static_style(Some("blocks")), StaticStyle::HalfBlock);
     }
 
     #[test]
