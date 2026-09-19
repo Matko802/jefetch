@@ -245,22 +245,37 @@ fn b64(data: &[u8]) -> String {
 
 const KITTY_CHUNK: usize = 4096;
 
+/// Chunked transmit. Per the spec, only the first chunk carries the
+/// full control set — continuation chunks must have only `m` (and
+/// optionally `q`). `q=1` suppresses `OK` chatter (failures still
+/// report, and the caller drains them); `q=2` would only suppress
+/// failures while `OK`s leak into the shell.
 pub fn kitty_transmit_seq(rgba: &[u8], w: u32, h: u32, id: u32) -> String {
     let enc = b64(rgba);
     let bytes = enc.as_bytes();
     let mut out = String::with_capacity(bytes.len() + 128);
     let mut i = 0;
+    let mut first = true;
     while i < bytes.len() {
         let j = (i + KITTY_CHUNK).min(bytes.len());
         let last = j == bytes.len();
-        out.push_str(&format!(
-            "\x1b_Ga=t,f=32,s={},v={},i={},m={},q=2;{}",
-            w,
-            h,
-            id,
-            if last { 0 } else { 1 },
-            &enc[i..j]
-        ));
+        if first {
+            out.push_str(&format!(
+                "\x1b_Ga=t,f=32,s={},v={},i={},m={},q=1;{}",
+                w,
+                h,
+                id,
+                if last { 0 } else { 1 },
+                &enc[i..j]
+            ));
+            first = false;
+        } else {
+            out.push_str(&format!(
+                "\x1b_Gm={},q=1;{}",
+                if last { 0 } else { 1 },
+                &enc[i..j]
+            ));
+        }
         out.push_str("\x1b\\");
         i = j;
     }
@@ -268,11 +283,11 @@ pub fn kitty_transmit_seq(rgba: &[u8], w: u32, h: u32, id: u32) -> String {
 }
 
 pub fn kitty_place_seq(id: u32, cols: u32, rows: u32) -> String {
-    format!("\x1b_Ga=p,i={},c={},r={},C=1,q=2\x1b\\", id, cols, rows)
+    format!("\x1b_Ga=p,i={},c={},r={},C=1,q=1\x1b\\", id, cols, rows)
 }
 
 pub fn kitty_delete_seq(id: u32) -> String {
-    format!("\x1b_Ga=d,d=i,i={},q=2\x1b\\", id)
+    format!("\x1b_Ga=d,d=i,i={},q=1\x1b\\", id)
 }
 
 // ---------------------------------------------------------------------------
@@ -472,12 +487,12 @@ fn display_kitty(raw: &RawImage, spec: &NativeSpec) -> bool {
     let (tw, th) = hires_dims(spec.cols, spec.rows);
     let px = logo_image::resize_box(&raw.rgba, raw.width, raw.height, tw, th);
     let id = image_id();
-    let mut out = String::with_capacity(px.len());
-    out.push_str(&kitty_transmit_seq(&px, tw as u32, th as u32, id));
-    // Swallow any late transmit acks so they never leak into the shell.
-    if let Some(tty) = TtyQuery::open() {
-        tty.drain(80);
+    // Transmit first on its own: with `q=1` success is silent, and any
+    // failure text is swallowed by the drain below.
+    if !write_out(&kitty_transmit_seq(&px, tw as u32, th as u32, id)) {
+        return false;
     }
+    let mut out = String::with_capacity(4096);
     out.push_str(&cup(lay.image_row, lay.image_col));
     out.push_str(&kitty_place_seq(id, spec.cols as u32, spec.rows as u32));
     for i in 0..lay.rows {
@@ -488,7 +503,14 @@ fn display_kitty(raw: &RawImage, spec: &NativeSpec) -> bool {
             spec.text.get(i).map(|s| s.as_str()).unwrap_or(""),
         );
     }
-    write_out(&out)
+    if !write_out(&out) {
+        return false;
+    }
+    // Swallow any failure text so it never leaks into the shell.
+    if let Some(tty) = TtyQuery::open() {
+        tty.drain(50);
+    }
+    true
 }
 
 fn display_sixel(raw: &RawImage, spec: &NativeSpec) -> bool {
@@ -598,14 +620,14 @@ pub fn establish_live_image(
             if !write_out(&kitty_transmit_seq(&px, tw as u32, th as u32, id)) {
                 return None;
             }
-            if let Some(tty) = TtyQuery::open() {
-                tty.drain(80);
-            }
             let mut out = String::from("\x1b[2J\x1b[H");
             out.push_str(&cup(image_row, image_col));
             out.push_str(&kitty_place_seq(id, cols as u32, rows as u32));
             if !write_out(&out) {
                 return None;
+            }
+            if let Some(tty) = TtyQuery::open() {
+                tty.drain(50);
             }
             Some(LiveImage { proto, img_id: id })
         }
@@ -729,8 +751,13 @@ mod tests {
         let seq = kitty_transmit_seq(&rgba, 40, 20, 777);
         assert_eq!(seq.matches("m=1").count(), 1);
         assert_eq!(seq.matches("m=0").count(), 1);
-        assert!(seq.contains("i=777") && seq.contains("s=40") && seq.contains("v=20"));
-        assert!(seq.contains("q=2"));
+        // Full control set only on the first chunk (spec discipline).
+        assert_eq!(seq.matches("a=t").count(), 1);
+        assert_eq!(seq.matches("f=32").count(), 1);
+        assert_eq!(seq.matches("i=777").count(), 1);
+        assert!(seq.contains("s=40") && seq.contains("v=20"));
+        assert!(seq.contains("q=1"));
+        assert!(!seq.contains("q=2"), "q=2 hides failures but leaks OKs");
         // Payload reassembles to the input.
         let mut payload = String::new();
         for part in seq.split("\x1b_G") {
@@ -746,6 +773,14 @@ mod tests {
             base64::engine::general_purpose::STANDARD.decode(&payload).unwrap(),
             rgba
         );
+    }
+
+    #[test]
+    fn kitty_single_chunk_carries_full_keys() {
+        let rgba = vec![1u8; 64];
+        let seq = kitty_transmit_seq(&rgba, 4, 4, 5);
+        assert_eq!(seq.matches("\x1b_G").count(), 1);
+        assert!(seq.contains("a=t") && seq.contains("m=0") && seq.contains("i=5"));
     }
 
     #[test]

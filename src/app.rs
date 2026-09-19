@@ -492,7 +492,7 @@ impl App {
                 }
             }
             // Native live image management: establish once when the live
-            // view goes still, tear down when leaving (toggle/config).
+            // view goes still, tear down when leaving (config change).
             let want_native = live_native_wanted(
                 animated,
                 &self.image,
@@ -756,12 +756,6 @@ impl App {
                     KeyAction::Quit => {
                         quit = true;
                         break;
-                    }
-                    KeyAction::Toggle => {
-                        if base_logo.is_some() {
-                            animated = !animated;
-                            needs_draw = true;
-                        }
                     }
                     KeyAction::Ignore => {}
                 }
@@ -1143,7 +1137,8 @@ fn image_logo_from_config(
 /// Native live image is wanted when the live view is not animating
 /// and the logo is an image with no `chars` conversion override.
 /// (A placed picture can't rotate, so the spinning cloud keeps
-/// priority while animation runs — `t` toggles between the two.)
+/// priority while animation runs; turn animation off for the real
+/// image in the live view.)
 fn live_native_wanted(
     animated: bool,
     image: &Option<crate::logo::image::LogoImage>,
@@ -1470,14 +1465,12 @@ fn config_search_dirs() -> Vec<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
     Quit,
-    Toggle,
     Ignore,
 }
 
 pub fn classify_key(b: u8) -> KeyAction {
     match b {
         b'q' | b'Q' | 0x03 | 0x1b => KeyAction::Quit,
-        b't' | b'T' => KeyAction::Toggle,
         _ => KeyAction::Ignore,
     }
 }
@@ -1835,8 +1828,8 @@ mod tests {
         assert_eq!(classify_key(b'Q'), KeyAction::Quit);
         assert_eq!(classify_key(0x03), KeyAction::Quit);
         assert_eq!(classify_key(0x1b), KeyAction::Quit);
-        assert_eq!(classify_key(b't'), KeyAction::Toggle);
-        assert_eq!(classify_key(b'T'), KeyAction::Toggle);
+        assert_eq!(classify_key(b't'), KeyAction::Ignore);
+        assert_eq!(classify_key(b'T'), KeyAction::Ignore);
         assert_eq!(classify_key(b'a'), KeyAction::Ignore);
         assert_eq!(classify_key(b' '), KeyAction::Ignore);
     }

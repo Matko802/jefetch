@@ -133,8 +133,8 @@ background shows through.
 - **Live view**: with animation off, the same native image shows and
   only the text refreshes around it. A placed picture can't rotate,
   so while the animation runs the image spins as a 3D point cloud
-  instead (per-pixel truecolor plus a luminance heightmap) — press
-  `t` to switch between the spinning cloud and the real image.
+  instead (per-pixel truecolor plus a luminance heightmap) — turn
+  animation off for the real image in the live view.
   `chars=ascii` renders ascii in both modes.
 
 With no `type` set, a `source` pointing at an image file is picked up
@@ -153,7 +153,7 @@ same text, so nothing breaks when you pipe it.
 
 Mix `x` / `y` / `z` however you like, each axis takes its own speed and
 negative runs backwards. `speed=N` sets the pace. In a terminal you get the
-live view where `t` pauses, `q` / `Esc` / `Ctrl-C` quits, and `--static`
+live view where `q` / `Esc` / `Ctrl-C` quits, and `--static`
 prints a single frame. Saving `config.jsonc` applies while it runs.
 
 ## sharkvis music mode
