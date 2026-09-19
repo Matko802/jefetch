@@ -8,7 +8,7 @@ Options:
   -h, --help                  Show this help message
   -v, --version               Show the version number
   -s, --structure <modules>   Set custom `module:module:module` structure
-  -l, --logo <name>           Override the logo
+  -l, --logo <name|path>      Override the logo (builtin id or image file)
   -c, --config <path>         Load a custom config file
       --no-config             Load without config file
       --list-modules          List all available modules
