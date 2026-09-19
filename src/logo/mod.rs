@@ -1,6 +1,3 @@
-pub mod graphics;
-pub mod image;
-
 #[derive(Debug, Clone)]
 pub struct Logo {
     pub name: &'static str,

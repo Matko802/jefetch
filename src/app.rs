@@ -26,10 +26,6 @@ pub struct App {
     pub options: CliOptions,
     pub config: Config,
     pub logo: Option<ResolvedLogo>,
-    /// Pixel source behind an image logo. `logo` above is its static
-    /// half-block render; the animated (3D) path builds its point cloud
-    /// from these pixels instead so colors and depth survive rotation.
-    pub image: Option<crate::logo::image::LogoImage>,
 }
 
 impl App {
@@ -38,7 +34,6 @@ impl App {
             options,
             config: Config::default(),
             logo: None,
-            image: None,
         }
     }
 
@@ -174,28 +169,10 @@ impl App {
         }
     }
 
-    /// Native image display is allowed for image logos unless `chars`
-    /// forces a conversion style (e.g. `chars=ascii`).
-    fn native_image_allowed(&self) -> bool {
-        self.image.is_some() && self.config.logo.chars.is_none()
-    }
-
     fn apply_logo_overrides(&mut self) {
         if let Some(name) = self.options.logo_name.clone() {
-            // A `--logo` value pointing at a real file is an image (or a
-            // text file) logo, not a builtin id.
-            let expanded = crate::logo::image::expand_tilde(&name);
-            if std::path::Path::new(&expanded).is_file() {
-                self.config.logo.source = Some(name);
-                if crate::logo::image::looks_like_image(&expanded) {
-                    self.config.logo.logo_type = Some("image".to_string());
-                } else {
-                    self.config.logo.logo_type = Some("file".to_string());
-                }
-            } else {
-                self.config.logo.source = Some(name);
-                self.config.logo.logo_type = Some("builtin".to_string());
-            }
+            self.config.logo.source = Some(name);
+            self.config.logo.logo_type = Some("builtin".to_string());
         }
         if self.config.logo.color.is_none() {
             if let Some(c) =
@@ -247,29 +224,6 @@ impl App {
         let lines = self.render_modules(&entries);
         let lines = Self::apply_display_sharkvis_static(&self.config, &entries, lines);
 
-        // Native terminal image (kitty/sixel/iTerm2) when supported and
-        // no `chars` override forces block conversion. Falls back to
-        // the half-block render below on any failure.
-        if self.native_image_allowed() {
-            if let (Some(img), Some(path)) =
-                (&self.image, self.config.logo.source.clone())
-            {
-                let logo = self.logo.as_ref();
-                let spec = crate::logo::graphics::NativeSpec {
-                    path,
-                    cols: img.cols,
-                    rows: img.rows,
-                    gap: logo.map(|l| l.padding_right).unwrap_or(2),
-                    pad_left: self.config.logo.padding_left.unwrap_or(0),
-                    pad_top: self.config.logo.padding_top.unwrap_or(0),
-                    text: lines.clone(),
-                };
-                if crate::logo::graphics::display_native(&spec) {
-                    return 0;
-                }
-            }
-        }
-
         let logo_pad = self
             .logo
             .as_ref()
@@ -312,22 +266,23 @@ impl App {
         if !crate::common::colors_enabled() {
             out = crate::print::format::strip_sgr(&out);
         }
-        // Image logos make this output tens of KB; a reader that quits
-        // early (e.g. `| head`) must not take us down with EPIPE.
-        let _ = write_stdout_lossy(&out);
+        print!("{}", out);
         0
     }
 
     fn run_live(&mut self, mut entries: Vec<ModuleEntry>, start_animated: bool) -> i32 {
         let mut base_logo = self.logo.clone();
-        let mut base_image = self.image.clone();
         let mut animated = start_animated && base_logo.is_some();
         let mut base_lines = self.render_modules(&entries);
 
         let (mut base_cfg, mut active_cfg, mut mode) = self.anim_configs();
         let mut display_live = display_wants_sharkvis(&self.config, &entries);
-        let mut base_cloud = logo_cloud_for(&base_logo, &base_image, &base_cfg);
-        let mut active_cloud = logo_cloud_for(&base_logo, &base_image, &active_cfg);
+        let mut base_cloud = base_logo
+            .as_ref()
+            .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
+        let mut active_cloud = base_logo
+            .as_ref()
+            .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
         let mut using_active = false;
         let mut shark_sync = crate::sharkvis::Sync::new();
         let mut shark_live = crate::sharkvis::LiveFrame::inactive();
@@ -373,11 +328,6 @@ impl App {
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
         let mut needs_draw = true;
-        // Live native image (real picture in the live view): owned
-        // placement while active, text-only refreshes. `failed` pins us
-        // to blocks until the config changes (no per-frame retries).
-        let mut live_native: Option<crate::logo::graphics::LiveImage> = None;
-        let mut live_native_failed = false;
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
         let (info_tx, info_rx) = std::sync::mpsc::channel::<(u64, Vec<String>)>();
         let mut refresh_gen: u64 = 0;
@@ -404,27 +354,20 @@ impl App {
                             self.apply_logo_overrides();
                             self.pick_logo();
                             base_logo = self.logo.clone();
-                            base_image = self.image.clone();
                             entries = self.build_entries();
                             let cfgs = self.anim_configs();
                             base_cfg = cfgs.0;
                             active_cfg = cfgs.1;
                             mode = cfgs.2;
                             display_live = display_wants_sharkvis(&self.config, &entries);
-                            base_cloud =
-                                logo_cloud_for(&base_logo, &base_image, &base_cfg);
-                            active_cloud =
-                                logo_cloud_for(&base_logo, &base_image, &active_cfg);
+                            base_cloud = base_logo
+                                .as_ref()
+                                .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
+                            active_cloud = base_logo
+                                .as_ref()
+                                .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
                             using_active = false;
                             animated = self.should_animate() && base_logo.is_some();
-                            // New logo on screen: drop any live native
-                            // placement (re-established below if wanted)
-                            // and allow retries with the fresh config.
-                            if let Some(n) = live_native.take() {
-                                crate::logo::graphics::delete_live_image(&n);
-                            }
-                            live_native_failed = false;
-                            needs_draw = true;
                             refresh_gen = refresh_gen.wrapping_add(1);
                             refresh_busy = None;
                             last_refresh = std::time::Instant::now()
@@ -490,78 +433,6 @@ impl App {
                         needs_draw = true;
                     }
                 }
-            }
-            // Native live image management: establish once when the live
-            // view goes still, tear down when leaving (config change).
-            let want_native = live_native_wanted(
-                animated,
-                &self.image,
-                self.config.logo.chars.as_deref(),
-            );
-            if want_native && live_native.is_none() && !live_native_failed {
-                let dims = self.image.as_ref().map(|i| (i.cols, i.rows));
-                let path = self.config.logo.source.clone();
-                let pad_left = self.config.logo.padding_left.unwrap_or(0);
-                let pad_top = self.config.logo.padding_top.unwrap_or(0);
-                match (dims, path) {
-                    (Some((cols, rows)), Some(path)) => {
-                        match crate::logo::graphics::establish_live_image(
-                            &path,
-                            cols,
-                            rows,
-                            2 + pad_top as u32,
-                            1 + pad_left,
-                        ) {
-                            Some(n) => {
-                                live_native = Some(n);
-                                needs_draw = true;
-                            }
-                            None => live_native_failed = true,
-                        }
-                    }
-                    _ => live_native_failed = true,
-                }
-            } else if !want_native && live_native.is_some() {
-                if let Some(n) = live_native.take() {
-                    crate::logo::graphics::delete_live_image(&n);
-                }
-                // Full clear so no ghost survives under clouds/blocks.
-                print!("\x1b[2J\x1b[H");
-                let _ = std::io::Write::flush(&mut std::io::stdout());
-                needs_draw = true;
-            }
-            if live_native.is_some() && needs_draw && self.image.is_some() {
-                // The picture persists; only text rows move.
-                let img_cols = self.image.as_ref().map(|i| i.cols).unwrap_or(0);
-                let pad_left = self.config.logo.padding_left.unwrap_or(0);
-                let gap = self.logo.as_ref().map(|l| l.padding_right).unwrap_or(2);
-                let text_col = 1 + pad_left + img_cols + gap;
-                let (tc, _) = crate::common::terminal_size();
-                out.clear();
-                for (k, raw) in base_lines.iter().enumerate() {
-                    let content = if display_live {
-                        crate::sharkvis::swap_display_placeholders_row(
-                            raw,
-                            &shark_live,
-                            k,
-                            info_count,
-                        )
-                    } else {
-                        raw.clone()
-                    };
-                    out.push_str(&format!("\x1b[{};{}H", k as u32 + 2, text_col));
-                    out.push_str(&crate::print::format::truncate_visible(
-                        content.trim_end(),
-                        tc.saturating_sub(text_col) + 1,
-                    ));
-                    out.push_str("\x1b[K\r\n");
-                }
-                if !crate::common::colors_enabled() {
-                    out = crate::print::format::strip_sgr(&out);
-                }
-                print!("{}", out);
-                let _ = std::io::Write::flush(&mut std::io::stdout());
-                needs_draw = false;
             }
             if animated {
 
@@ -757,6 +628,12 @@ impl App {
                         quit = true;
                         break;
                     }
+                    KeyAction::Toggle => {
+                        if base_logo.is_some() {
+                            animated = !animated;
+                            needs_draw = true;
+                        }
+                    }
                     KeyAction::Ignore => {}
                 }
                 if quit {
@@ -764,9 +641,6 @@ impl App {
                 }
             }
             if quit {
-                if let Some(n) = live_native.take() {
-                    crate::logo::graphics::delete_live_image(&n);
-                }
                 restore(tty_fd, is_tty, &orig_term);
                 return 0;
             }
@@ -783,10 +657,8 @@ impl App {
     }
 
     fn pick_logo(&mut self) {
-        let (logo, image) = resolve_logo(&self.config);
-        self.logo = logo;
-        self.image = image;
-        if self.logo.is_none() && self.image.is_none() {
+        self.logo = resolve_logo(&self.config);
+        if self.logo.is_none() {
 
             let id = crate::detection::os::detect().id.to_ascii_lowercase();
             self.logo = builtin_logo_v(&id, &self.config.logo)
@@ -847,7 +719,7 @@ impl App {
                 ]));
             }
         }
-        let _ = write_stdout_lossy(&JsonValue::Arr(items).to_json_pretty());
+        print!("{}", JsonValue::Arr(items).to_json_pretty());
     }
 
     fn render_modules(&self, entries: &[ModuleEntry]) -> Vec<String> {
@@ -1004,19 +876,6 @@ impl App {
     }
 }
 
-/// Best-effort stdout write: early-closed pipes (`| head`) report
-/// `BrokenPipe`, which must not panic the process.
-fn write_stdout_lossy(s: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
-    match lock.write_all(s.as_bytes()) {
-        Ok(()) => lock.flush(),
-        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-        Err(e) => Err(e),
-    }
-}
-
 fn separator_colored(_sep: &str, cfg: &crate::config::configfile::Config) -> String {
     let s = cfg.display.separator.clone();
     match &cfg.display.separator_color {
@@ -1076,97 +935,8 @@ impl App {
     }
 }
 
-/// Image logo requested either explicitly (`"type": "image"`) or by
-/// pointing `source` at an image file with any non-builtin type.
-fn image_logo_requested(lc: &LogoConfig) -> bool {
-    if lc
-        .logo_type
-        .as_deref()
-        .is_some_and(|t| t.eq_ignore_ascii_case("image"))
-    {
-        return true;
-    }
-    if lc.logo_type.as_deref().is_some_and(|t| {
-        t.eq_ignore_ascii_case("builtin") || t.eq_ignore_ascii_case("none")
-    }) {
-        return false;
-    }
-    match &lc.source {
-        Some(src) if !src.is_empty() && !src.contains('\n') => {
-            let expanded = expand_tilde(src);
-            std::path::Path::new(&expanded).is_file()
-                && crate::logo::image::looks_like_image(&expanded)
-        }
-        _ => false,
-    }
-}
+fn resolve_logo(cfg: &Config) -> Option<ResolvedLogo> {
 
-fn image_logo_from_config(
-    lc: &LogoConfig,
-) -> Result<(ResolvedLogo, crate::logo::image::LogoImage), String> {
-    let src = lc
-        .source
-        .clone()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "image logo needs a \"source\" path".to_string())?;
-    let img = crate::logo::image::LogoImage::load(&src, lc.width, lc.height)?;
-    let style = crate::logo::image::LogoImage::static_style(lc.chars.as_deref());
-    let mut logo = img.to_resolved_styled(lc.padding_right.unwrap_or(2), style);
-    if let Some(top) = lc.padding_top {
-        for _ in 0..top {
-            logo.lines.insert(0, String::new());
-            logo.colors.insert(0, String::new());
-        }
-    }
-    if let Some(left) = lc.padding_left {
-        if left > 0 {
-            for line in logo.lines.iter_mut() {
-                if !line.is_empty() {
-                    *line = format!("{}{}", " ".repeat(left), line);
-                }
-            }
-            logo.width += left;
-        }
-    }
-    Ok((logo, img))
-}
-
-/// Point cloud for the animated (3D) path. Image logos build the
-/// cloud from their pixels (truecolor + luminance depth); everything
-/// else renders from the resolved text lines as before.
-/// Native live image is wanted when the live view is not animating
-/// and the logo is an image with no `chars` conversion override.
-/// (A placed picture can't rotate, so the spinning cloud keeps
-/// priority while animation runs; turn animation off for the real
-/// image in the live view.)
-fn live_native_wanted(
-    animated: bool,
-    image: &Option<crate::logo::image::LogoImage>,
-    chars: Option<&str>,
-) -> bool {
-    !animated && image.is_some() && chars.is_none()
-}
-
-fn logo_cloud_for(
-    logo: &Option<ResolvedLogo>,
-    image: &Option<crate::logo::image::LogoImage>,
-    cfg: &crate::anim::AnimConfig,
-) -> Option<crate::anim::LogoCloud> {
-    if let Some(img) = image {
-        if let Some(cloud) = crate::anim::build_cloud_from_image(img, cfg) {
-            return Some(cloud);
-        }
-        // Fully transparent image: fall back to its static render.
-    }
-    logo.as_ref().and_then(|l| crate::anim::build_cloud(l, cfg))
-}
-
-fn resolve_logo(
-    cfg: &Config,
-) -> (
-    Option<ResolvedLogo>,
-    Option<crate::logo::image::LogoImage>,
-) {
     if cfg
         .logo
         .logo_type
@@ -1180,7 +950,7 @@ fn resolve_logo(
             .clone()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| crate::detection::os::detect().id);
-        return (builtin_logo_v(id.to_ascii_lowercase().as_str(), &cfg.logo), None);
+        return builtin_logo_v(id.to_ascii_lowercase().as_str(), &cfg.logo);
     }
 
     if cfg
@@ -1190,27 +960,19 @@ fn resolve_logo(
         .map(|t| t.eq_ignore_ascii_case("none"))
         .unwrap_or(false)
     {
-        return (None, None);
-    }
-
-    if image_logo_requested(&cfg.logo) {
-        match image_logo_from_config(&cfg.logo) {
-            Ok((logo, img)) => return (Some(logo), Some(img)),
-            Err(e) => eprintln!("jefetch: {}", e),
-        }
-        // Fall through to builtin autodetect below.
+        return None;
     }
 
     if let Some(src) = &cfg.logo.source {
         let expanded = expand_tilde(src);
         if let Ok(text) = std::fs::read_to_string(&expanded) {
-            return (Some(logo_from_lines(&text, &cfg.logo)), None);
+            return Some(logo_from_lines(&text, &cfg.logo));
         }
     }
 
     if let Some(src) = &cfg.logo.source {
         if src.contains('\n') {
-            return (Some(logo_from_lines(src, &cfg.logo)), None);
+            return Some(logo_from_lines(src, &cfg.logo));
         }
     }
 
@@ -1227,10 +989,7 @@ fn resolve_logo(
                 .filter(|t| !t.eq_ignore_ascii_case("auto"))
         })
         .unwrap_or(id);
-    (
-        builtin_logo_v(name.to_ascii_lowercase().as_str(), &cfg.logo),
-        None,
-    )
+    builtin_logo_v(name.to_ascii_lowercase().as_str(), &cfg.logo)
 }
 
 fn logo_from_lines(text: &str, lc: &LogoConfig) -> ResolvedLogo {
@@ -1465,12 +1224,14 @@ fn config_search_dirs() -> Vec<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
     Quit,
+    Toggle,
     Ignore,
 }
 
 pub fn classify_key(b: u8) -> KeyAction {
     match b {
         b'q' | b'Q' | 0x03 | 0x1b => KeyAction::Quit,
+        b't' | b'T' => KeyAction::Toggle,
         _ => KeyAction::Ignore,
     }
 }
@@ -1828,8 +1589,8 @@ mod tests {
         assert_eq!(classify_key(b'Q'), KeyAction::Quit);
         assert_eq!(classify_key(0x03), KeyAction::Quit);
         assert_eq!(classify_key(0x1b), KeyAction::Quit);
-        assert_eq!(classify_key(b't'), KeyAction::Ignore);
-        assert_eq!(classify_key(b'T'), KeyAction::Ignore);
+        assert_eq!(classify_key(b't'), KeyAction::Toggle);
+        assert_eq!(classify_key(b'T'), KeyAction::Toggle);
         assert_eq!(classify_key(b'a'), KeyAction::Ignore);
         assert_eq!(classify_key(b' '), KeyAction::Ignore);
     }
@@ -1862,154 +1623,6 @@ mod tests {
         assert!(enso.width <= 41, "enso width {}", enso.width);
         let kiba = builtin_logo_v("kibaos", &lc).expect("kibaos exists");
         assert!(!kiba.lines.is_empty());
-    }
-
-    fn solid_bmp_tmp(tag: &str, w: u32, h: u32, r: u8, g: u8, b: u8) -> String {
-        let stride = ((w * 3 + 3) / 4) * 4;
-        let data_len = stride * h;
-        let mut v: Vec<u8> = Vec::with_capacity(54 + data_len as usize);
-        v.extend_from_slice(b"BM");
-        v.extend_from_slice(&(54 + data_len).to_le_bytes());
-        v.extend_from_slice(&[0u8; 4]);
-        v.extend_from_slice(&54u32.to_le_bytes());
-        v.extend_from_slice(&40u32.to_le_bytes());
-        v.extend_from_slice(&w.to_le_bytes());
-        v.extend_from_slice(&h.to_le_bytes());
-        v.extend_from_slice(&1u16.to_le_bytes());
-        v.extend_from_slice(&24u16.to_le_bytes());
-        v.extend_from_slice(&0u32.to_le_bytes());
-        v.extend_from_slice(&data_len.to_le_bytes());
-        v.extend_from_slice(&[0u8; 16]);
-        for _ in 0..h {
-            for _ in 0..w {
-                v.push(b);
-                v.push(g);
-                v.push(r);
-            }
-            while (v.len() - 54) % 4 != 0 {
-                v.push(0);
-            }
-        }
-        let p = std::env::temp_dir().join(format!(
-            "jefetch-apptest-{}-{}.bmp",
-            std::process::id(),
-            tag
-        ));
-        std::fs::write(&p, &v).unwrap();
-        p.to_string_lossy().into_owned()
-    }
-
-    fn image_test_config(path: &str) -> Config {
-        let mut cfg = Config::default();
-        cfg.logo.logo_type = Some("image".to_string());
-        cfg.logo.source = Some(path.to_string());
-        cfg
-    }
-
-    #[test]
-    fn image_logo_resolves_from_config() {
-        let p = solid_bmp_tmp("resolve", 8, 8, 255, 0, 0);
-        let cfg = image_test_config(&p);
-        let (logo, image) = resolve_logo(&cfg);
-        let _ = std::fs::remove_file(&p);
-        let logo = logo.expect("static image logo resolves");
-        let image = image.expect("pixel source kept for 3D");
-        assert_eq!((image.cols, image.rows), (8, 4));
-        assert_eq!(logo.width, 8);
-        assert!(logo.lines.iter().any(|l| l.contains("38;2;255;0;0m")),
-            "red half-blocks, got {:?}", logo.lines);
-    }
-
-    #[test]
-    fn image_logo_detected_by_source_path() {
-        let p = solid_bmp_tmp("auto", 4, 4, 0, 255, 0);
-        let mut cfg = Config::default();
-        cfg.logo.source = Some(p.clone());
-        assert!(image_logo_requested(&cfg.logo));
-        let (logo, image) = resolve_logo(&cfg);
-        let _ = std::fs::remove_file(&p);
-        assert!(logo.is_some() && image.is_some());
-    }
-
-    #[test]
-    fn image_logo_missing_file_falls_back_quietly() {
-        let cfg = image_test_config("/nonexistent-jefetch-logo-xyz.png");
-        let (logo, image) = resolve_logo(&cfg);
-        assert!(logo.is_none() && image.is_none());
-    }
-
-    #[test]
-    fn logo_cloud_prefers_image_pixels() {
-        let p = solid_bmp_tmp("cloud", 8, 8, 255, 0, 0);
-        let cfg = image_test_config(&p);
-        let (logo, image) = resolve_logo(&cfg);
-        let _ = std::fs::remove_file(&p);
-        let anim = crate::anim::AnimConfig::from_animation_str(Some("spin y speed=2.0"));
-        let mut cloud = logo_cloud_for(&logo, &image, &anim).expect("cloud builds");
-        let out = crate::anim::render_cloud(&mut cloud, 0.0, &anim, 36, 4);
-        let raw = out.lines.join("\n");
-        assert!(raw.contains("38;2;255;0;0"),
-            "image truecolor survives 3D, got:\n{}", strip_ansi(&raw));
-    }
-
-    #[test]
-    fn cli_logo_file_override_picks_image() {
-        let p = solid_bmp_tmp("cli", 4, 4, 0, 0, 255);
-        let mut app = App::new(CliOptions {
-            logo_name: Some(p.clone()),
-            ..CliOptions::default()
-        });
-        app.apply_logo_overrides();
-        assert_eq!(app.config.logo.logo_type.as_deref(), Some("image"));
-        app.pick_logo();
-        let _ = std::fs::remove_file(&p);
-        assert!(app.image.is_some(), "pixel source stored");
-        assert!(app.logo.map(|l| !l.lines.is_empty()).unwrap_or(false));
-    }
-
-    #[test]
-    fn image_chars_ascii_forces_conversion() {
-        let p = solid_bmp_tmp("asciicfg", 8, 8, 255, 255, 255);
-        let mut cfg = image_test_config(&p);
-        cfg.logo.chars = Some("ascii".to_string());
-        let (logo, image) = resolve_logo(&cfg);
-        let _ = std::fs::remove_file(&p);
-        let logo = logo.expect("resolves");
-        assert!(image.is_some());
-        let flat: String = logo.lines.join("\n");
-        assert!(flat.contains('@'), "ascii ramp, got {:?}", logo.lines);
-        assert!(!flat.contains('▀'), "no half-blocks, got {:?}", logo.lines);
-    }
-
-    #[test]
-    fn native_image_only_without_chars_override() {
-        let p = solid_bmp_tmp("nativegate", 4, 4, 255, 0, 0);
-        let mut app = App::new(CliOptions::default());
-        app.config = image_test_config(&p);
-        app.pick_logo();
-        let _ = std::fs::remove_file(&p);
-        assert!(app.native_image_allowed());
-        app.config.logo.chars = Some("ascii".to_string());
-        assert!(!app.native_image_allowed());
-        app.image = None;
-        app.config.logo.chars = None;
-        assert!(!app.native_image_allowed());
-    }
-
-    #[test]
-    fn live_native_wanted_matrix() {
-        let img = crate::logo::image::LogoImage {
-            cols: 4,
-            rows: 2,
-            rgba: vec![255u8; 4 * 4 * 4],
-        };
-        let some = Some(img);
-        let none: Option<crate::logo::image::LogoImage> = None;
-        assert!(live_native_wanted(false, &some, None));
-        assert!(!live_native_wanted(true, &some, None), "spinning cloud wins");
-        assert!(!live_native_wanted(false, &some, Some("ascii")), "chars forces conversion");
-        assert!(!live_native_wanted(false, &some, Some("blocks")));
-        assert!(!live_native_wanted(false, &none, None), "no image, no native");
     }
 
     #[test]

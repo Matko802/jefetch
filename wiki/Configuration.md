@@ -101,44 +101,15 @@ jefetch --structure "os:kernel:uptime:break:colors"
 
 | Key | Notes |
 |-----|-------|
-| `source` | Builtin id (see `jefetch --list-logos`), a `"~/logo.txt"` file, an image path (see below), or `""` to autodetect |
-| `type` | `"builtin"` / `"none"` / `"file"` (with `"source": "~/logo.txt"`) / `"image"` (with `"source": "~/pic.png"`) |
+| `source` | Builtin id (see `jefetch --list-logos`), or `""` to autodetect |
+| `type` | `"builtin"` / `"none"` / `"file"` (with `"source": "~/logo.txt"`) |
 | `color` | `"red"`, or per-line like `{ "1": "green", "2-4": "blue" }` (`$N` slots just work) |
-| `padding` | `4`, or `{ top, left, right }` (`right` defaults to `4`; images default to `2`) |
-| `width` / `height` | Image logos only: target size in terminal columns / rows (default fits 48 columns, aspect kept). Set one side and the other follows the aspect; set both to stretch |
+| `padding` | `4`, or `{ top, left, right }` (`right` defaults to `4`) |
 | `animation` | Needs an explicit `speed` or the logo won't move; `off` turns it off |
 | `style` / `chars` | `"flat"` or `"3d"`; `"ascii"` keeps the logo's own glyphs, anything else is shade blocks like fetch. These beat `animation` |
 | `sharkvis` | Its own profile for when sharkvis is running (own speed and axes). Base `animation` is ignored meanwhile |
 
-`jefetch --logo arch` swaps the logo for one run. Point `--logo` at an
-image file (`jefetch --logo ~/pic.png`) for a one-run image logo.
-
-## Image logos
-
-```jsonc
-{ "logo": { "type": "image", "source": "~/Pictures/logo.png", "width": 40 } }
-```
-
-Supported formats: png, jpeg, gif (first frame), bmp, pnm, qoi, tga.
-Transparency is honored — translucent pixels stay empty so the
-background shows through.
-
-- **Static (non-3D)**: with `chars` unset, the image prints as a real
-  image when the terminal supports it — kitty graphics, sixel, then
-  iTerm2 inline images, auto-detected. Otherwise (unsupported
-  terminal, piped output, or `chars=ascii`) it converts to blocks:
-  truecolor half-blocks (`▀`/`▄`, two image rows per terminal row),
-  or a colored ascii luminance ramp with `chars=ascii`. No graphics
-  protocols needed for the fallback.
-- **Live view**: with animation off, the same native image shows and
-  only the text refreshes around it. A placed picture can't rotate,
-  so while the animation runs the image spins as a 3D point cloud
-  instead (per-pixel truecolor plus a luminance heightmap) — turn
-  animation off for the real image in the live view.
-  `chars=ascii` renders ascii in both modes.
-
-With no `type` set, a `source` pointing at an image file is picked up
-as an image automatically.
+`jefetch --logo arch` swaps the logo for one run.
 
 ## Animation
 
@@ -153,7 +124,7 @@ same text, so nothing breaks when you pipe it.
 
 Mix `x` / `y` / `z` however you like, each axis takes its own speed and
 negative runs backwards. `speed=N` sets the pace. In a terminal you get the
-live view where `q` / `Esc` / `Ctrl-C` quits, and `--static`
+live view where `t` pauses, `q` / `Esc` / `Ctrl-C` quits, and `--static`
 prints a single frame. Saving `config.jsonc` applies while it runs.
 
 ## sharkvis music mode
@@ -206,7 +177,7 @@ Without it the logo stays where the music left it.
 | Flag | What it does |
 |------|--------------|
 | `-c <path>` | Use this config file |
-| `--logo <name\|path>` | Different logo for one run (builtin id or image file) |
+| `--logo <name>` | Different logo for one run |
 | `--no-config` | Skip configs entirely |
 | `--static` | Print once, no animation |
 | `--structure "os:kernel:"` | Reorder modules for one run |
