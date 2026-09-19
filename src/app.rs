@@ -236,6 +236,34 @@ impl App {
         let lines = self.render_modules(&entries);
         let lines = Self::apply_display_sharkvis_static(&self.config, &entries, lines);
 
+        // Native terminal image (kitty/sixel/iTerm2) when supported.
+        // Falls back to the half-block render below on any failure.
+        // The resolved image logo carries padding, so strip it back to
+        // the pixel grid for native placement.
+        if image_logo_requested(&self.config.logo) {
+            if let (Some(logo), Some(path)) =
+                (&self.logo, self.config.logo.source.clone())
+            {
+                let pad_left = self.config.logo.padding_left.unwrap_or(0);
+                let pad_top = self.config.logo.padding_top.unwrap_or(0);
+                let spec = crate::logo::graphics::NativeSpec {
+                    path,
+                    cols: logo.width.saturating_sub(pad_left),
+                    rows: logo.lines.len().saturating_sub(pad_top),
+                    gap: logo.padding_right,
+                    pad_left,
+                    pad_top,
+                    text: lines.clone(),
+                };
+                if spec.cols > 0
+                    && spec.rows > 0
+                    && crate::logo::graphics::display_native(&spec)
+                {
+                    return 0;
+                }
+            }
+        }
+
         let logo_pad = self
             .logo
             .as_ref()

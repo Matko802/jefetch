@@ -606,6 +606,9 @@ pub fn display_native(spec: &NativeSpec) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn kitty_ok_parses() {
@@ -768,3 +771,4 @@ pub fn display_native(spec: &NativeSpec) -> bool {
         }
     }
 }
+

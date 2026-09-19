@@ -119,9 +119,12 @@ image file (`jefetch --logo ~/pic.png`) for a one-run image logo.
 { "logo": { "type": "image", "source": "~/Pictures/logo.png", "width": 40 } }
 ```
 
-Raster images (png, jpeg, gif first frame, bmp) render as static
-truecolor half-blocks (`▀`/`▄`, two image rows per terminal row), so
-they work in any terminal with no graphics protocols needed.
+Raster images (png, jpeg, gif first frame, bmp) print as a real
+image when the terminal supports it — kitty graphics, sixel, then
+iTerm2 inline images, auto-detected. Otherwise (unsupported
+terminal or piped output) they render as static truecolor
+half-blocks (`▀`/`▄`, two image rows per terminal row), so they work
+in any terminal with no graphics protocols needed.
 Transparency is honored — translucent pixels stay empty so the
 background shows through.
 
