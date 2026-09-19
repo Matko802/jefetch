@@ -9,6 +9,7 @@ license = "MIT"
 libc = "0.2"
 # Static image logos (type = "image"): decode only, no encoders, no rayon.
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png"] }
+base64 = "0.22"
 
 [profile.release]
 opt-level = 3
