@@ -373,6 +373,11 @@ impl App {
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
         let mut needs_draw = true;
+        // Live native image (real picture in the live view): owned
+        // placement while active, text-only refreshes. `failed` pins us
+        // to blocks until the config changes (no per-frame retries).
+        let mut live_native: Option<crate::logo::graphics::LiveImage> = None;
+        let mut live_native_failed = false;
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
         let (info_tx, info_rx) = std::sync::mpsc::channel::<(u64, Vec<String>)>();
         let mut refresh_gen: u64 = 0;
@@ -412,6 +417,14 @@ impl App {
                                 logo_cloud_for(&base_logo, &base_image, &active_cfg);
                             using_active = false;
                             animated = self.should_animate() && base_logo.is_some();
+                            // New logo on screen: drop any live native
+                            // placement (re-established below if wanted)
+                            // and allow retries with the fresh config.
+                            if let Some(n) = live_native.take() {
+                                crate::logo::graphics::delete_live_image(&n);
+                            }
+                            live_native_failed = false;
+                            needs_draw = true;
                             refresh_gen = refresh_gen.wrapping_add(1);
                             refresh_busy = None;
                             last_refresh = std::time::Instant::now()
@@ -477,6 +490,78 @@ impl App {
                         needs_draw = true;
                     }
                 }
+            }
+            // Native live image management: establish once when the live
+            // view goes still, tear down when leaving (toggle/config).
+            let want_native = live_native_wanted(
+                animated,
+                &self.image,
+                self.config.logo.chars.as_deref(),
+            );
+            if want_native && live_native.is_none() && !live_native_failed {
+                let dims = self.image.as_ref().map(|i| (i.cols, i.rows));
+                let path = self.config.logo.source.clone();
+                let pad_left = self.config.logo.padding_left.unwrap_or(0);
+                let pad_top = self.config.logo.padding_top.unwrap_or(0);
+                match (dims, path) {
+                    (Some((cols, rows)), Some(path)) => {
+                        match crate::logo::graphics::establish_live_image(
+                            &path,
+                            cols,
+                            rows,
+                            2 + pad_top as u32,
+                            1 + pad_left,
+                        ) {
+                            Some(n) => {
+                                live_native = Some(n);
+                                needs_draw = true;
+                            }
+                            None => live_native_failed = true,
+                        }
+                    }
+                    _ => live_native_failed = true,
+                }
+            } else if !want_native && live_native.is_some() {
+                if let Some(n) = live_native.take() {
+                    crate::logo::graphics::delete_live_image(&n);
+                }
+                // Full clear so no ghost survives under clouds/blocks.
+                print!("\x1b[2J\x1b[H");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                needs_draw = true;
+            }
+            if live_native.is_some() && needs_draw && self.image.is_some() {
+                // The picture persists; only text rows move.
+                let img_cols = self.image.as_ref().map(|i| i.cols).unwrap_or(0);
+                let pad_left = self.config.logo.padding_left.unwrap_or(0);
+                let gap = self.logo.as_ref().map(|l| l.padding_right).unwrap_or(2);
+                let text_col = 1 + pad_left + img_cols + gap;
+                let (tc, _) = crate::common::terminal_size();
+                out.clear();
+                for (k, raw) in base_lines.iter().enumerate() {
+                    let content = if display_live {
+                        crate::sharkvis::swap_display_placeholders_row(
+                            raw,
+                            &shark_live,
+                            k,
+                            info_count,
+                        )
+                    } else {
+                        raw.clone()
+                    };
+                    out.push_str(&format!("\x1b[{};{}H", k as u32 + 2, text_col));
+                    out.push_str(&crate::print::format::truncate_visible(
+                        content.trim_end(),
+                        tc.saturating_sub(text_col) + 1,
+                    ));
+                    out.push_str("\x1b[K\r\n");
+                }
+                if !crate::common::colors_enabled() {
+                    out = crate::print::format::strip_sgr(&out);
+                }
+                print!("{}", out);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                needs_draw = false;
             }
             if animated {
 
@@ -685,6 +770,9 @@ impl App {
                 }
             }
             if quit {
+                if let Some(n) = live_native.take() {
+                    crate::logo::graphics::delete_live_image(&n);
+                }
                 restore(tty_fd, is_tty, &orig_term);
                 return 0;
             }
@@ -1052,6 +1140,18 @@ fn image_logo_from_config(
 /// Point cloud for the animated (3D) path. Image logos build the
 /// cloud from their pixels (truecolor + luminance depth); everything
 /// else renders from the resolved text lines as before.
+/// Native live image is wanted when the live view is not animating
+/// and the logo is an image with no `chars` conversion override.
+/// (A placed picture can't rotate, so the spinning cloud keeps
+/// priority while animation runs — `t` toggles between the two.)
+fn live_native_wanted(
+    animated: bool,
+    image: &Option<crate::logo::image::LogoImage>,
+    chars: Option<&str>,
+) -> bool {
+    !animated && image.is_some() && chars.is_none()
+}
+
 fn logo_cloud_for(
     logo: &Option<ResolvedLogo>,
     image: &Option<crate::logo::image::LogoImage>,
@@ -1901,6 +2001,22 @@ mod tests {
         app.image = None;
         app.config.logo.chars = None;
         assert!(!app.native_image_allowed());
+    }
+
+    #[test]
+    fn live_native_wanted_matrix() {
+        let img = crate::logo::image::LogoImage {
+            cols: 4,
+            rows: 2,
+            rgba: vec![255u8; 4 * 4 * 4],
+        };
+        let some = Some(img);
+        let none: Option<crate::logo::image::LogoImage> = None;
+        assert!(live_native_wanted(false, &some, None));
+        assert!(!live_native_wanted(true, &some, None), "spinning cloud wins");
+        assert!(!live_native_wanted(false, &some, Some("ascii")), "chars forces conversion");
+        assert!(!live_native_wanted(false, &some, Some("blocks")));
+        assert!(!live_native_wanted(false, &none, None), "no image, no native");
     }
 
     #[test]

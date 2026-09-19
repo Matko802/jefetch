@@ -271,6 +271,10 @@ pub fn kitty_place_seq(id: u32, cols: u32, rows: u32) -> String {
     format!("\x1b_Ga=p,i={},c={},r={},C=1,q=2\x1b\\", id, cols, rows)
 }
 
+pub fn kitty_delete_seq(id: u32) -> String {
+    format!("\x1b_Ga=d,d=i,i={},q=2\x1b\\", id)
+}
+
 // ---------------------------------------------------------------------------
 // sixel
 // ---------------------------------------------------------------------------
@@ -555,6 +559,101 @@ fn display_iterm2(raw: &RawImage, spec: &NativeSpec) -> bool {
     write_out(&out)
 }
 
+/// Opaque handle for a live-mode native image (owned placement).
+#[derive(Debug, Clone, Copy)]
+pub struct LiveImage {
+    pub proto: GraphicsProto,
+    pub img_id: u32,
+}
+
+/// Clear the screen and draw the image for live mode at 1-based
+/// (`image_row`, `image_col`), sized `cols` × `rows` cells. Text is
+/// drawn separately with absolute CUP, so the picture persists across
+/// text-only refreshes. Returns `None` on any failure (caller uses
+/// blocks). Sixel needs a cell-size answer; without it this fails.
+pub fn establish_live_image(
+    path: &str,
+    cols: usize,
+    rows: usize,
+    image_row: u32,
+    image_col: usize,
+) -> Option<LiveImage> {
+    if !stdout_is_tty() || cols == 0 || rows == 0 {
+        return None;
+    }
+    let proto = detect()?;
+    let raw = match logo_image::load(path) {
+        Ok(r) => r,
+        Err(_) => return None,
+    };
+    let (tc, _) = crate::common::terminal_size();
+    if image_col + cols - 1 > tc {
+        return None;
+    }
+    match proto {
+        GraphicsProto::Kitty => {
+            let (tw, th) = hires_dims(cols, rows);
+            let px = logo_image::resize_box(&raw.rgba, raw.width, raw.height, tw, th);
+            let id = image_id();
+            if !write_out(&kitty_transmit_seq(&px, tw as u32, th as u32, id)) {
+                return None;
+            }
+            if let Some(tty) = TtyQuery::open() {
+                tty.drain(80);
+            }
+            let mut out = String::from("\x1b[2J\x1b[H");
+            out.push_str(&cup(image_row, image_col));
+            out.push_str(&kitty_place_seq(id, cols as u32, rows as u32));
+            if !write_out(&out) {
+                return None;
+            }
+            Some(LiveImage { proto, img_id: id })
+        }
+        GraphicsProto::Sixel => {
+            let (cell_w, cell_h) = match cell_size() {
+                Some((w, h)) if w > 0 && h > 0 => (w as usize, h as usize),
+                _ => return None,
+            };
+            let mut pw = cols * cell_w;
+            let mut ph = rows * cell_h;
+            if pw > 1000 {
+                let s = 1000.0 / pw as f64;
+                pw = 1000;
+                ph = ((ph as f64 * s) as usize).max(1);
+            }
+            let px = logo_image::resize_box(&raw.rgba, raw.width, raw.height, pw, ph);
+            let mut out = String::from("\x1b[2J\x1b[H");
+            out.push_str(&cup(image_row, image_col));
+            out.push_str(&sixel_encode(&px, pw, ph));
+            if !write_out(&out) {
+                return None;
+            }
+            Some(LiveImage { proto, img_id: 0 })
+        }
+        GraphicsProto::Iterm2 => {
+            let (tw, th) = hires_dims(cols, rows);
+            let px = logo_image::resize_box(&raw.rgba, raw.width, raw.height, tw, th);
+            let png = png_bytes(&px, tw as u32, th as u32)?;
+            let mut out = String::from("\x1b[2J\x1b[H");
+            out.push_str(&cup(image_row, image_col));
+            out.push_str(&iterm2_seq(&png, path, cols as u32, rows as u32));
+            if !write_out(&out) {
+                return None;
+            }
+            Some(LiveImage { proto, img_id: 0 })
+        }
+    }
+}
+
+/// Remove a live-mode native image (kitty placements survive screen
+/// clears, so they must be deleted explicitly). Best effort.
+pub fn delete_live_image(native: &LiveImage) -> bool {
+    match native.proto {
+        GraphicsProto::Kitty => write_out(&kitty_delete_seq(native.img_id)),
+        _ => true,
+    }
+}
+
 pub struct NativeSpec {
     pub path: String,
     pub cols: usize,
@@ -647,6 +746,13 @@ mod tests {
             base64::engine::general_purpose::STANDARD.decode(&payload).unwrap(),
             rgba
         );
+    }
+
+    #[test]
+    fn kitty_delete_targets_id() {
+        let s = kitty_delete_seq(4242);
+        assert!(s.contains("a=d") && s.contains("d=i") && s.contains("i=4242"));
+        assert!(s.ends_with("\x1b\\"));
     }
 
     #[test]

@@ -130,10 +130,12 @@ background shows through.
   truecolor half-blocks (`▀`/`▄`, two image rows per terminal row),
   or a colored ascii luminance ramp with `chars=ascii`. No graphics
   protocols needed for the fallback.
-- **3D / animated**: the same pixels feed the rotating point cloud —
-  per-pixel truecolor plus a luminance heightmap, so photos get real
-  depth while spinning. `chars=ascii` renders the cells as a luminance
-  ramp instead of solid blocks.
+- **Live view**: with animation off, the same native image shows and
+  only the text refreshes around it. A placed picture can't rotate,
+  so while the animation runs the image spins as a 3D point cloud
+  instead (per-pixel truecolor plus a luminance heightmap) — press
+  `t` to switch between the spinning cloud and the real image.
+  `chars=ascii` renders ascii in both modes.
 
 With no `type` set, a `source` pointing at an image file is picked up
 as an image automatically.
