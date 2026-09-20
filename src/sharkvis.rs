@@ -100,12 +100,23 @@ fn scan_proc() -> bool {
         }
         let comm_path = format!("/proc/{}/comm", name);
         if let Ok(comm) = std::fs::read_to_string(&comm_path) {
-            if comm.trim() == "sharkvis" {
+            if comm.trim() == "sharkvis" && !is_raw_backend(&name) {
                 return true;
             }
         }
     }
     false
+}
+
+fn cmdline_has_raw(cmdline: &[u8]) -> bool {
+    cmdline.split(|b| *b == 0).any(|a| a == b"--raw")
+}
+
+fn is_raw_backend(pid: &str) -> bool {
+    match std::fs::read(format!("/proc/{}/cmdline", pid)) {
+        Ok(bytes) => cmdline_has_raw(&bytes),
+        Err(_) => false,
+    }
 }
 
 pub fn config_paths() -> Vec<String> {
@@ -1662,6 +1673,15 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn raw_backend_cmdline_detected() {
+        assert!(super::cmdline_has_raw(b"sharkvis\0--raw\0--bars\048\0"));
+        assert!(super::cmdline_has_raw(b"/x/sharkvis\0--raw-mode\0wave\0--raw\0"));
+        assert!(!super::cmdline_has_raw(b"sharkvis\0"));
+        assert!(!super::cmdline_has_raw(b"sharkvis\0--bars\048\0"));
+        assert!(!super::cmdline_has_raw(b""));
     }
 
     #[test]
