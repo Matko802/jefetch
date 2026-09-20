@@ -1,34 +1,18 @@
-//! Static image logos (`"type": "image"`, `"source": "~/pic.png"`).
-//!
-//! Raster images (png/jpeg/gif-first-frame/bmp) are decoded with the
-//! `image` crate, area-averaged down to a terminal-cell grid, and
-//! rendered as truecolor half-blocks (`▀`/`▄`, two image rows per
-//! terminal row). Transparency is honored: translucent pairs stay
-//! empty so the background shows through.
-//!
-//! Terminal cells are roughly twice as tall as they are wide, so the
-//! grid is `cols` × `rows` cells backed by `cols` × `rows * 2` pixels.
 
 use crate::app::ResolvedLogo;
 
-/// Alpha at or below this counts as transparent.
 pub const ALPHA_CUT: u8 = 128;
 
-/// Default logo width in terminal columns when neither `width` nor
-/// `height` is set.
 pub const DEFAULT_COLS: usize = 48;
 pub const MAX_COLS: usize = 128;
 pub const MAX_ROWS: usize = 64;
 
-/// Decoded image in row-major RGBA8.
 pub struct RawImage {
     pub width: usize,
     pub height: usize,
     pub rgba: Vec<u8>,
 }
 
-/// Image resampled to the logo grid: `cols` columns by `rows * 2`
-/// pixel rows (two pixels per terminal row for half-block rendering).
 pub struct LogoImage {
     pub cols: usize,
     pub rows: usize,
@@ -44,9 +28,6 @@ pub fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
-/// File extension based guess, used for `--logo <file>` detection and
-/// for picking the image branch when `type` is unset. Decoding itself
-/// sniffs the content.
 pub fn looks_like_image(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let base = lower.rsplit('/').next().unwrap_or(&lower);
@@ -76,10 +57,6 @@ pub fn load(path: &str) -> Result<RawImage, String> {
     })
 }
 
-/// Target logo size in terminal cells. `cfg_w` / `cfg_h` are the
-/// `"width"` / `"height"` logo keys (columns / rows). Aspect is
-/// preserved whenever only one side is given; cells count double
-/// height (`rows = cols / aspect / 2`).
 pub fn target_cells(
     src_w: usize,
     src_h: usize,
@@ -110,9 +87,6 @@ pub fn target_cells(
     (cols, rows)
 }
 
-/// Area-average `src` (`src_w` × `src_h` RGBA) down (or up) to
-/// `dst_w` × `dst_h`. Colors are alpha-weighted so translucent edges
-/// don't leave dark fringes.
 pub fn resize_box(
     src: &[u8],
     src_w: usize,
@@ -176,7 +150,6 @@ pub fn resize_box(
 }
 
 impl LogoImage {
-    /// Decode `path` and resample to the configured cell grid.
     pub fn load(path: &str, cfg_w: Option<u32>, cfg_h: Option<u32>) -> Result<LogoImage, String> {
         let raw = load(path)?;
         Ok(Self::from_raw(&raw, cfg_w, cfg_h))
@@ -193,15 +166,12 @@ impl LogoImage {
         (self.rgba[p], self.rgba[p + 1], self.rgba[p + 2], self.rgba[p + 3])
     }
 
-    /// Render as truecolor half-blocks, two pixels per terminal row.
-    /// Fully transparent pairs become plain spaces.
     pub fn to_resolved(&self, padding_right: usize) -> ResolvedLogo {
         let mut lines: Vec<String> = Vec::with_capacity(self.rows);
         let mut width = 0usize;
         for r in 0..self.rows {
             let mut line = String::new();
             let mut last = self.cols;
-            // Trim trailing transparent pairs.
             while last > 0 {
                 let (_, _, _, a0) = self.pixel(last - 1, r * 2);
                 let (_, _, _, a1) = self.pixel(last - 1, r * 2 + 1);
@@ -250,7 +220,6 @@ impl LogoImage {
 mod tests {
     use super::*;
 
-    /// Minimal 24-bit BMP writer for fixtures: `pixels` top-down RGB.
     fn bmp_bytes(w: u32, h: u32, pixels: &[(u8, u8, u8)]) -> Vec<u8> {
         let row_stride = ((w * 3 + 3) / 4) * 4;
         let data_len = row_stride * h;
@@ -267,7 +236,6 @@ mod tests {
         v.extend_from_slice(&0u32.to_le_bytes());
         v.extend_from_slice(&data_len.to_le_bytes());
         v.extend_from_slice(&[0u8; 16]);
-        // BMP rows are bottom-up, BGR.
         for row in (0..h).rev() {
             for col in 0..w {
                 let (r, g, b) = pixels[(row * w + col) as usize];
@@ -299,7 +267,6 @@ mod tests {
 
     #[test]
     fn loads_bmp_pixels() {
-        // 2x2: red green / blue white (top-down).
         let px = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255)];
         let p = write_tmp("load", &bmp_bytes(2, 2, &px));
         let raw = load(&p).unwrap();
@@ -322,15 +289,10 @@ mod tests {
 
     #[test]
     fn target_cells_keeps_terminal_aspect() {
-        // 96x48 (2:1) at 48 cols -> 12 rows (cells are 2x tall).
         assert_eq!(target_cells(96, 48, None, None), (48, 12));
-        // Small images keep native width.
         assert_eq!(target_cells(16, 16, None, None), (16, 8));
-        // Explicit width preserves aspect.
         assert_eq!(target_cells(100, 100, Some(40), None), (40, 20));
-        // Explicit height preserves aspect (cells are 2x tall).
         assert_eq!(target_cells(100, 100, None, Some(10)), (20, 10));
-        // Both set wins as-is, clamped.
         assert_eq!(target_cells(10, 10, Some(500), Some(500)), (MAX_COLS, MAX_ROWS));
         assert_eq!(target_cells(10, 10, Some(0), Some(0)), (1, 1));
     }
@@ -347,7 +309,6 @@ mod tests {
 
     #[test]
     fn resize_box_unpremultiplies_alpha() {
-        // Half red opaque, half transparent -> mean alpha 128, still red.
         let mut src = Vec::new();
         for _ in 0..2 {
             src.extend_from_slice(&[255, 0, 0, 255, 0, 0, 0, 0]);
@@ -359,12 +320,11 @@ mod tests {
 
     #[test]
     fn static_render_uses_half_blocks() {
-        // 2 cols x 2 rows: top red, bottom blue.
         let img = LogoImage {
             cols: 2,
             rows: 1,
             rgba: vec![
-                255, 0, 0, 255, 255, 0, 0, 255, //
+                255, 0, 0, 255, 255, 0, 0, 255,
                 0, 0, 255, 255, 0, 0, 255, 255,
             ],
         };
@@ -382,12 +342,11 @@ mod tests {
 
     #[test]
     fn static_render_handles_transparency() {
-        // Top transparent, bottom green -> lower half block.
         let img = LogoImage {
             cols: 2,
             rows: 1,
             rgba: vec![
-                0, 0, 0, 0, 255, 0, 0, 255, //
+                0, 0, 0, 0, 255, 0, 0, 255,
                 0, 255, 0, 255, 0, 0, 0, 0,
             ],
         };

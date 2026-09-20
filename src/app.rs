@@ -171,8 +171,6 @@ impl App {
 
     fn apply_logo_overrides(&mut self) {
         if let Some(name) = self.options.logo_name.clone() {
-            // A `--logo` value pointing at a real file is an image (or a
-            // text file) logo, not a builtin id.
             let expanded = crate::logo::image::expand_tilde(&name);
             if std::path::Path::new(&expanded).is_file() {
                 self.config.logo.source = Some(name);
@@ -234,12 +232,7 @@ impl App {
         }
 
         let lines = self.render_modules(&entries);
-        let lines = Self::apply_display_sharkvis_static(&self.config, &entries, lines);
 
-        // Native terminal image (kitty/sixel/iTerm2) when supported.
-        // Falls back to the half-block render below on any failure.
-        // The resolved image logo carries padding, so strip it back to
-        // the pixel grid for native placement.
         if image_logo_requested(&self.config.logo) {
             if let (Some(logo), Some(path)) =
                 (&self.logo, self.config.logo.source.clone())
@@ -447,14 +440,10 @@ impl App {
             if rows > 0 {
                 render_height = render_height.min(rows.max(1));
             }
-            // Single poll per frame feeds both the logo and live text.
-            // Display-only mode must still get live colors without tinting the logo.
             if animated || display_live {
                 if shark_polled.elapsed() >= std::time::Duration::from_millis(30) {
                     let want =
                         base_cfg.live_colors || active_cfg.live_colors || display_live;
-                    // Display wants live even when the logo mode is Off
-                    // (e.g. logo none / no animation) — poll with Auto then.
                     let poll_mode = if display_live
                         && mode == crate::sharkvis::SharkvisMode::Off
                     {
@@ -476,8 +465,6 @@ impl App {
             }
             if animated {
 
-                // Logo follows its own mode only — display-only polling must
-                // not flip the logo into its sharkvis profile.
                 let logo_active =
                     mode != crate::sharkvis::SharkvisMode::Off && shark_live.active;
                 if logo_active != using_active {
@@ -491,8 +478,6 @@ impl App {
                 spin_phase += f64::from(shark_live.speed_mult);
                 let mut fx = crate::anim::RenderFx::none();
                 if using_active {
-                    // Logo tint only when the active profile opts in with
-                    // `color=sharkvis` — display-only mode must not tint it.
                     if cfg.live_colors {
                         if let Some(g) = shark_live.grad {
                             fx.grad = Some(g);
@@ -500,8 +485,6 @@ impl App {
                             fx.grad = Some((c, c));
                         }
                     }
-                    // Live charset only when following it (`chars=sharkvis`);
-                    // explicit charsets and ascii mode keep their own glyphs.
                     if !cfg.original_glyphs && !cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }
@@ -931,16 +914,9 @@ fn separator_colored(_sep: &str, cfg: &crate::config::configfile::Config) -> Str
 }
 
 fn display_wants_sharkvis(cfg: &Config, _entries: &[ModuleEntry]) -> bool {
-    // Live text is profile-gated (`textcolor=sharkvis`); the slots
-    // themselves just carry normal colors (or placeholders via injection).
     profile_text_live(&cfg.logo)
 }
 
-/// Whether the animation profile opts text into live colors:
-/// `textcolor=sharkvis` in the base animation or the sharkvis profile.
-/// When true, text renders as `normal color + live placeholder`, so the
-/// gradient always overrides while active and the normal color only shows
-/// when idle.
 fn profile_text_live(logo: &LogoConfig) -> bool {
     let base = crate::anim::AnimConfig::from_animation_str(logo.animation.as_deref());
     if base.text_live_colors {
@@ -950,33 +926,11 @@ fn profile_text_live(logo: &LogoConfig) -> bool {
 }
 
 impl App {
-    fn apply_display_sharkvis_static(
-        cfg: &Config,
-        entries: &[ModuleEntry],
-        lines: Vec<String>,
-    ) -> Vec<String> {
-        if !display_wants_sharkvis(cfg, entries) {
-            return lines;
-        }
-        // One-shot poll so `--static` / piped output still follows the music.
-        // Display-only mode (logo none / no animation) still works: when the
-        // logo mode is Off but display wants sharkvis, poll with Auto.
-        let mut tmp = App::new(CliOptions::default());
-        tmp.config = cfg.clone();
-        let (base, active, mode) = tmp.anim_configs();
-        let poll_mode = if mode == crate::sharkvis::SharkvisMode::Off {
-            crate::sharkvis::SharkvisMode::Auto
-        } else {
-            mode
-        };
-        let mut sync = crate::sharkvis::Sync::new();
-        let frame = sync.poll(poll_mode, active.beat_depth.max(base.beat_depth), true);
-        crate::sharkvis::swap_display_lines_frame(&lines, &frame)
+    fn apply_display_sharkvis_static(lines: Vec<String>) -> Vec<String> {
+        crate::sharkvis::swap_display_lines_frame(&lines, &crate::sharkvis::LiveFrame::inactive())
     }
 }
 
-/// Image logo requested either explicitly (`"type": "image"`) or by
-/// pointing `source` at an image file with any non-builtin type.
 fn image_logo_requested(lc: &LogoConfig) -> bool {
     if lc
         .logo_type
@@ -1060,7 +1014,6 @@ fn resolve_logo(cfg: &Config) -> Option<ResolvedLogo> {
             Ok(logo) => return Some(logo),
             Err(e) => eprintln!("jefetch: {}", e),
         }
-        // Fall through to builtin autodetect below.
     }
 
     if let Some(src) = &cfg.logo.source {
@@ -1595,15 +1548,12 @@ mod tests {
     }
 
     #[test]
-    fn static_path_overrides_normal_with_live() {
+    fn static_path_ignores_live() {
         let _g = crate::sharkvis::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-textopt-{}.state", std::process::id()));
-        // Note: no color_low/high here — those would win as the live
-        // gradient; we want the pinned config gradients below.
         std::fs::write(&path, "color=#ff8800 energy=0.9 beat=1").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", &path);
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        // Pinned sharkvis gradients so the expected tint is deterministic.
         let cfg_path = std::env::temp_dir().join(format!("jefetch-textopt-{}.toml", std::process::id()));
         std::fs::write(
             &cfg_path,
@@ -1615,28 +1565,19 @@ mod tests {
         let entries = vec![ModuleEntry::Name("title".to_string())];
         let mut cfg = Config::default();
         cfg.logo.sharkvis = Some("xyz textcolor=sharkvis".to_string());
-        // Explicit normal color underneath, like run() leaves it.
         cfg.display.title_color = Some("red".to_string());
         cfg.display.text_live = profile_text_live(&cfg.logo);
         let lines = App::render_modules_with(&cfg, &[], &entries);
         assert!(!lines.is_empty());
-        let out = App::apply_display_sharkvis_static(&cfg, &entries, lines);
-        assert!(
-            out.iter().any(|l| l.contains("\x1b[31m\x1b[38;2;128;0;128m")),
-            "live overrides normal, got {:?}",
-            out
-        );
-
-        // Same setup without the keyword: normal color only, no placeholder.
-        let mut plain_cfg = Config::default();
-        plain_cfg.logo.sharkvis = Some("xyz color=sharkvis".to_string());
-        plain_cfg.display.title_color = Some("red".to_string());
-        plain_cfg.display.text_live = profile_text_live(&plain_cfg.logo);
-        let lines = App::render_modules_with(&plain_cfg, &[], &entries);
-        let out = App::apply_display_sharkvis_static(&plain_cfg, &entries, lines);
+        let out = App::apply_display_sharkvis_static(lines);
         assert!(
             !out.iter().any(|l| l.contains("38;2")),
-            "no live tint without opt-in, got {:?}",
+            "static never polls sharkvis, got {:?}",
+            out
+        );
+        assert!(
+            out.iter().any(|l| l.contains("\x1b[31m")),
+            "normal color kept, got {:?}",
             out
         );
 
@@ -1650,8 +1591,6 @@ mod tests {
     #[test]
     fn static_path_stays_plain_when_sharkvis_down() {
         let _g = crate::sharkvis::test_env_lock();
-        // Stale state + no process: even with the textcolor opt-in and a
-        // colors module present, only normal colors may resolve.
         let path = std::env::temp_dir().join(format!("jefetch-textoff-{}.state", std::process::id()));
         std::fs::write(&path, "color=#ff8800 energy=0.9 beat=1").unwrap();
         let f = std::fs::File::options().write(true).open(&path).unwrap();
@@ -1670,7 +1609,7 @@ mod tests {
         cfg.display.title_color = Some("red".to_string());
         cfg.display.text_live = profile_text_live(&cfg.logo);
         let lines = App::render_modules_with(&cfg, &[], &entries);
-        let out = App::apply_display_sharkvis_static(&cfg, &entries, lines);
+        let out = App::apply_display_sharkvis_static(lines);
         let joined = out.join("\n");
         assert!(!joined.contains("38;2"), "no live fg when down, got {:?}", out);
         assert!(!joined.contains("48;2"), "no live bg when down, got {:?}", out);

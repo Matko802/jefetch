@@ -1,12 +1,3 @@
-//! Native terminal image protocols for image logos.
-//!
-//! When the terminal speaks kitty graphics, sixel, or iTerm2 inline
-//! images, an image logo prints as a real image. Otherwise —
-//! unsupported terminal or piped output — it falls back to the
-//! half-block conversion in [`super::image`].
-//!
-//! Only the one-shot static path uses this: animated output and the
-//! live view keep the regular text rendering.
 
 use super::image::{self as logo_image, RawImage};
 
@@ -17,9 +8,6 @@ pub enum GraphicsProto {
     Iterm2,
 }
 
-/// A `/dev/tty` handle with the terminal in noncanonical mode and the
-/// fd nonblocking, restored on drop. Mirrors the kitty font query in
-/// `detection::terminal`.
 struct TtyQuery {
     fd: i32,
     orig_term: libc::termios,
@@ -80,7 +68,6 @@ impl TtyQuery {
         true
     }
 
-    /// Read until `done` matches or `budget_ms` elapses.
     fn read_until(&self, budget_ms: u64, done: impl Fn(&[u8]) -> bool) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut tmp = [0u8; 512];
@@ -107,7 +94,6 @@ impl TtyQuery {
         buf
     }
 
-    /// Throw away any pending input (late protocol acks).
     fn drain(&self, budget_ms: u64) {
         self.read_until(budget_ms, |_| false);
     }
@@ -137,8 +123,6 @@ pub fn kitty_response_ok(buf: &[u8]) -> bool {
     text.contains(&format!("_Gi={}", KITTY_PROBE_ID)) && text.contains("OK")
 }
 
-/// Primary device attributes reply ends with `c`; sixel support is
-/// parameter `4` (`ESC [ ? 61 ; 4 ; … c`).
 fn da_complete(buf: &[u8]) -> bool {
     let text = String::from_utf8_lossy(buf);
     match text.find("\x1b[?") {
@@ -161,9 +145,6 @@ pub fn sixel_response_ok(buf: &[u8]) -> bool {
     false
 }
 
-/// Best-effort protocol detection. Env fast paths first (no I/O), then
-/// a single round trip carrying both the kitty and sixel probes.
-/// Returns `None` without a tty, on timeouts, or when unsupported.
 pub fn detect() -> Option<GraphicsProto> {
     if let Ok(tp) = std::env::var("TERM_PROGRAM") {
         if tp == "iTerm.app" || tp == "WezTerm" {
@@ -213,7 +194,6 @@ pub fn cursor_pos() -> Option<(u32, u32)> {
     parse_cpr(&buf)
 }
 
-/// Cell size in pixels as `(width, height)`, via `CSI 14 t`.
 pub fn parse_cell_size(buf: &[u8]) -> Option<(u32, u32)> {
     let text = String::from_utf8_lossy(buf);
     let i = text.rfind("\x1b[4;")?;
@@ -237,17 +217,9 @@ fn b64(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
-// ---------------------------------------------------------------------------
-// kitty graphics
-// ---------------------------------------------------------------------------
 
 const KITTY_CHUNK: usize = 4096;
 
-/// Chunked transmit. Per the spec, only the first chunk carries the
-/// full control set — continuation chunks must have only `m` (and
-/// optionally `q`). `q=1` suppresses `OK` chatter (failures still
-/// report, and the caller drains them); `q=2` would only suppress
-/// failures while `OK`s leak into the shell.
 pub fn kitty_transmit_seq(rgba: &[u8], w: u32, h: u32, id: u32) -> String {
     let enc = b64(rgba);
     let bytes = enc.as_bytes();
@@ -284,12 +256,7 @@ pub fn kitty_place_seq(id: u32, cols: u32, rows: u32) -> String {
     format!("\x1b_Ga=p,i={},c={},r={},C=1,q=1\x1b\\", id, cols, rows)
 }
 
-// ---------------------------------------------------------------------------
-// sixel
-// ---------------------------------------------------------------------------
 
-/// Sixel-encode RGBA (`w` × `h`) with a uniform 6×6×6 palette,
-/// alpha composited on black.
 pub fn sixel_encode(rgba: &[u8], w: usize, h: usize) -> String {
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
         return String::new();
@@ -366,9 +333,6 @@ pub fn sixel_encode(rgba: &[u8], w: usize, h: usize) -> String {
     out
 }
 
-// ---------------------------------------------------------------------------
-// iTerm2 inline images
-// ---------------------------------------------------------------------------
 
 pub fn png_bytes(rgba: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
     use ::image::ImageEncoder;
@@ -390,9 +354,6 @@ pub fn iterm2_seq(png: &[u8], name: &str, cols: u32, rows: u32) -> String {
     )
 }
 
-// ---------------------------------------------------------------------------
-// layout + display
-// ---------------------------------------------------------------------------
 
 fn stdout_is_tty() -> bool {
     unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 }
@@ -418,9 +379,6 @@ struct Layout {
     rows: usize,
 }
 
-/// Cursor-anchored layout mirroring the block path: text starts at the
-/// reported cursor row, the image sits `pad_top` below it, and text
-/// starts after `pad_left + logo_cols + gap`.
 fn begin_layout(
     logo_cols: usize,
     logo_rows: usize,
@@ -458,8 +416,6 @@ fn image_id() -> u32 {
     10000 + std::process::id() % 50000
 }
 
-/// Transmit resolution for cell-scaled protocols (kitty, iTerm2):
-/// sharp enough to upscale cleanly, small enough to stay fast.
 fn hires_dims(cols: usize, rows: usize) -> (usize, usize) {
     let tw = (cols * 8).clamp(1, 800);
     let th = (tw * rows * 2 / cols.max(1)).clamp(1, 800);
@@ -481,8 +437,6 @@ fn display_kitty(raw: &RawImage, spec: &NativeSpec) -> bool {
     let (tw, th) = hires_dims(spec.cols, spec.rows);
     let px = logo_image::resize_box(&raw.rgba, raw.width, raw.height, tw, th);
     let id = image_id();
-    // Transmit first on its own: with `q=1` success is silent, and any
-    // failure text is swallowed by the drain below.
     if !write_out(&kitty_transmit_seq(&px, tw as u32, th as u32, id)) {
         return false;
     }
@@ -500,7 +454,6 @@ fn display_kitty(raw: &RawImage, spec: &NativeSpec) -> bool {
     if !write_out(&out) {
         return false;
     }
-    // Swallow any failure text so it never leaks into the shell.
     if let Some(tty) = TtyQuery::open() {
         tty.drain(50);
     }
@@ -584,9 +537,6 @@ pub struct NativeSpec {
     pub text: Vec<String>,
 }
 
-/// Print an image logo as a real image when the terminal supports it.
-/// Returns `false` on any failure so the caller falls back to
-/// half-block / ascii conversion.
 pub fn display_native(spec: &NativeSpec) -> bool {
     if !stdout_is_tty() {
         return false;
@@ -625,7 +575,6 @@ mod tests {
         assert!(sixel_response_ok(b"\x1b[?61;4;6;7;14;101;102c"));
         assert!(!sixel_response_ok(b"\x1b[?62c"));
         assert!(!sixel_response_ok(b"garbage"));
-        // 14 without 4 must not match.
         assert!(!sixel_response_ok(b"\x1b[?62;14c"));
     }
 
@@ -644,19 +593,16 @@ mod tests {
 
     #[test]
     fn kitty_transmit_chunks_and_reassembles() {
-        // 3200 bytes -> 4268 b64 chars -> 2 chunks.
         let rgba = vec![128u8; 3200];
         let seq = kitty_transmit_seq(&rgba, 40, 20, 777);
         assert_eq!(seq.matches("m=1").count(), 1);
         assert_eq!(seq.matches("m=0").count(), 1);
-        // Full control set only on the first chunk (spec discipline).
         assert_eq!(seq.matches("a=t").count(), 1);
         assert_eq!(seq.matches("f=32").count(), 1);
         assert_eq!(seq.matches("i=777").count(), 1);
         assert!(seq.contains("s=40") && seq.contains("v=20"));
         assert!(seq.contains("q=1"));
         assert!(!seq.contains("q=2"), "q=2 hides failures but leaks OKs");
-        // Payload reassembles to the input.
         let mut payload = String::new();
         for part in seq.split("\x1b_G") {
             if let Some(semi) = part.find(';') {
@@ -691,7 +637,6 @@ mod tests {
 
     #[test]
     fn sixel_encodes_regs_and_rle() {
-        // 4x1 solid red -> single reg, RLE run.
         let px = vec![255u8, 0, 0, 255].repeat(4);
         let s = sixel_encode(&px, 4, 1);
         assert!(s.starts_with("\x1bPq"), "got {:?}", &s[..8.min(s.len())]);

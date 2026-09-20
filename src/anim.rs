@@ -45,9 +45,6 @@ pub struct AnimConfig {
     pub sharkvis: crate::sharkvis::SharkvisMode,
     pub sharkvis_set: bool,
     pub live_colors: bool,
-    /// `textcolor=sharkvis`: text (keys/title/separator) follows the live
-    /// gradient too. Separate from `live_colors` (logo) so each can opt in
-    /// on its own.
     pub text_live_colors: bool,
     pub beat_depth: f32,
     pub grow: f32,
@@ -159,9 +156,6 @@ impl AnimConfig {
                 }
             }
             if let Some(v) = chars_opt {
-                // Only the keywords mean anything now; custom ramps are
-                // ignored and render as plain blocks like fetch.
-                // `chars=sharkvis` follows the live charset instead.
                 cfg.apply_chars_value(&v);
                 cfg.shading_explicit = !Self::is_sharkvis_chars_value(&v);
             } else if has_word(&low, "ascii") || has_word(&low, "original") {
@@ -328,8 +322,6 @@ impl AnimConfig {
         }
         let l = t.to_ascii_lowercase();
         if l == "sharkvis" {
-            // Follow sharkvis's `chars` charset while it runs;
-            // default blocks otherwise (live shading fills in per-frame).
             self.original_glyphs = false;
             self.shading = default_shading();
             return;
@@ -345,8 +337,6 @@ impl AnimConfig {
             self.original_glyphs = true;
             return;
         }
-        // Everything else (blocks, custom ramps, sharkvis) renders as
-        // plain shade blocks like fetch.
         self.original_glyphs = false;
         self.shading = default_shading();
     }
@@ -1360,8 +1350,6 @@ pub fn render_cloud_with_fx(
         }
     }
 
-    // Live sharkvis charset wins when the profile follows it
-    // (`chars=sharkvis`); otherwise plain shade blocks like fetch.
     let shading: &[String] = match fx.shading.as_deref() {
         Some(s) if !s.is_empty() => s,
         _ => &config.shading,
@@ -1622,9 +1610,6 @@ mod tests {
         let cfg = AnimConfig::from_animation_str(Some("boom=10 textcolor=sharkvis"));
         assert!(cfg.text_live_colors);
         assert!(!cfg.live_colors, "logo tint stays off");
-        // The `x` in `textcolor` must not enable x-spin, and a bare
-        // `textcolor` value must not trip the `color` matcher either way.
-        // (spin_y is default-on; only x/z must stay off.)
         assert!(!cfg.spin_x && !cfg.spin_z, "{:?}", cfg);
         let cfg = AnimConfig::from_animation_str(Some("textcolor=red"));
         assert!(!cfg.text_live_colors);
@@ -1637,8 +1622,6 @@ mod tests {
 
     #[test]
     fn live_chars_opt_in() {
-        // `chars=sharkvis` follows the live charset; custom ramps are
-        // ignored and render as plain blocks like fetch.
         let cfg = AnimConfig::from_animation_str(Some("boom=10 chars=sharkvis"));
         assert!(!cfg.original_glyphs);
         assert!(!cfg.shading_explicit, "live charset must stay follow-mode");
@@ -2316,7 +2299,6 @@ mod tests {
 
     #[test]
     fn live_shading_override_redraws_logo() {
-        // Live sharkvis charset wins over the default blocks ramp.
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let plain = render_frame(&solid_test_logo(), 9.0, &cfg, 36, 4);
         let live = render_frame_with_fx(

@@ -1,20 +1,11 @@
 pub const RESET: &str = "\x1b[0m";
 
-/// Placeholder SGR emitted when a display color is `"sharkvis"`.
-/// Background rendering bakes this in, then `app.rs` swaps it per-frame
-/// for the live sharkvis color (or strips it when inactive).
-/// Value 1,2,3 is near-black and vanishingly unlikely as a real user color.
 pub const SHARKVIS_PLACEHOLDER_START: &str = "\x1b[38;2;1;2;3m";
 
 pub fn is_sharkvis_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
-/// Live suffix for text colors: the placeholder when the animation profile
-/// opts in (`textcolor=sharkvis`, plumbed as `DisplayConfig::text_live`),
-/// empty otherwise. Text renders as `normal + placeholder`, so the live
-/// gradient always overrides while active and the normal color only shows
-/// when idle.
 pub fn live_text_suffix(text_live: bool) -> &'static str {
     if text_live {
         SHARKVIS_PLACEHOLDER_START

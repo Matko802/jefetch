@@ -27,7 +27,6 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
     };
 
     let has_custom_key = inst.args.key.is_some();
-    // Per-monitor keys (e.g. Display (model)): use them when no custom key overrides.
     if !has_custom_key {
         if let Some(pv) = base.per_value_keys.clone() {
             if pv.len() == values.len() {

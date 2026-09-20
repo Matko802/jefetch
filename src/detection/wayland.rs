@@ -322,7 +322,6 @@ fn query_on_stream(mut stream: UnixStream) -> Vec<WlOutput> {
                     globals.push((*name, interface.clone(), *version));
                 }
             }
-            // Bind xdg-output manager for logical sizes (fractional scale).
             let mut xdg_manager_id: Option<u32> = None;
             for (name, interface, version) in &fresh {
                 if interface == "zxdg_output_manager_v1" {

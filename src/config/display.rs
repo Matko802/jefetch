@@ -1,8 +1,5 @@
 use super::json::JsonValue;
 
-/// Text no longer follows sharkvis (the live reaction lives in the
-/// `colors` module now), so `"sharkvis"` here behaves as unset and the
-/// logo-derived defaults apply.
 fn text_color_opt(s: &str) -> Option<String> {
     if s.trim().eq_ignore_ascii_case("sharkvis") {
         None
@@ -32,10 +29,6 @@ pub struct DisplayConfig {
     pub color_align: bool,
     pub hide_cursor: bool,
     pub is_smart: bool,
-    /// Runtime only (never parsed): the animation profile opts text into
-    /// live sharkvis colors (`textcolor=sharkvis`). When set, text renders
-    /// as `normal color + live placeholder`, so the gradient overrides
-    /// while active and the normal color shows when idle.
     pub text_live: bool,
 }
 

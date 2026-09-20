@@ -128,8 +128,6 @@ fn render_colors(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
 
 fn colors_rows(opts: &ColorsOpts) -> Vec<String> {
     let pad = " ".repeat(opts.pad);
-    // Static palette only: the `colors` module never follows sharkvis
-    // (live gradient is text-only, via `textcolor=sharkvis`).
     match opts.symbol {
         ColorsSymbol::Block | ColorsSymbol::Background => {
             let mut rows = Vec::new();
@@ -1660,7 +1658,6 @@ mod tests {
 
     #[test]
     fn colors_never_carry_live_placeholders() {
-        // The palette stays static: only text follows sharkvis.
         for symbol in [
             ColorsSymbol::Background,
             ColorsSymbol::Block,
@@ -1673,7 +1670,6 @@ mod tests {
                 assert!(!row.contains("1;2;3"), "no sentinel, got {:?}", row);
             }
         }
-        // Even against an active frame the rows are untouched.
         let frame = crate::sharkvis::LiveFrame {
             active: true,
             grad: Some(((10, 20, 30), (200, 210, 220))),

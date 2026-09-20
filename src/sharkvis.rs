@@ -306,8 +306,6 @@ pub struct LiveState {
     pub bass: Option<f32>,
     pub left: Option<f32>,
     pub right: Option<f32>,
-    /// Session id (`started=` millis): with several live sessions only the
-    /// newest one is followed, older ones are ignored.
     pub started: Option<u64>,
 }
 
@@ -332,10 +330,6 @@ fn state_is_live(st: &LiveState) -> bool {
         || st.right.is_some()
 }
 
-/// Pick the state to follow out of every candidate file. Fresh,
-/// parseable files compete on `started` (newest session wins, older ones
-/// are ignored); files without it (legacy singletons) count as oldest.
-/// Missing/unreadable/stale/empty files are skipped, never fatal.
 fn select_state(
     paths: &[String],
     stale: Duration,
@@ -403,8 +397,6 @@ fn state_paths() -> Vec<String> {
     }
     let mut out = Vec::new();
     let uid = unsafe { libc::getuid() };
-    // Per-session directories first (preferred): at most one entry each,
-    // then every live `state-<pid>` session file inside.
     let mut dirs: Vec<String> = Vec::new();
     if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
         if !rt.is_empty() {
@@ -419,7 +411,6 @@ fn state_paths() -> Vec<String> {
         out.push(format!("{}/state", dir));
         append_session_files(dir, &mut out);
     }
-    // Legacy singletons.
     if let Ok(tmp) = std::env::var("TMPDIR") {
         if !tmp.is_empty() {
             out.push(format!("{}/sharkvis-{}.state", tmp.trim_end_matches('/'), uid));
@@ -430,8 +421,6 @@ fn state_paths() -> Vec<String> {
     out
 }
 
-/// Every live `state-<pid>` session file in `dir`, name-sorted for a
-/// deterministic order (`*.tmp` scratch files never qualify).
 fn append_session_files(dir: &str, out: &mut Vec<String>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
@@ -1380,16 +1369,10 @@ impl Default for Sync {
     }
 }
 
-/// True when a display color string opts into live sharkvis colors.
 pub fn is_live_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
-/// Live RGB for one text row (keys / separator / title).
-/// Vertical gradient top→bottom, matching the logo tint:
-/// first row = gradient_high, last row = gradient_low.
-/// - flat single color wins when present (same for every row)
-/// - inactive frame → None
 pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> {
     if !frame.active {
         return None;
@@ -1408,7 +1391,6 @@ pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> 
     None
 }
 
-/// Whether the frame yields any display color (for redraw decisions).
 pub fn has_display_color(frame: &LiveFrame) -> bool {
     frame.active && (frame.flat.is_some() || frame.grad.is_some())
 }
@@ -1417,9 +1399,6 @@ pub fn rgb_ansi_start(rgb: Rgb) -> String {
     format!("\x1b[38;2;{};{};{}m", rgb.0, rgb.1, rgb.2)
 }
 
-/// Swap placeholder SGRs baked by `print::color` for the live color.
-/// When `live` is None (sharkvis inactive) placeholders are stripped
-/// so text falls back to plain (no color).
 pub fn swap_display_placeholders(s: &str, live: Option<Rgb>) -> String {
     let ph = crate::print::color::SHARKVIS_PLACEHOLDER_START;
     if !s.contains(ph) {
@@ -1438,8 +1417,6 @@ pub fn swap_display_lines(lines: &[String], live: Option<Rgb>) -> Vec<String> {
         .collect()
 }
 
-/// Row-aware swap: gradient top→bottom across the whole text block.
-/// Falls back to plain when the frame yields no color.
 pub fn swap_display_placeholders_row(
     s: &str,
     frame: &LiveFrame,
@@ -1460,8 +1437,6 @@ pub fn swap_display_lines_frame(lines: &[String], frame: &LiveFrame) -> Vec<Stri
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    // Process env is global: tests across modules that stub
-    // JEFETCH_SHARKVIS_* vars serialize on this one lock.
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -1552,12 +1527,10 @@ mod tests {
         let (st, sig) = select_state(&paths, stale, None).expect("a session reads");
         assert_eq!(st.color, Some((0, 0, 255)), "newest session only");
         assert!(sig.0.ends_with("state-200"));
-        // A stale newest session falls back to the older live one.
         let past = std::time::SystemTime::now() - Duration::from_secs(30);
         filetime_set(std::path::Path::new(&new), past).unwrap();
         let (st, _) = select_state(&paths, stale, None).expect("older live session");
         assert_eq!(st.color, Some((255, 0, 0)));
-        // Nothing live at all.
         filetime_set(std::path::Path::new(&old), past).unwrap();
         assert!(select_state(&paths, stale, None).is_none());
         let _ = std::fs::remove_file(&old);
@@ -1570,15 +1543,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("jefetch-sess-leg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let stale = Duration::from_millis(1000);
-        // Legacy singleton listed first still loses to any session file.
         let leg = write_state(&dir, "state", "color=#00ff00 energy=1");
         let sess = write_state(&dir, "state-300", "color=#0000ff energy=1 started=5");
         let (st, _) = select_state(&[leg.clone(), sess.clone()], stale, None).expect("reads");
         assert_eq!(st.color, Some((0, 0, 255)));
-        // ...and carries the day alone when no session file exists.
         let (st, _) = select_state(&[leg.clone()], stale, None).expect("legacy works");
         assert_eq!(st.color, Some((0, 255, 0)));
-        // Missing/empty candidates never abort the scan.
         let (st, _) = select_state(
             &[dir.join("nope").to_string_lossy().into_owned(), leg.clone()],
             stale,

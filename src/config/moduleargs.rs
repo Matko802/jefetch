@@ -26,7 +26,6 @@ impl ModuleArgs {
         }
         if let Some(v) = obj.get("keyColor") {
             if let Some(s) = v.as_str() {
-                // Text no longer follows sharkvis (see display.rs): unset.
                 if !s.trim().eq_ignore_ascii_case("sharkvis") {
                     a.key_color = Some(s.to_string());
                 }
