@@ -232,6 +232,7 @@ impl App {
         }
 
         let lines = self.render_modules(&entries);
+        let lines = Self::apply_display_sharkvis_static(lines);
 
         if image_logo_requested(&self.config.logo) {
             if let (Some(logo), Some(path)) =
