@@ -1461,22 +1461,27 @@ static KeyAction poll_key_action(int tty_fd, int is_tty, KeyQueue *pending) {
 }
 
 static void apply_display_sharkvis_static(App *app, char **lines, size_t n) {
-    /* Terminal flow needs no daemon and starts at phase 0 (deterministic).
-     * Otherwise poll the daemon once; fall back to stripping placeholders. */
+    /* Terminal flow (queried palette, phase 0 = deterministic) wins when
+     * configured and the terminal answers. Otherwise poll the daemon once;
+     * fall back to stripping placeholders. */
     LiveFrame fr;
     memset(&fr, 0, sizeof fr);
     int have = 0;
     if (profile_term_colors(&app->config.logo)) {
-        Sync *s = sync_new();
-        Rgb tlo, thi;
-        sv_term_flow(s, 0.0f, &tlo, &thi);
-        sync_free(s);
-        fr.active = 1;
-        fr.has_grad = 1;
-        fr.glo = tlo;
-        fr.ghi = thi;
-        have = 1;
-    } else {
+        Rgb tpal[16];
+        if (sv_term_palette(tpal)) {
+            Sync *s = sync_new();
+            Rgb tlo, thi;
+            sv_term_flow(s, 0.0f, tpal, &tlo, &thi);
+            sync_free(s);
+            fr.active = 1;
+            fr.has_grad = 1;
+            fr.glo = tlo;
+            fr.ghi = thi;
+            have = 1;
+        }
+    }
+    if (!have) {
         Sync *s = sync_new();
         LiveFrame f = sync_poll(s, SVM_AUTO, 0.0f, 1);
         if (sv_has_display_color(&f)) {
@@ -1992,11 +1997,14 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 needs_draw = 1;
         }
         /* Terminal flow overrides daemon colors (logo tint + live text share
-         * this frame). Needs no daemon; phase flows smoothly with music. */
-        int term_flow = active_cfg.live_term_colors || base_cfg.live_term_colors;
+         * this frame). Degrades gracefully when the terminal cannot be
+         * queried: daemon/strip paths below stay untouched. */
+        Rgb tpal[16];
+        int term_flow = (active_cfg.live_term_colors || base_cfg.live_term_colors) &&
+                        sv_term_palette(tpal);
         if (term_flow) {
             Rgb tlo, thi;
-            sv_term_flow(shark_sync, shark_live.energy, &tlo, &thi);
+            sv_term_flow(shark_sync, shark_live.energy, tpal, &tlo, &thi);
             shark_live.active = 1;
             shark_live.has_grad = 1;
             shark_live.has_flat = 0;

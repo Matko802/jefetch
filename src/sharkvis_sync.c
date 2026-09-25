@@ -1,5 +1,7 @@
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -8,6 +10,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1523,17 +1526,207 @@ void sv_rgb_ansi_start(Rgb c, char *out, size_t n) {
     snprintf(out, n, "\x1b[38;2;%u;%u;%um", c.r, c.g, c.b);
 }
 
-/* Standard 16 terminal colors (VGA palette) as RGB. */
-static const Rgb TERM_PALETTE[16] = {
-    {0, 0, 0},       {170, 0, 0},     {0, 170, 0},     {170, 85, 0},
-    {0, 0, 170},     {170, 0, 170},   {0, 170, 170},   {170, 170, 170},
-    {85, 85, 85},    {255, 85, 85},   {85, 255, 85},   {255, 255, 85},
-    {85, 85, 255},   {255, 85, 255},  {85, 255, 255},  {255, 255, 255},
-};
+/* Real terminal palette via OSC 4 query. No hardcoded colors: the 16 colors
+ * come from the terminal itself (\e]4;i;? -> rgb:R/G/B). Queried once per
+ * process; 0 when the terminal cannot be asked (no tty, dumb, silent). */
+static int term_env_ok(void) {
+    const char *t = getenv("TERM");
+    if (!t || !*t)
+        return 0;
+    char l[64];
+    size_t i = 0;
+    while (t[i] && i + 1 < sizeof l) {
+        char c = t[i];
+        l[i++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    }
+    l[i] = 0;
+    return strcmp(l, "dumb") != 0;
+}
+
+static int hexdig(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+/* One X11 color component (1-4 hex digits) scaled to 8 bit. */
+static int parse_comp(const char *s, size_t len, unsigned *out) {
+    if (len < 1 || len > 4)
+        return 0;
+    unsigned v = 0, max = 0;
+    for (size_t i = 0; i < len; i++) {
+        int d = hexdig(s[i]);
+        if (d < 0)
+            return 0;
+        v = v * 16 + (unsigned)d;
+    }
+    max = len == 1 ? 15 : len == 2 ? 255 : len == 3 ? 4095 : 65535;
+    *out = (v * 255 + max / 2) / max;
+    return 1;
+}
+
+static int parse_osc4_spec(const char *s, Rgb *out) {
+    if (!strncmp(s, "rgb:", 4)) {
+        const char *p = s + 4;
+        unsigned c[3];
+        for (int k = 0; k < 3; k++) {
+            const char *e = p;
+            while (*e && *e != '/')
+                e++;
+            if (!parse_comp(p, (size_t)(e - p), &c[k]))
+                return 0;
+            p = *e ? e + 1 : e;
+        }
+        out->r = (uint8_t)c[0];
+        out->g = (uint8_t)c[1];
+        out->b = (uint8_t)c[2];
+        return 1;
+    }
+    if (s[0] == '#') {
+        size_t l = strlen(s + 1);
+        if (l != 3 && l != 6)
+            return 0;
+        unsigned c[3];
+        size_t w = l / 3;
+        for (int k = 0; k < 3; k++) {
+            if (!parse_comp(s + 1 + (size_t)k * w, w, &c[k]))
+                return 0;
+        }
+        out->r = (uint8_t)c[0];
+        out->g = (uint8_t)c[1];
+        out->b = (uint8_t)c[2];
+        return 1;
+    }
+    return 0;
+}
+
+/* Scan accumulated reply bytes for OSC 4 responses. */
+static int osc4_parse(const uint8_t *buf, size_t len, Rgb pal[16], int have[16]) {
+    int found = 0;
+    for (size_t i = 0; i + 5 < len; i++) {
+        if (buf[i] != 0x1b || buf[i + 1] != ']')
+            continue;
+        size_t j = i + 2;
+        if (j + 1 >= len || buf[j] != '4' || buf[j + 1] != ';')
+            continue;
+        j += 2;
+        unsigned idx = 0;
+        size_t digits = 0;
+        while (j < len && buf[j] >= '0' && buf[j] <= '9') {
+            idx = idx * 10 + (unsigned)(buf[j] - '0');
+            digits++;
+            j++;
+        }
+        if (!digits || idx > 15)
+            continue;
+        if (j >= len || (buf[j] != ';' && buf[j] != ':'))
+            continue;
+        j++;
+        size_t s = j;
+        while (j < len && buf[j] != '\a' &&
+               !(buf[j] == 0x1b && j + 1 < len && buf[j + 1] == '\\'))
+            j++;
+        if (j >= len)
+            break; /* unterminated at buffer end; more data may complete it */
+        char spec[64];
+        size_t sl = j - s;
+        if (sl == 0 || sl >= sizeof spec)
+            continue;
+        memcpy(spec, buf + s, sl);
+        spec[sl] = 0;
+        Rgb c;
+        if (!have[idx] && parse_osc4_spec(spec, &c)) {
+            pal[idx] = c;
+            have[idx] = 1;
+            found++;
+        }
+    }
+    return found;
+}
+
+#define OSC4_MAX_READS 6
+
+static int osc4_query(Rgb pal[16]) {
+    if (!term_env_ok())
+        return 0;
+    int fd = open("/dev/tty", O_RDWR | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    struct termios orig, raw;
+    if (tcgetattr(fd, &orig) != 0) {
+        close(fd);
+        return 0;
+    }
+    raw = orig;
+    raw.c_lflag &= (unsigned)(~(ICANON | ECHO));
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
+    if (tcsetattr(fd, TCSANOW, &raw) != 0) {
+        close(fd);
+        return 0;
+    }
+    char req[16 * 16];
+    size_t rl = 0;
+    for (int i = 0; i < 16; i++)
+        rl += (size_t)snprintf(req + rl, sizeof req - rl, "\x1b]4;%d;?\x1b\\", i);
+    size_t wr = 0;
+    while (wr < rl) {
+        ssize_t k = write(fd, req + wr, rl - wr);
+        if (k <= 0)
+            break;
+        wr += (size_t)k;
+    }
+    uint8_t buf[4096];
+    size_t bl = 0;
+    int have[16] = {0};
+    int found = 0;
+    int empty = 0;
+    for (int i = 0; i < OSC4_MAX_READS && found < 16 && bl < sizeof buf - 64; i++) {
+        ssize_t k = read(fd, buf + bl, sizeof buf - bl - 1);
+        if (k < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        if (k == 0) {
+            /* Timeout with no bytes yet; replies may still be on the way. */
+            if (++empty >= 3)
+                break;
+            continue;
+        }
+        empty = 0;
+        bl += (size_t)k;
+        osc4_parse(buf, bl, pal, have);
+        found = 0;
+        for (int q = 0; q < 16; q++)
+            found += have[q];
+    }
+    /* Swallow stragglers so late replies never spill into shell input. */
+    read(fd, buf, 1);
+    tcsetattr(fd, TCSANOW, &orig);
+    close(fd);
+    return found == 16;
+}
+
+static Rgb term_cache[16];
+static int term_cache_state = 0; /* 0 unknown, 1 ok, -1 failed */
+
+int sv_term_palette(Rgb out[16]) {
+    if (!term_cache_state)
+        term_cache_state = osc4_query(term_cache) ? 1 : -1;
+    if (term_cache_state < 0)
+        return 0;
+    memcpy(out, term_cache, sizeof term_cache);
+    return 1;
+}
 
 /* Smoothly interpolated palette position: full RGB lerp between the two
  * adjacent palette entries, so the flow never bands. */
-static Rgb term_at(double pos) {
+static Rgb term_at(const Rgb pal[16], double pos) {
     double f = floor(pos);
     double frac = pos - f;
     long i = (long)f % 16;
@@ -1545,16 +1738,16 @@ static Rgb term_at(double pos) {
     if (frac > 1.0)
         frac = 1.0;
     Rgb o;
-    o.r = (uint8_t)(TERM_PALETTE[i].r + (TERM_PALETTE[j].r - TERM_PALETTE[i].r) * frac + 0.5);
-    o.g = (uint8_t)(TERM_PALETTE[i].g + (TERM_PALETTE[j].g - TERM_PALETTE[i].g) * frac + 0.5);
-    o.b = (uint8_t)(TERM_PALETTE[i].b + (TERM_PALETTE[j].b - TERM_PALETTE[i].b) * frac + 0.5);
+    o.r = (uint8_t)(pal[i].r + (pal[j].r - pal[i].r) * frac + 0.5);
+    o.g = (uint8_t)(pal[i].g + (pal[j].g - pal[i].g) * frac + 0.5);
+    o.b = (uint8_t)(pal[i].b + (pal[j].b - pal[i].b) * frac + 0.5);
     return o;
 }
 
 #define TERM_FLOW_SPAN 4.0
 #define TERM_FLOW_PERIOD_MS 6400.0
 
-void sv_term_flow(Sync *s, float energy, Rgb *lo, Rgb *hi) {
+void sv_term_flow(Sync *s, float energy, const Rgb pal[16], Rgb *lo, Rgb *hi) {
     uint64_t now = jf_now_ms();
     if (!s->term_init) {
         s->term_phase = 0.0;
@@ -1573,8 +1766,8 @@ void sv_term_flow(Sync *s, float energy, Rgb *lo, Rgb *hi) {
             s->term_phase = fmod(s->term_phase, 16.0);
         s->term_at = now;
     }
-    *lo = term_at(s->term_phase);
-    *hi = term_at(s->term_phase + TERM_FLOW_SPAN);
+    *lo = term_at(pal, s->term_phase);
+    *hi = term_at(pal, s->term_phase + TERM_FLOW_SPAN);
 }
 
 void sv_swap_placeholders(const char *s, int has_live, Rgb live, char *out, size_t n) {

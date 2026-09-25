@@ -185,7 +185,7 @@ Without it the logo stays where the music left it.
 | `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
-| `color=terminal` | Glide the logo smoothly through the 16 terminal colors (needs no daemon, speeds up with the music) |
+| `color=terminal` | Glide the logo through your terminal's real 16 colors (asked via OSC 4, needs an interactive terminal; falls back to daemon colors, then plain) |
 | `textcolor=sharkvis` | Text follows the live gradient too, overriding normal colors (shown when idle) |
 | `textcolor=terminal` | Text follows the terminal-color flow too |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |

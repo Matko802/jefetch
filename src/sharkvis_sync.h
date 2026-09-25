@@ -86,9 +86,13 @@ int sv_has_display_color(const LiveFrame *f);
 void sv_rgb_ansi_start(Rgb c, char *out, size_t n);
 void sv_swap_placeholders(const char *s, int has_live, Rgb live, char *out, size_t n);
 
-/* Smooth flow through the 16 terminal colors. Advances an internal phase
- * (music-reactive via energy) and returns the current gradient endpoints.
- * Needs no daemon; a fresh Sync starts at phase 0 (deterministic). */
-void sv_term_flow(struct Sync *s, float energy, Rgb *lo, Rgb *hi);
+/* Real terminal palette via OSC 4 query (cached, once per process).
+ * Returns 1 with the 16 colors, 0 when the terminal cannot be asked. */
+int sv_term_palette(Rgb out[16]);
+
+/* Smooth flow through the given 16 terminal colors. Advances an internal
+ * phase (music-reactive via energy) and returns the current gradient
+ * endpoints. A fresh Sync starts at phase 0 (deterministic). */
+void sv_term_flow(struct Sync *s, float energy, const Rgb pal[16], Rgb *lo, Rgb *hi);
 
 #endif
