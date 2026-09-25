@@ -830,6 +830,24 @@ static int profile_text_live(const LogoConfig *lc) {
     return r;
 }
 
+static int profile_term_colors(const LogoConfig *lc) {
+    AnimConfig base;
+    anim_config_default(&base);
+    if (lc->animation)
+        anim_config_from_str(&base, lc->animation);
+    int r = base.live_term_colors;
+    anim_config_free(&base);
+    if (r)
+        return 1;
+    AnimConfig act;
+    anim_config_default(&act);
+    if (lc->sharkvis)
+        anim_config_from_str(&act, lc->sharkvis);
+    r = act.live_term_colors;
+    anim_config_free(&act);
+    return r;
+}
+
 static int display_wants_sharkvis(const JfConfig *cfg) {
     (void)cfg;
     return profile_text_live(&cfg->logo);
@@ -1442,13 +1460,47 @@ static KeyAction poll_key_action(int tty_fd, int is_tty, KeyQueue *pending) {
     return app_classify_key((unsigned char)b);
 }
 
-static void apply_display_sharkvis_static(char **lines, size_t n) {
+static void apply_display_sharkvis_static(App *app, char **lines, size_t n) {
+    /* Terminal flow needs no daemon and starts at phase 0 (deterministic).
+     * Otherwise poll the daemon once; fall back to stripping placeholders. */
     LiveFrame fr;
     memset(&fr, 0, sizeof fr);
+    int have = 0;
+    if (profile_term_colors(&app->config.logo)) {
+        Sync *s = sync_new();
+        Rgb tlo, thi;
+        sv_term_flow(s, 0.0f, &tlo, &thi);
+        sync_free(s);
+        fr.active = 1;
+        fr.has_grad = 1;
+        fr.glo = tlo;
+        fr.ghi = thi;
+        have = 1;
+    } else {
+        Sync *s = sync_new();
+        LiveFrame f = sync_poll(s, SVM_AUTO, 0.0f, 1);
+        if (sv_has_display_color(&f)) {
+            fr.active = 1;
+            fr.has_grad = f.has_grad;
+            fr.glo = f.glo;
+            fr.ghi = f.ghi;
+            fr.has_flat = f.has_flat;
+            fr.flat = f.flat;
+            have = 1;
+        }
+        live_frame_free_contents(&f);
+        sync_free(s);
+    }
     for (size_t i = 0; i < n; i++) {
         Rgb live = {0, 0, 0};
+        int hl = 0;
+        if (have) {
+            hl = sv_grad_for_row(&fr, i, n > 0 ? n : 1, &live);
+            if (!hl)
+                have = 0;
+        }
         char *tmp = malloc(strlen(lines[i]) + 32);
-        sv_swap_placeholders(lines[i], 0, live, tmp, strlen(lines[i]) + 32);
+        sv_swap_placeholders(lines[i], hl, live, tmp, strlen(lines[i]) + 32);
         free(lines[i]);
         lines[i] = tmp;
     }
@@ -1457,7 +1509,7 @@ static void apply_display_sharkvis_static(char **lines, size_t n) {
 static int run_static(App *app, BuildEntry *entries, size_t n) {
     size_t nl = 0;
     char **lines = render_modules_with(app, entries, n, &nl);
-    apply_display_sharkvis_static(lines, nl);
+    apply_display_sharkvis_static(app, lines, nl);
     int use_image = 0;
     if (app->logo && app->config.logo.source) {
         NativeSpec spec;
@@ -1916,7 +1968,9 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
         if (animated || display_live) {
             now = jf_now_ms();
             if (now - shark_polled >= 30) {
-                int want = base_cfg.live_colors || active_cfg.live_colors || display_live;
+                int want = base_cfg.live_colors || active_cfg.live_colors ||
+                           base_cfg.live_term_colors || active_cfg.live_term_colors ||
+                           display_live;
                 SharkvisMode pm = (display_live && mode == SVM_OFF) ? SVM_AUTO : mode;
                 live_frame_free_contents(&shark_live);
                 shark_live = sync_poll(shark_sync, pm, active_cfg.beat_depth, want);
@@ -1935,6 +1989,20 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 }
             }
             if (display_live && !animated && sv_has_display_color(&shark_live))
+                needs_draw = 1;
+        }
+        /* Terminal flow overrides daemon colors (logo tint + live text share
+         * this frame). Needs no daemon; phase flows smoothly with music. */
+        int term_flow = active_cfg.live_term_colors || base_cfg.live_term_colors;
+        if (term_flow) {
+            Rgb tlo, thi;
+            sv_term_flow(shark_sync, shark_live.energy, &tlo, &thi);
+            shark_live.active = 1;
+            shark_live.has_grad = 1;
+            shark_live.has_flat = 0;
+            shark_live.glo = tlo;
+            shark_live.ghi = thi;
+            if (display_live && !animated)
                 needs_draw = 1;
         }
         if (animated) {
@@ -1995,6 +2063,15 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 fx.audio[2] = (float)roll_phase;
                 float boom = ccfg->has_boom ? ccfg->boom : 0.0f;
                 fx.scale = 1.0f + ccfg->grow * shark_live.beat + boom * shark_live.energy;
+            }
+            if (term_flow && !fx.has_grad && shark_live.has_grad) {
+                fx.has_grad = 1;
+                fx.grad_lo[0] = shark_live.glo.r;
+                fx.grad_lo[1] = shark_live.glo.g;
+                fx.grad_lo[2] = shark_live.glo.b;
+                fx.grad_hi[0] = shark_live.ghi.r;
+                fx.grad_hi[1] = shark_live.ghi.g;
+                fx.grad_hi[2] = shark_live.ghi.b;
             }
             ResolvedLogo *anim_logo = NULL;
             if (cloud)

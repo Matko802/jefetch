@@ -1245,6 +1245,9 @@ struct Sync {
     uint64_t mem_mtime;
     size_t mem_size;
     LiveState mem_state;
+    double term_phase;
+    uint64_t term_at;
+    int term_init;
 };
 
 Sync *sync_new(void) {
@@ -1518,6 +1521,60 @@ int sv_has_display_color(const LiveFrame *f) {
 
 void sv_rgb_ansi_start(Rgb c, char *out, size_t n) {
     snprintf(out, n, "\x1b[38;2;%u;%u;%um", c.r, c.g, c.b);
+}
+
+/* Standard 16 terminal colors (VGA palette) as RGB. */
+static const Rgb TERM_PALETTE[16] = {
+    {0, 0, 0},       {170, 0, 0},     {0, 170, 0},     {170, 85, 0},
+    {0, 0, 170},     {170, 0, 170},   {0, 170, 170},   {170, 170, 170},
+    {85, 85, 85},    {255, 85, 85},   {85, 255, 85},   {255, 255, 85},
+    {85, 85, 255},   {255, 85, 255},  {85, 255, 255},  {255, 255, 255},
+};
+
+/* Smoothly interpolated palette position: full RGB lerp between the two
+ * adjacent palette entries, so the flow never bands. */
+static Rgb term_at(double pos) {
+    double f = floor(pos);
+    double frac = pos - f;
+    long i = (long)f % 16;
+    if (i < 0)
+        i += 16;
+    long j = (i + 1) % 16;
+    if (frac < 0.0)
+        frac = 0.0;
+    if (frac > 1.0)
+        frac = 1.0;
+    Rgb o;
+    o.r = (uint8_t)(TERM_PALETTE[i].r + (TERM_PALETTE[j].r - TERM_PALETTE[i].r) * frac + 0.5);
+    o.g = (uint8_t)(TERM_PALETTE[i].g + (TERM_PALETTE[j].g - TERM_PALETTE[i].g) * frac + 0.5);
+    o.b = (uint8_t)(TERM_PALETTE[i].b + (TERM_PALETTE[j].b - TERM_PALETTE[i].b) * frac + 0.5);
+    return o;
+}
+
+#define TERM_FLOW_SPAN 4.0
+#define TERM_FLOW_PERIOD_MS 6400.0
+
+void sv_term_flow(Sync *s, float energy, Rgb *lo, Rgb *hi) {
+    uint64_t now = jf_now_ms();
+    if (!s->term_init) {
+        s->term_phase = 0.0;
+        s->term_at = now;
+        s->term_init = 1;
+    } else {
+        double dt = (double)(now - s->term_at);
+        if (dt < 0.0)
+            dt = 0.0;
+        if (dt > 1000.0)
+            dt = 1000.0;
+        double rate = 16.0 / TERM_FLOW_PERIOD_MS;
+        double boost = 1.0 + 2.0 * (energy < 0.0f ? 0.0 : energy > 1.0f ? 1.0 : energy);
+        s->term_phase += dt * rate * boost;
+        if (s->term_phase >= 4096.0)
+            s->term_phase = fmod(s->term_phase, 16.0);
+        s->term_at = now;
+    }
+    *lo = term_at(s->term_phase);
+    *hi = term_at(s->term_phase + TERM_FLOW_SPAN);
 }
 
 void sv_swap_placeholders(const char *s, int has_live, Rgb live, char *out, size_t n) {

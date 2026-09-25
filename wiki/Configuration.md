@@ -185,7 +185,9 @@ Without it the logo stays where the music left it.
 | `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
+| `color=terminal` | Glide the logo smoothly through the 16 terminal colors (needs no daemon, speeds up with the music) |
 | `textcolor=sharkvis` | Text follows the live gradient too, overriding normal colors (shown when idle) |
+| `textcolor=terminal` | Text follows the terminal-color flow too |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |

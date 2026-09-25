@@ -571,6 +571,8 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
         l[q] = 0;
         if (!strcmp(l, "sharkvis"))
             c->live_colors = 1;
+        else if (!strcmp(l, "terminal"))
+            c->live_term_colors = 1;
     }
     if (extract_word(low, raw, "textcolor", 1, v, sizeof v)) {
         char *t = v;
@@ -586,7 +588,7 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
         char *e = l + strlen(l);
         while (e > l && (e[-1] == ' ' || e[-1] == '\t'))
             *--e = 0;
-        if (!strcmp(l, "sharkvis"))
+        if (!strcmp(l, "sharkvis") || !strcmp(l, "terminal"))
             c->text_live_colors = 1;
     }
     const char *char_keys[] = {"characters", "chars", "glyphs", "glyph", "shading",

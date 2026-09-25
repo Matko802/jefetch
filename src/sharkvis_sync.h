@@ -86,4 +86,9 @@ int sv_has_display_color(const LiveFrame *f);
 void sv_rgb_ansi_start(Rgb c, char *out, size_t n);
 void sv_swap_placeholders(const char *s, int has_live, Rgb live, char *out, size_t n);
 
+/* Smooth flow through the 16 terminal colors. Advances an internal phase
+ * (music-reactive via energy) and returns the current gradient endpoints.
+ * Needs no daemon; a fresh Sync starts at phase 0 (deterministic). */
+void sv_term_flow(struct Sync *s, float energy, Rgb *lo, Rgb *hi);
+
 #endif

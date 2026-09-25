@@ -29,6 +29,7 @@ typedef struct {
     SharkvisMode sharkvis;
     int sharkvis_set;
     int live_colors;
+    int live_term_colors;
     int text_live_colors;
     float beat_depth;
     float grow;
