@@ -830,42 +830,6 @@ static int profile_text_live(const LogoConfig *lc) {
     return r;
 }
 
-static int profile_term_colors(const LogoConfig *lc) {
-    AnimConfig base;
-    anim_config_default(&base);
-    if (lc->animation)
-        anim_config_from_str(&base, lc->animation);
-    int r = base.live_term_colors;
-    anim_config_free(&base);
-    if (r)
-        return 1;
-    AnimConfig act;
-    anim_config_default(&act);
-    if (lc->sharkvis)
-        anim_config_from_str(&act, lc->sharkvis);
-    r = act.live_term_colors;
-    anim_config_free(&act);
-    return r;
-}
-
-static int profile_live_colors(const LogoConfig *lc) {
-    AnimConfig base;
-    anim_config_default(&base);
-    if (lc->animation)
-        anim_config_from_str(&base, lc->animation);
-    int r = base.live_colors;
-    anim_config_free(&base);
-    if (r)
-        return 1;
-    AnimConfig act;
-    anim_config_default(&act);
-    if (lc->sharkvis)
-        anim_config_from_str(&act, lc->sharkvis);
-    r = act.live_colors;
-    anim_config_free(&act);
-    return r;
-}
-
 static int display_wants_sharkvis(const JfConfig *cfg) {
     (void)cfg;
     return profile_text_live(&cfg->logo);
@@ -1478,90 +1442,22 @@ static KeyAction poll_key_action(int tty_fd, int is_tty, KeyQueue *pending) {
     return app_classify_key((unsigned char)b);
 }
 
-/* One-shot gradient source for --static: terminal flow (phase 0,
- * deterministic) wins when configured and the terminal answers, else one
- * daemon poll, else nothing. Shared by text and logo tint. */
-static int static_live_frame(App *app, LiveFrame *fr) {
-    memset(fr, 0, sizeof *fr);
-    if (profile_term_colors(&app->config.logo)) {
-        Rgb tpal[16];
-        if (sv_term_palette(tpal)) {
-            Sync *s = sync_new();
-            Rgb tlo, thi;
-            sv_term_flow(s, 0.0f, tpal, &tlo, &thi);
-            sync_free(s);
-            fr->active = 1;
-            fr->has_grad = 1;
-            fr->glo = tlo;
-            fr->ghi = thi;
-            return 1;
-        }
-    }
-    Sync *s = sync_new();
-    LiveFrame f = sync_poll(s, SVM_AUTO, 0.0f, 1);
-    int have = 0;
-    if (sv_has_display_color(&f)) {
-        fr->active = 1;
-        fr->has_grad = f.has_grad;
-        fr->glo = f.glo;
-        fr->ghi = f.ghi;
-        fr->has_flat = f.has_flat;
-        fr->flat = f.flat;
-        have = 1;
-    }
-    live_frame_free_contents(&f);
-    sync_free(s);
-    return have;
-}
-
-static void apply_display_sharkvis_static(const LiveFrame *fr, int have, char **lines,
-                                            size_t n) {
+static void apply_display_sharkvis_static(char **lines, size_t n) {
+    LiveFrame fr;
+    memset(&fr, 0, sizeof fr);
     for (size_t i = 0; i < n; i++) {
         Rgb live = {0, 0, 0};
-        int hl = 0;
-        if (have) {
-            hl = sv_grad_for_row(fr, i, n > 0 ? n : 1, &live);
-            if (!hl)
-                have = 0;
-        }
         char *tmp = malloc(strlen(lines[i]) + 32);
-        sv_swap_placeholders(lines[i], hl, live, tmp, strlen(lines[i]) + 32);
+        sv_swap_placeholders(lines[i], 0, live, tmp, strlen(lines[i]) + 32);
         free(lines[i]);
         lines[i] = tmp;
     }
 }
 
-/* Background SGR on an expanded logo line (4x/10x/48;)? Tinted rows would
- * destroy block logos, so those keep built-in colors. */
-static int logo_line_has_bg(const char *s) {
-    for (const char *p = s; (p = strstr(p, "\x1b[")) != NULL; p += 2) {
-        const char *q = p + 2;
-        if (*q == '4' && q[1] >= '0' && q[1] <= '9')
-            return 1;
-        if (*q == '1' && q[1] == '0' && q[2] >= '0' && q[2] <= '9')
-            return 1;
-    }
-    return 0;
-}
-
-/* Row tint escape for a static logo, mirroring the animated tint_rows
- * formula (top row = hi). */
-static void static_logo_tint(const LiveFrame *fr, size_t row, size_t h, char *out,
-                             size_t n) {
-    Rgb g = {0, 0, 0};
-    if (!sv_grad_for_row(fr, row, h > 0 ? h : 1, &g)) {
-        out[0] = 0;
-        return;
-    }
-    snprintf(out, n, "\x1b[38;2;%u;%u;%um", g.r, g.g, g.b);
-}
-
 static int run_static(App *app, BuildEntry *entries, size_t n) {
     size_t nl = 0;
     char **lines = render_modules_with(app, entries, n, &nl);
-    LiveFrame sfr;
-    int shave = static_live_frame(app, &sfr);
-    apply_display_sharkvis_static(&sfr, shave, lines, nl);
+    apply_display_sharkvis_static(lines, nl);
     int use_image = 0;
     if (app->logo && app->config.logo.source) {
         NativeSpec spec;
@@ -1586,15 +1482,10 @@ static int run_static(App *app, BuildEntry *entries, size_t n) {
         }
     }
     size_t logo_pad = app->logo ? app->logo->width : 0;
-    /* Logo follows only on explicit opt-in (mirrors the animated fx gate);
-     * text follows whenever its placeholders exist. */
-    int stint = shave && (profile_live_colors(&app->config.logo) ||
-                           profile_term_colors(&app->config.logo));
     JfBuf out;
     memset(&out, 0, sizeof out);
     if (app->logo) {
         size_t m = nl > app->logo->nlines ? nl : app->logo->nlines;
-        size_t lh = app->logo->nlines;
         for (size_t row = 0; row < m; row++) {
             const char *logo_line = row < app->logo->nlines ? app->logo->lines[row] : NULL;
             const char *text_line = row < nl ? lines[row] : "";
@@ -1602,17 +1493,6 @@ static int run_static(App *app, BuildEntry *entries, size_t n) {
             if (logo_line) {
                 const char *cn = row < app->logo->ncolors ? app->logo->colors[row] : "";
                 colorize_logo_str(logo_line, cn, lcol, sizeof lcol);
-                if (stint && row < lh && !logo_line_has_bg(lcol)) {
-                    char tint[32];
-                    static_logo_tint(&sfr, row, lh, tint, sizeof tint);
-                    if (tint[0]) {
-                        char stripped[8192];
-                        jf_strip_sgr(lcol, stripped, sizeof stripped);
-                        if (strlen(stripped) + 32 < sizeof lcol)
-                            snprintf(lcol, sizeof lcol, "%s%s%s", tint, stripped,
-                                     JF_RESET);
-                    }
-                }
             } else {
                 memset(lcol, ' ', logo_pad);
                 lcol[logo_pad] = 0;
@@ -2075,38 +1955,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             shark_live.ghi = thi;
             if (display_live && !animated)
                 needs_draw = 1;
-        } else if (shark_live.active &&
-                   (active_cfg.live_colors || base_cfg.live_colors)) {
-            /* Daemon endpoints are static config; breathe with the music so
-             * the display updates live. Silence holds a steady dim glow. */
-            float e = shark_live.energy;
-            if (e < 0.0f)
-                e = 0.0f;
-            if (e > 1.0f)
-                e = 1.0f;
-            float blo = 0.35f + 0.65f * e;
-            float bhi = 0.55f + 0.45f * e;
-            if (shark_live.has_grad) {
-                unsigned r = (unsigned)(shark_live.glo.r * blo + 0.5f);
-                unsigned g = (unsigned)(shark_live.glo.g * blo + 0.5f);
-                unsigned b = (unsigned)(shark_live.glo.b * blo + 0.5f);
-                shark_live.glo.r = (uint8_t)(r > 255 ? 255 : r);
-                shark_live.glo.g = (uint8_t)(g > 255 ? 255 : g);
-                shark_live.glo.b = (uint8_t)(b > 255 ? 255 : b);
-                r = (unsigned)(shark_live.ghi.r * bhi + 0.5f);
-                g = (unsigned)(shark_live.ghi.g * bhi + 0.5f);
-                b = (unsigned)(shark_live.ghi.b * bhi + 0.5f);
-                shark_live.ghi.r = (uint8_t)(r > 255 ? 255 : r);
-                shark_live.ghi.g = (uint8_t)(g > 255 ? 255 : g);
-                shark_live.ghi.b = (uint8_t)(b > 255 ? 255 : b);
-            } else if (shark_live.has_flat) {
-                unsigned r = (unsigned)(shark_live.flat.r * bhi + 0.5f);
-                unsigned g = (unsigned)(shark_live.flat.g * bhi + 0.5f);
-                unsigned b = (unsigned)(shark_live.flat.b * bhi + 0.5f);
-                shark_live.flat.r = (uint8_t)(r > 255 ? 255 : r);
-                shark_live.flat.g = (uint8_t)(g > 255 ? 255 : g);
-                shark_live.flat.b = (uint8_t)(b > 255 ? 255 : b);
-            }
         }
         if (animated) {
             int logo_active = mode != SVM_OFF && shark_live.active;
