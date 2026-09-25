@@ -7,8 +7,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_definitions(_POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
 add_compile_options(-Wall -Wextra -Wno-trigraphs)
 
-# Bake the same target/libc identity `build.rs` bakes into the Rust binary
-# (`JEFETCH_TARGET` / `JEFETCH_LIB`), so `--version` matches.
+# Bake the compiler target/libc identity (`JEFETCH_TARGET` / `JEFETCH_LIB`)
+# into the binary for `--version`.
 execute_process(
     COMMAND ${CMAKE_C_COMPILER} -dumpmachine
     OUTPUT_VARIABLE JEFETCH_TARGET_TRIPLE
@@ -19,11 +19,16 @@ if(NOT JEFETCH_TARGET_TRIPLE)
     set(JEFETCH_TARGET_TRIPLE "unknown")
 endif()
 execute_process(
-    COMMAND sh -c "echo | ${CMAKE_C_COMPILER} -dM -E - 2>/dev/null | grep -q __GLIBC__ && echo glibc || echo unknown"
-    OUTPUT_VARIABLE JEFETCH_LIB_DETECTED
+    COMMAND sh -c "ldd --version 2>/dev/null | head -n 1"
+    OUTPUT_VARIABLE JEFETCH_LDD_LINE
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
 )
+if(JEFETCH_LDD_LINE MATCHES "GNU libc")
+    set(JEFETCH_LIB_DETECTED "glibc")
+else()
+    set(JEFETCH_LIB_DETECTED "unknown")
+endif()
 if(JEFETCH_TARGET_TRIPLE MATCHES "musl")
     set(JEFETCH_LIB_DETECTED "musl")
 endif()
@@ -33,18 +38,6 @@ add_compile_definitions(
 )
 
 find_package(Threads REQUIRED)
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-
-set(LOGO_GEN_C ${CMAKE_BINARY_DIR}/logo_data.c)
-
-add_custom_command(
-    OUTPUT ${LOGO_GEN_C}
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/logo_data_to_c.py
-            ${CMAKE_SOURCE_DIR}/src/logo/data.rs ${LOGO_GEN_C}
-    DEPENDS ${CMAKE_SOURCE_DIR}/scripts/logo_data_to_c.py
-            ${CMAKE_SOURCE_DIR}/src/logo/data.rs
-    COMMENT "Generating logo table"
-)
 
 add_executable(jefetch
     src/main.c
@@ -94,10 +87,10 @@ add_executable(jefetch
     src/anim.c
     src/modules.c
     src/app.c
-    ${LOGO_GEN_C}
+    src/logo_data.c
 )
 
-target_include_directories(jefetch PRIVATE src ${CMAKE_BINARY_DIR})
+target_include_directories(jefetch PRIVATE src)
 target_link_libraries(jefetch PRIVATE m Threads::Threads)
 
 install(TARGETS jefetch DESTINATION bin)

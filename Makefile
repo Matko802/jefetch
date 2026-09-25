@@ -1,35 +1,45 @@
 VERSION ?= 0.1.0
 PREFIX ?= /usr/local
+CC ?= cc
+CFLAGS ?= -O2
+BUILDDIR ?= build
 
-musl_for_host = case "$$(uname -m)" in x86_64) echo x86_64-unknown-linux-musl;; aarch64|arm64) echo aarch64-unknown-linux-musl;; armv7*|armv6*) echo armv7-unknown-linux-musleabihf;; esac
+SRCS := $(wildcard src/*.c)
+OBJS := $(patsubst src/%.c,$(BUILDDIR)/%.o,$(SRCS))
 
-# Static musl when the toolchain knows the host musl target,
-# otherwise plain `cargo build --release` (Arch, Arch ARM, vanilla rust).
+TARGET_TRIPLE := $(shell $(CC) -dumpmachine 2>/dev/null || echo unknown)
+ifeq ($(findstring musl,$(TARGET_TRIPLE)),musl)
+  JEFETCH_LIB := musl
+else ifneq ($(findstring GNU libc,$(shell ldd --version 2>/dev/null)),)
+  JEFETCH_LIB := glibc
+else
+  JEFETCH_LIB := unknown
+endif
+
+DEFS := -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE \
+	'-DJEFETCH_TARGET="$(TARGET_TRIPLE)"' '-DJEFETCH_LIB="$(JEFETCH_LIB)"'
+STD := -std=c17
+WARN := -Wall -Wextra -Wno-trigraphs
+INCS := -Isrc
+LIBS := -lm -pthread
+
 # On NixOS, run inside `nix develop` or use `nix build`.
-all:
-	@MUSL_TARGET=$$($(musl_for_host)); \
-	if [ -n "$$MUSL_TARGET" ] && rustup target list --installed 2>/dev/null | grep -q "^$$MUSL_TARGET"; then \
-		cargo build --release --target $$MUSL_TARGET; \
-	else \
-		cargo build --release; \
-	fi
+all: $(BUILDDIR)/jefetch
+
+$(BUILDDIR)/jefetch: $(OBJS)
+	$(CC) $(OBJS) -o $@ $(LIBS)
+
+$(BUILDDIR)/%.o: src/%.c | $(BUILDDIR)
+	$(CC) $(STD) $(DEFS) $(WARN) $(INCS) $(CFLAGS) -c $< -o $@
+
+$(BUILDDIR):
+	mkdir -p $(BUILDDIR)
 
 install: all
-	@MUSL_TARGET=$$($(musl_for_host)); \
-	BIN=""; \
-	if [ -n "$$MUSL_TARGET" ] && [ -f "target/$$MUSL_TARGET/release/jefetch" ]; then \
-		BIN="target/$$MUSL_TARGET/release/jefetch"; \
-	elif [ -f "target/release/jefetch" ]; then \
-		BIN="target/release/jefetch"; \
-	else \
-		BIN=$$(ls -t target/*/release/jefetch 2>/dev/null | head -n1); \
-	fi; \
-	if [ -z "$$BIN" ]; then echo "No binary found. Run 'make' first." >&2; exit 1; fi; \
-	install -Dm755 "$$BIN" "$(DESTDIR)$(PREFIX)/bin/jefetch"
+	install -Dm755 "$(BUILDDIR)/jefetch" "$(DESTDIR)$(PREFIX)/bin/jefetch"
 
 clean:
-	cargo clean
-	rm -rf result result-*
+	rm -rf $(BUILDDIR) result result-*
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/jefetch
@@ -37,32 +47,23 @@ uninstall:
 # Install the build dependencies for the detected distro.
 deps:
 	@if command -v apt-get >/dev/null 2>&1; then \
-		sudo apt-get install -y cargo rustc; \
+		sudo apt-get install -y gcc make; \
 	elif command -v pacman >/dev/null 2>&1; then \
-		sudo pacman -S --needed rust cargo; \
+		sudo pacman -S --needed gcc make; \
 	elif command -v dnf >/dev/null 2>&1; then \
-		sudo dnf install -y cargo rust; \
+		sudo dnf install -y gcc make; \
 	elif command -v zypper >/dev/null 2>&1; then \
-		sudo zypper install -y cargo rust; \
+		sudo zypper install -y gcc make; \
 	elif command -v xbps-install >/dev/null 2>&1; then \
-		sudo xbps-install -S cargo rust; \
+		sudo xbps-install -S gcc make; \
 	elif command -v apk >/dev/null 2>&1; then \
-		sudo apk add cargo rust; \
+		sudo apk add gcc make musl-dev; \
 	elif command -v emerge >/dev/null 2>&1; then \
-		sudo emerge --ask dev-lang/rust dev-lang/rust-bin; \
+		sudo emerge --ask sys-devel/gcc sys-devel/make; \
 	elif command -v nix >/dev/null 2>&1; then \
 		echo "Nix detected: run 'nix develop' for toolchain"; \
 	else \
-		echo "Unsupported package manager. Install cargo and rustc."; \
-	fi
-	@if command -v rustup >/dev/null 2>&1; then \
-		MUSL_TARGET=$$($(musl_for_host)); \
-		if [ -n "$$MUSL_TARGET" ] && ! rustup target list --installed 2>/dev/null | grep -q "^$$MUSL_TARGET"; then \
-			echo "Adding musl target $$MUSL_TARGET..."; \
-			rustup target add $$MUSL_TARGET || true; \
-		fi; \
-	elif command -v cargo >/dev/null 2>&1; then \
-		echo "Using system cargo (no rustup) — will build dynamic binary if musl target missing"; \
+		echo "Unsupported package manager. Install gcc and make."; \
 	fi
 
 .PHONY: all install uninstall clean deps

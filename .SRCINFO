@@ -1,5 +1,5 @@
 pkgbase = jefetch-git
-	pkgdesc = A fastfetch clone written in pure Rust
+	pkgdesc = A fastfetch clone written in pure C
 	pkgver = 0.1.0.r40.g01169ed
 	pkgrel = 1
 	url = https://github.com/Matko802/jefetch
@@ -7,7 +7,8 @@ pkgbase = jefetch-git
 	arch = aarch64
 	arch = armv7h
 	license = MIT
-	makedepends = cargo
+	makedepends = gcc
+	makedepends = make
 	makedepends = git
 	depends = glibc
 	depends = gcc-libs
