@@ -1714,14 +1714,39 @@ static int osc4_query(Rgb pal[16]) {
 
 static Rgb term_cache[16];
 static int term_cache_state = 0; /* 0 unknown, 1 ok, -1 failed */
+static uint64_t term_cache_at = 0;
+
+#define TERM_REQUERY_MS 10000
 
 int sv_term_palette(Rgb out[16]) {
-    if (!term_cache_state)
+    uint64_t now = jf_now_ms();
+    if (!term_cache_state || now - term_cache_at > TERM_REQUERY_MS) {
+        /* Re-query periodically: picks up terminal theme switches and
+         * recovers from an early failed query instead of freezing. */
         term_cache_state = osc4_query(term_cache) ? 1 : -1;
+        term_cache_at = now;
+    }
     if (term_cache_state < 0)
         return 0;
     memcpy(out, term_cache, sizeof term_cache);
     return 1;
+}
+
+/* Escape for a live color: exact palette hits emit the terminal index
+ * itself (identical to what sharkvis renders), blends stay truecolor. */
+void sv_live_esc(const Rgb *pal, Rgb c, char *out, size_t n) {
+    if (pal) {
+        for (int i = 0; i < 16; i++) {
+            if (pal[i].r == c.r && pal[i].g == c.g && pal[i].b == c.b) {
+                if (i < 8)
+                    snprintf(out, n, "\x1b[%dm", 30 + i);
+                else
+                    snprintf(out, n, "\x1b[%dm", 90 + (i - 8));
+                return;
+            }
+        }
+    }
+    snprintf(out, n, "\x1b[38;2;%u;%u;%um", c.r, c.g, c.b);
 }
 
 /* Smoothly interpolated palette position: full RGB lerp between the two
@@ -1770,14 +1795,15 @@ void sv_term_flow(Sync *s, float energy, const Rgb pal[16], Rgb *lo, Rgb *hi) {
     *hi = term_at(pal, s->term_phase + TERM_FLOW_SPAN);
 }
 
-void sv_swap_placeholders(const char *s, int has_live, Rgb live, char *out, size_t n) {
+void sv_swap_placeholders(const char *s, int has_live, Rgb live,
+                            const Rgb *term_pal, char *out, size_t n) {
     const char *ph = "\x1b[38;2;1;2;3m";
     size_t phlen = strlen(ph);
     size_t pos = 0;
     const char *p = s;
     char esc[32] = "";
     if (has_live)
-        sv_rgb_ansi_start(live, esc, sizeof esc);
+        sv_live_esc(term_pal, live, esc, sizeof esc);
     while (*p && pos + 1 < n) {
         if (!strncmp(p, ph, phlen)) {
             if (has_live) {

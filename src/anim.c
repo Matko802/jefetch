@@ -1591,7 +1591,9 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
                 unsigned cg = (unsigned)(fx->grad_lo[1] + (fx->grad_hi[1] - fx->grad_lo[1]) * t + 0.5f);
                 unsigned cb2 = (unsigned)(fx->grad_lo[2] + (fx->grad_hi[2] - fx->grad_lo[2]) * t + 0.5f);
                 char tmp[32];
-                snprintf(tmp, sizeof tmp, "\x1b[38;2;%u;%u;%um", cr, cg, cb2);
+                Rgb tc = {(uint8_t)cr, (uint8_t)cg, (uint8_t)cb2};
+                sv_live_esc(fx->has_term_pal ? fx->term_pal : NULL, tc, tmp,
+                            sizeof tmp);
                 size_t l = strlen(tmp);
                 cloud->tint_rows[y] = malloc(l + 1);
                 memcpy(cloud->tint_rows[y], tmp, l + 1);

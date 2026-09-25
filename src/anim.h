@@ -53,6 +53,8 @@ typedef struct {
     float grad_lo[3];
     float grad_hi[3];
     int has_grad;
+    int has_term_pal;
+    Rgb term_pal[16];
     char **shading;
     size_t nshading;
     int has_shading;

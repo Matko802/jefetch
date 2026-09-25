@@ -1448,7 +1448,7 @@ static void apply_display_sharkvis_static(char **lines, size_t n) {
     for (size_t i = 0; i < n; i++) {
         Rgb live = {0, 0, 0};
         char *tmp = malloc(strlen(lines[i]) + 32);
-        sv_swap_placeholders(lines[i], 0, live, tmp, strlen(lines[i]) + 32);
+        sv_swap_placeholders(lines[i], 0, live, NULL, tmp, strlen(lines[i]) + 32);
         free(lines[i]);
         lines[i] = tmp;
     }
@@ -1616,10 +1616,11 @@ static void draw_animated_frame(JfBuf *out, const char **anim_lines, size_t nani
             if (display_live) {
                 Rgb g;
                 char tmp[4096];
+                const Rgb *tp = live->has_term_pal ? live->term_pal : NULL;
                 if (sv_grad_for_row(live, (size_t)info_row, ninfo, &g))
-                    sv_swap_placeholders(info[info_row], 1, g, tmp, sizeof tmp);
+                    sv_swap_placeholders(info[info_row], 1, g, tp, tmp, sizeof tmp);
                 else
-                    sv_swap_placeholders(info[info_row], 0, g, tmp, sizeof tmp);
+                    sv_swap_placeholders(info[info_row], 0, g, tp, tmp, sizeof tmp);
                 jf_buf_put(&line, tmp);
             } else {
                 jf_buf_put(&line, info[info_row]);
@@ -1674,10 +1675,11 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
             if (display_live) {
                 Rgb g;
                 char tmp[4096];
+                const Rgb *tp = live->has_term_pal ? live->term_pal : NULL;
                 if (sv_grad_for_row(live, (size_t)info_row, ninfo, &g))
-                    sv_swap_placeholders(info[info_row], 1, g, tmp, sizeof tmp);
+                    sv_swap_placeholders(info[info_row], 1, g, tp, tmp, sizeof tmp);
                 else
-                    sv_swap_placeholders(info[info_row], 0, g, tmp, sizeof tmp);
+                    sv_swap_placeholders(info[info_row], 0, g, tp, tmp, sizeof tmp);
                 jf_buf_put(&line, tmp);
             } else {
                 jf_buf_put(&line, info[info_row]);
@@ -1688,7 +1690,6 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
         while (e > t && (e[-1] == ' ' || e[-1] == '\t'))
             *--e = 0;
         char *clipped = malloc(strlen(t) + 16);
-        jf_truncate_visible(t, cols, clipped, strlen(t) + 16);
         jf_buf_put(out, clipped);
         jf_buf_put(out, "\x1b[K");
         if (row + 1 < render_height)
@@ -1953,6 +1954,8 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             shark_live.has_flat = 0;
             shark_live.glo = tlo;
             shark_live.ghi = thi;
+            shark_live.has_term_pal = 1;
+            memcpy(shark_live.term_pal, tpal, sizeof tpal);
             if (display_live && !animated)
                 needs_draw = 1;
         }
@@ -2023,6 +2026,10 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 fx.grad_hi[0] = shark_live.ghi.r;
                 fx.grad_hi[1] = shark_live.ghi.g;
                 fx.grad_hi[2] = shark_live.ghi.b;
+                if (shark_live.has_term_pal) {
+                    fx.has_term_pal = 1;
+                    memcpy(fx.term_pal, shark_live.term_pal, sizeof fx.term_pal);
+                }
             }
             ResolvedLogo *anim_logo = NULL;
             if (cloud)
