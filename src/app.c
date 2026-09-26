@@ -1398,8 +1398,8 @@ static void live_signal_restore(int sig) {
 }
 
 static void install_live_signal_handlers(void) {
-    int sigs[] = {SIGTERM, SIGINT, SIGHUP};
-    for (size_t i = 0; i < 3; i++)
+    int sigs[] = {SIGTERM, SIGINT, SIGHUP, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGABRT};
+    for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
         signal(sigs[i], live_signal_restore);
 }
 
