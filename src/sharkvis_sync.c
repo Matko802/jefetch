@@ -203,18 +203,12 @@ char **sv_config_paths(size_t *n) {
     e = getenv("HOME");
     if (e) {
         char p[1152];
-        /* JSONC first: sharkvis prefers config.jsonc for new files. */
         snprintf(p, sizeof p, "%s/.config/sharkvis/config.jsonc", e);
-        out = realloc(out, (m + 1) * sizeof(char *));
-        out[m++] = strdup(p);
-        snprintf(p, sizeof p, "%s/.config/sharkvis/config.toml", e);
         out = realloc(out, (m + 1) * sizeof(char *));
         out[m++] = strdup(p);
     }
     out = realloc(out, (m + 1) * sizeof(char *));
     out[m++] = strdup("./config.jsonc");
-    out = realloc(out, (m + 1) * sizeof(char *));
-    out[m++] = strdup("./config.toml");
     *n = m;
     return out;
 }
@@ -362,18 +356,8 @@ int sv_parse_color(const char *s, Rgb *out) {
     return 0;
 }
 
-static int text_is_jsonc(const char *text) {
-    const unsigned char *p = (const unsigned char *)text;
-    if (p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF)
-        p += 3;
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
-        p++;
-    return *p == '{';
-}
-
-/* JSONC branch: same schema sharkvis writes
- * ({"color": {"gradient_low": ..., "gradient_high": ...}}). */
-static int parse_cfg_gradients_jsonc(const char *text, Rgb *lo, Rgb *hi) {
+/* Same schema sharkvis writes ({"color": {"gradient_low": ...}}). */
+static int parse_cfg_gradients(const char *text, Rgb *lo, Rgb *hi) {
     char err[256];
     JsonValue *root = json_parse(text, err, sizeof err);
     if (!root)
@@ -389,92 +373,6 @@ static int parse_cfg_gradients_jsonc(const char *text, Rgb *lo, Rgb *hi) {
             have_hi = 1;
     }
     json_free(root);
-    if (have_lo && have_hi)
-        return 1;
-    if (have_lo && !have_hi) {
-        *hi = *lo;
-        return 1;
-    }
-    if (!have_lo && have_hi) {
-        *lo = *hi;
-        return 1;
-    }
-    return 0;
-}
-
-static int parse_cfg_gradients(const char *text, Rgb *lo, Rgb *hi) {
-    if (text_is_jsonc(text))
-        return parse_cfg_gradients_jsonc(text, lo, hi);
-    int have_lo = 0, have_hi = 0;
-    char section[64] = "general";
-    char *dup = strdup(text);
-    char *save = NULL;
-    char *line = strtok_r(dup, "\n", &save);
-    while (line) {
-        char *t = line;
-        while (*t == ' ' || *t == '\t')
-            t++;
-        char *e = t + strlen(t);
-        while (e > t && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r'))
-            *--e = 0;
-        if (!*t || *t == ';' || *t == '#') {
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
-        if (*t == '[') {
-            char *end = strchr(t, ']');
-            if (end)
-                *end = 0;
-            char *nm = t + 1;
-            while (*nm == ' ' || *nm == '\t')
-                nm++;
-            size_t i = 0;
-            while (nm[i] && i + 1 < sizeof section) {
-                char c = nm[i];
-                section[i++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
-            }
-            section[i] = 0;
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
-        char *eq = strchr(t, '=');
-        if (!eq) {
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
-        *eq = 0;
-        char *k = t;
-        char *ke = k + strlen(k);
-        while (ke > k && (ke[-1] == ' ' || ke[-1] == '\t'))
-            *--ke = 0;
-        char kl[64];
-        size_t i = 0;
-        while (k[i] && i + 1 < sizeof kl) {
-            char c = k[i];
-            kl[i++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
-        }
-        kl[i] = 0;
-        char *v = eq + 1;
-        while (*v == ' ' || *v == '\t')
-            v++;
-        char *semi = strchr(v, ';');
-        if (semi)
-            *semi = 0;
-        e = v + strlen(v);
-        while (e > v && (e[-1] == ' ' || e[-1] == '\t'))
-            *--e = 0;
-        if (!strcmp(section, "color")) {
-            if (!strcmp(kl, "gradient_low")) {
-                if (sv_parse_color(v, lo))
-                    have_lo = 1;
-            } else if (!strcmp(kl, "gradient_high")) {
-                if (sv_parse_color(v, hi))
-                    have_hi = 1;
-            }
-        }
-        line = strtok_r(NULL, "\n", &save);
-    }
-    free(dup);
     if (have_lo && have_hi)
         return 1;
     if (have_lo && !have_hi) {
@@ -594,81 +492,9 @@ char **sv_glyph_ramp(size_t *n) {
         char *text = read_file_all(paths[i]);
         if (!text)
             continue;
-        if (text_is_jsonc(text)) {
-            char **r = glyph_ramp_jsonc(text, n);
-            if (r)
-                out = r;
-            free(text);
-            continue;
-        }
-        char section[64] = "general";
-        char *dup = strdup(text);
-        char *save = NULL;
-        char *line = strtok_r(dup, "\n", &save);
-        while (line) {
-            char *t = line;
-            while (*t == ' ' || *t == '\t')
-                t++;
-            char *e = t + strlen(t);
-            while (e > t && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r'))
-                *--e = 0;
-            if (!*t || *t == ';' || *t == '#') {
-                line = strtok_r(NULL, "\n", &save);
-                continue;
-            }
-            if (*t == '[') {
-                char *end = strchr(t, ']');
-                if (end)
-                    *end = 0;
-                char *nm = t + 1;
-                while (*nm == ' ' || *nm == '\t')
-                    nm++;
-                size_t k = 0;
-                while (nm[k] && k + 1 < sizeof section) {
-                    char c = nm[k];
-                    section[k++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
-                }
-                section[k] = 0;
-                line = strtok_r(NULL, "\n", &save);
-                continue;
-            }
-            if (strcmp(section, "visualizer")) {
-                line = strtok_r(NULL, "\n", &save);
-                continue;
-            }
-            char *eq = strchr(t, '=');
-            if (!eq) {
-                line = strtok_r(NULL, "\n", &save);
-                continue;
-            }
-            *eq = 0;
-            char *k = t;
-            char *ke = k + strlen(k);
-            while (ke > k && (ke[-1] == ' ' || ke[-1] == '\t'))
-                *--ke = 0;
-            char kl[32];
-            size_t q = 0;
-            while (k[q] && q + 1 < sizeof kl) {
-                char c = k[q];
-                kl[q++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
-            }
-            kl[q] = 0;
-            if (strcmp(kl, "chars")) {
-                line = strtok_r(NULL, "\n", &save);
-                continue;
-            }
-            char *v = eq + 1;
-            while (*v == ' ' || *v == '\t')
-                v++;
-            size_t m = 0;
-            char **ramp = ramp_from_chars(v, &m);
-            if (ramp) {
-                out = ramp;
-                *n = m;
-            }
-            break;
-        }
-        free(dup);
+        char **r = glyph_ramp_jsonc(text, n);
+        if (r)
+            out = r;
         free(text);
     }
     sv_free_paths(paths, np);
