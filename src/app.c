@@ -2308,10 +2308,17 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                             double ny = anim_ease_to_root(yaw_phase, dt);
                             double np = anim_ease_to_root(pitch_phase, dt);
                             double nr = anim_ease_to_root(roll_phase, dt);
-                            at_rest = (ny == yaw_phase && np == pitch_phase && nr == roll_phase);
-                            yaw_phase = ny;
-                            pitch_phase = np;
-                            roll_phase = nr;
+                            if (ny == yaw_phase && np == pitch_phase && nr == roll_phase) {
+                                yaw_phase = 0.0;
+                                pitch_phase = 0.0;
+                                roll_phase = 0.0;
+                                at_rest = 1;
+                            } else {
+                                yaw_phase = ny;
+                                pitch_phase = np;
+                                roll_phase = nr;
+                                at_rest = 0;
+                            }
                         } else {
                             at_rest = 0;
                         }
