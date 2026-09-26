@@ -326,7 +326,6 @@ int sv_parse_color(const char *s, Rgb *out) {
         return 1;
     }
     if (!strcmp(low, "purple")) {
-        /* Distinct from magenta, like sharkvis (8800ff vs ff00ff). */
         *out = (Rgb){136, 0, 255};
         return 1;
     }
@@ -358,7 +357,6 @@ int sv_parse_color(const char *s, Rgb *out) {
         *out = (Rgb){0, 0, 0};
         return 1;
     }
-    /* Bright approximations, same values as sharkvis color_to_rgb. */
     if (!strcmp(low, "bright_black")) {
         *out = (Rgb){128, 128, 128};
         return 1;
@@ -394,7 +392,6 @@ int sv_parse_color(const char *s, Rgb *out) {
     return 0;
 }
 
-/* Same schema sharkvis writes ({"color": {"gradient_low": ...}}). */
 static int parse_cfg_gradients(const char *text, Rgb *lo, Rgb *hi) {
     char err[256];
     JsonValue *root = json_parse(text, err, sizeof err);
@@ -440,8 +437,6 @@ int sv_gradient_colors(Rgb *lo, Rgb *hi) {
     return found;
 }
 
-/* Split a chars string into one malloc'd glyph per codepoint.
- * Returns NULL (with *n == 0) for blank/empty ramps. */
 static char **ramp_from_chars(const char *v, size_t *n) {
     size_t m = 0;
     const char *p = v;
@@ -459,7 +454,6 @@ static char **ramp_from_chars(const char *v, size_t *n) {
             kl2 = 3;
         else
             kl2 = 4;
-        /* Truncated multibyte at end: stop instead of over-reading. */
         if (kl2 > vrem)
             break;
         int valid = 1;
@@ -504,7 +498,6 @@ static char **ramp_from_chars(const char *v, size_t *n) {
     return NULL;
 }
 
-/* JSONC branch: {"visualizer": {"chars": "..."}}. */
 static char **glyph_ramp_jsonc(const char *text, size_t *n) {
     char err[256];
     JsonValue *root = json_parse(text, err, sizeof err);
@@ -1285,8 +1278,6 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         memset(&s->last, 0, sizeof s->last);
         LiveFrame out;
         memset(&out, 0, sizeof out);
-        /* Like Rust's LiveFrame::inactive(): no beat info means full speed,
-         * otherwise the base animation never advances (spin_phase += 0). */
         out.speed_mult = 1.0f;
         return out;
     }
@@ -1303,14 +1294,12 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         memset(&s->last, 0, sizeof s->last);
         LiveFrame out;
         memset(&out, 0, sizeof out);
-        /* Like Rust's LiveFrame::inactive(): no beat info means full speed. */
         out.speed_mult = 1.0f;
         return out;
     }
     if (!s->have_visual_at || now - s->visual_at >= 250) {
         Rgb lo, hi;
         if (sv_gradient_colors(&lo, &hi)) {
-            /* Only latch when actually changed; otherwise tint caches churn. */
             if (!s->has_gradients || s->grad_lo.r != lo.r || s->grad_lo.g != lo.g ||
                 s->grad_lo.b != lo.b || s->grad_hi.r != hi.r || s->grad_hi.g != hi.g ||
                 s->grad_hi.b != hi.b) {
@@ -1379,8 +1368,6 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         s->last_ok = now;
     } else if (s->last.active) {
         if (s->have_last_ok && now - s->last_ok < 750) {
-            /* Deep copy: the caller takes ownership and frees its copy,
-             * so it must never alias s->last.glyphs (use-after-free). */
             LiveFrame stale = s->last;
             stale.glyphs = NULL;
             stale.nglyphs = 0;
@@ -1435,11 +1422,6 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
     memset(&frame, 0, sizeof frame);
     frame.active = 1;
     if (live_colors) {
-        /* Fresh state wins over everything. Sticky fallback to s->last is
-         * only allowed when we have NO fresh state (transient gap); when
-         * have_state==1 a missing grad/color means "no live color", not
-         * "keep showing the previous logo's color".
-         * Priority: live grad > fresh flat > config grad > last (gap only). */
         if (has_live_grad) {
             frame.has_grad = 1;
             frame.glo = live_lo;
@@ -1579,9 +1561,6 @@ void sv_rgb_ansi_start(Rgb c, char *out, size_t n) {
     snprintf(out, n, "\x1b[38;2;%u;%u;%um", c.r, c.g, c.b);
 }
 
-/* Real terminal palette via OSC 4 query. No hardcoded colors: the 16 colors
- * come from the terminal itself (\e]4;i;? -> rgb:R/G/B). Queried once per
- * process; 0 when the terminal cannot be asked (no tty, dumb, silent). */
 static int term_env_ok(void) {
     const char *t = getenv("TERM");
     if (!t || !*t)
@@ -1606,7 +1585,6 @@ static int hexdig(char c) {
     return -1;
 }
 
-/* One X11 color component (1-4 hex digits) scaled to 8 bit. */
 static int parse_comp(const char *s, size_t len, unsigned *out) {
     if (len < 1 || len > 4)
         return 0;
@@ -1657,7 +1635,6 @@ static int parse_osc4_spec(const char *s, Rgb *out) {
     return 0;
 }
 
-/* Scan accumulated reply bytes for OSC 4 responses. */
 static int osc4_parse(const uint8_t *buf, size_t len, Rgb pal[16], int have[16]) {
     int found = 0;
     for (size_t i = 0; i + 5 < len; i++) {
@@ -1684,7 +1661,7 @@ static int osc4_parse(const uint8_t *buf, size_t len, Rgb pal[16], int have[16])
                !(buf[j] == 0x1b && j + 1 < len && buf[j + 1] == '\\'))
             j++;
         if (j >= len)
-            break; /* unterminated at buffer end; more data may complete it */
+            break;
         char spec[64];
         size_t sl = j - s;
         if (sl == 0 || sl >= sizeof spec)
@@ -1746,7 +1723,6 @@ static int osc4_query(Rgb pal[16]) {
             break;
         }
         if (k == 0) {
-            /* Timeout with no bytes yet; replies may still be on the way. */
             if (++empty >= 3)
                 break;
             continue;
@@ -1758,7 +1734,6 @@ static int osc4_query(Rgb pal[16]) {
         for (int q = 0; q < 16; q++)
             found += have[q];
     }
-    /* Swallow stragglers so late replies never spill into shell input. */
     read(fd, buf, 1);
     tcsetattr(fd, TCSANOW, &orig);
     close(fd);
@@ -1766,7 +1741,7 @@ static int osc4_query(Rgb pal[16]) {
 }
 
 static Rgb term_cache[16];
-static int term_cache_state = 0; /* 0 unknown, 1 ok, -1 failed */
+static int term_cache_state = 0;
 static uint64_t term_cache_at = 0;
 
 #define TERM_REQUERY_MS 10000
@@ -1774,8 +1749,6 @@ static uint64_t term_cache_at = 0;
 int sv_term_palette(Rgb out[16]) {
     uint64_t now = jf_now_ms();
     if (!term_cache_state || now - term_cache_at > TERM_REQUERY_MS) {
-        /* Re-query periodically: picks up terminal theme switches and
-         * recovers from an early failed query instead of freezing. */
         term_cache_state = osc4_query(term_cache) ? 1 : -1;
         term_cache_at = now;
     }
@@ -1785,8 +1758,6 @@ int sv_term_palette(Rgb out[16]) {
     return 1;
 }
 
-/* Escape for a live color: exact palette hits emit the terminal index
- * itself (identical to what sharkvis renders), blends stay truecolor. */
 void sv_live_esc(const Rgb *pal, Rgb c, char *out, size_t n) {
     if (pal) {
         for (int i = 0; i < 16; i++) {
@@ -1802,8 +1773,6 @@ void sv_live_esc(const Rgb *pal, Rgb c, char *out, size_t n) {
     snprintf(out, n, "\x1b[38;2;%u;%u;%um", c.r, c.g, c.b);
 }
 
-/* Smoothly interpolated palette position: full RGB lerp between the two
- * adjacent palette entries, so the flow never bands. */
 static Rgb term_at(const Rgb pal[16], double pos) {
     double f = floor(pos);
     double frac = pos - f;

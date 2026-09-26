@@ -806,10 +806,6 @@ static void anim_configs(const App *app, AnimConfig *base, AnimConfig *active,
         }
     }
     anim_apply_style_chars(active, app->config.logo.style, app->config.logo.chars);
-    /* chars=ascii sticks across the sharkvis switch: keep the logo's own
-     * glyphs while it plays unless the sharkvis profile (or top-level
-     * chars) explicitly selects a charset. chars=sharkvis keeps using
-     * the daemon ramp. */
     if (!active->chars_set && base->original_glyphs) {
         active->original_glyphs = 1;
         active->shading_explicit = 1;
@@ -1210,7 +1206,6 @@ static char **render_modules_with(const App *app, const BuildEntry *entries, siz
             free(jobs);
             free(ths);
             free(started);
-            /* Fall through to serial path on OOM. */
         } else {
             for (size_t i = 0; i < n; i++) {
                 jobs[i].app = app;
@@ -1220,7 +1215,6 @@ static char **render_modules_with(const App *app, const BuildEntry *entries, siz
                 if (pthread_create(&ths[i], NULL, render_job_fn, &jobs[i]) == 0)
                     started[i] = 1;
                 else {
-                    /* Spawn failed: run inline so ordering is preserved. */
                     render_job_fn(&jobs[i]);
                 }
             }
@@ -1249,7 +1243,6 @@ static char **render_modules_with(const App *app, const BuildEntry *entries, siz
             }
         }
         if (nordered == 0 && (n > 1)) {
-            /* Thread path failed entirely; render serially below. */
             for (size_t i = 0; i < n; i++) {
                 if (entry_disabled(app, entries[i].name)) {
                     Ordered *no = realloc(ordered, (nordered + 1) * sizeof(Ordered));
@@ -1390,24 +1383,17 @@ static int config_stamp(const char *path, uint64_t *mtime_ms, size_t *size) {
     return 1;
 }
 
-
-
 static struct termios live_saved_term;
 static int live_have_term = 0;
 
 static void live_signal_restore(int sig) {
     const char seq[] = "\x1b[?25h\x1b[0m\n";
-    /* Async-signal-safe only: write + re-raise. tcsetattr/signal are not
-     * safe inside a fault handler and deadlocked on allocator crashes. */
     write(STDOUT_FILENO, seq, sizeof seq - 1);
     signal(sig, SIG_DFL);
     raise(sig);
 }
 
 static void install_live_signal_handlers(void) {
-    /* Only termination signals. Never catch SIGBUS/SIGFPE/SIGILL/SIGSEGV/
-     * SIGABRT: running non-async-safe code in a fault handler causes
-     * deadlock/double-fault and masks the real crash. */
     int sigs[] = {SIGTERM, SIGINT, SIGHUP};
     for (size_t i = 0; i < 3; i++)
         signal(sigs[i], live_signal_restore);
@@ -1442,7 +1428,6 @@ static int keyqueue_push(KeyQueue *pending, const uint8_t *buf, size_t k) {
         while (ncap < need) {
             ncap *= 2;
             if (ncap > 4096) {
-                /* Drop overflow instead of OOM-crashing live loop. */
                 return 0;
             }
         }
@@ -1613,7 +1598,6 @@ static int run_static(App *app, BuildEntry *entries, size_t n) {
     return 0;
 }
 
-
 static ResolvedLogo *logo_clone(const ResolvedLogo *l) {
     if (!l)
         return NULL;
@@ -1644,12 +1628,8 @@ typedef struct {
     pthread_mutex_t mu;
 } RefreshState;
 
-
 static void *refresh_thread_fn(void *arg) {
     RefreshState *st = arg;
-    /* Snapshot shared inputs under lock so the main thread cannot
-     * free/realloc cfg/disabled/entries underneath us. Rendering itself
-     * runs without the lock. */
     App tmp;
     memset(&tmp, 0, sizeof tmp);
     BuildEntry *entries = NULL;
@@ -1697,7 +1677,6 @@ static void *refresh_thread_fn(void *arg) {
                 entries[i].args.has_fmt = st->entries[i].args.has_fmt;
                 entries[i].raw = json_clone(st->entries[i].raw);
                 if (!entries[i].name) {
-                    /* Mark unusable; render skips NULL names safely. */
                     json_free(entries[i].raw);
                     entries[i].raw = NULL;
                 }
@@ -1736,8 +1715,6 @@ static void *refresh_thread_fn(void *arg) {
             free(st->lines[i]);
         free(st->lines);
     }
-    /* Drop stale results: only publish if generation still matches, else
-     * free immediately so a config reload never resurrects old lines. */
     if (gen == st->gen) {
         st->lines = lines;
         st->nlines = nl;
@@ -1746,7 +1723,6 @@ static void *refresh_thread_fn(void *arg) {
         for (size_t i = 0; i < nl; i++)
             free(lines[i]);
         free(lines);
-        /* ready stays 0; main thread will clear busy on timeout/join. */
     }
     pthread_mutex_unlock(&st->mu);
     return NULL;
@@ -1818,11 +1794,6 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
                 char lcol[8192];
                 colorize_logo_str(logo_line, cn, lcol, sizeof lcol);
                 if (logo_live) {
-                    /* Full gradient across the logo itself (like sharkvis
-                     * bars span their area): endpoints land on the logo's
-                     * own top/bottom rows so neither color sits far away
-                     * outside it. Same lerp/rounding as text. Overrides
-                     * builtin color. */
                     Rgb g;
                     int has = 0;
                     if (logo_h > 0)
@@ -1831,7 +1802,6 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
                         char esc[32];
                         const Rgb *tp = live->has_term_pal ? live->term_pal : NULL;
                         sv_live_esc(tp, g, esc, sizeof esc);
-                        /* Strip builtin SGR so gradient is exact like anim. */
                         char plain[8192];
                         jf_strip_sgr(lcol, plain, sizeof plain);
                         size_t vis = jf_visible_len(plain);
@@ -2011,14 +1981,9 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                             base_logo ? anim_build_cloud(base_logo, &active_cfg) : NULL;
                         using_active = 0;
                         animated = should_animate(app) && base_logo != NULL;
-                        /* Bump generation so any in-flight refresh result is
-                         * discarded. Do NOT touch refresh.cfg/entries or clear
-                         * refresh_busy here: the worker may still be reading
-                         * them. The next snapshot happens once it finishes. */
                         refresh_gen++;
                         pthread_mutex_lock(&refresh.mu);
                         refresh.gen = refresh_gen;
-                        /* Drop any already-ready stale lines. */
                         refresh.ready = 0;
                         for (size_t i = 0; i < refresh.nlines; i++)
                             free(refresh.lines[i]);
@@ -2034,7 +1999,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             }
         }
         if (now - last_refresh >= 1000 && !refresh_busy) {
-            /* Reclaim the previous joinable worker before reusing state. */
             if (has_refresh_thr) {
                 pthread_join(refresh_thr, NULL);
                 has_refresh_thr = 0;
@@ -2126,8 +2090,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             if (pthread_create(&refresh_thr, NULL, refresh_thread_fn, &refresh) == 0) {
                 has_refresh_thr = 1;
             } else {
-                /* Thread spawn failed: fall back to synchronous refresh so
-                 * we never join a garbage handle. */
                 pthread_mutex_lock(&refresh.mu);
                 refresh_busy = 0;
                 pthread_mutex_unlock(&refresh.mu);
@@ -2136,9 +2098,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
         pthread_mutex_lock(&refresh.mu);
         if (refresh.ready) {
             refresh.ready = 0;
-            /* Join here (worker has exited once ready==1) so the handle is
-             * reclaimed before the next spawn. Non-blocking: worker already
-             * done, join returns immediately. */
             pthread_mutex_unlock(&refresh.mu);
             if (has_refresh_thr) {
                 pthread_join(refresh_thr, NULL);
@@ -2211,9 +2170,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             if (display_live && !animated && sv_has_display_color(&shark_live))
                 needs_draw = 1;
         }
-        /* Terminal flow overrides daemon colors (logo tint + live text share
-         * this frame). Degrades gracefully when the terminal cannot be
-         * queried: daemon/strip paths below stay untouched. */
         Rgb tpal[16];
         int term_flow = (active_cfg.live_term_colors || base_cfg.live_term_colors) &&
                         sv_term_palette(tpal);
@@ -2235,8 +2191,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             using_active = logo_active ? 1 : 0;
             AnimConfig *ccfg = using_active ? &active_cfg : &base_cfg;
             LogoCloud *cloud = using_active ? active_cloud : base_cloud;
-            /* Sharkvis mode only: volume winds the spin up on top of the
-             * beat dip. Plain jefetch mode keeps a constant rate. */
             float step = shark_live.speed_mult;
             if (using_active) {
                 float e = shark_live.energy;
@@ -2259,8 +2213,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                         fx.grad_hi[0] = shark_live.ghi.r;
                         fx.grad_hi[1] = shark_live.ghi.g;
                         fx.grad_hi[2] = shark_live.ghi.b;
-                        /* Text path uses live->term_pal for exact palette hits;
-                         * logo must too or same RGB renders differently. */
                         if (shark_live.has_term_pal) {
                             fx.has_term_pal = 1;
                             memcpy(fx.term_pal, shark_live.term_pal, sizeof fx.term_pal);
@@ -2422,8 +2374,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     }
     printf("\x1b[?25h\x1b[0m\n");
     fflush(stdout);
-    /* Joinable worker borrows refresh state: join before teardown so we never
-     * free cfg/entries/mutex underneath it. */
     if (has_refresh_thr) {
         pthread_join(refresh_thr, NULL);
         has_refresh_thr = 0;

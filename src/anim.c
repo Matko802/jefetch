@@ -1642,11 +1642,6 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
                     size_t built = 0;
                     int fail = 0;
                     for (size_t y = 0; y < h; y++) {
-                        /* Full gradient across the visible ink, like
-                         * sharkvis bars: endpoints land on the logo's
-                         * own top/bottom rows so neither color sits far
-                         * away in empty space. Flat (lo==hi) falls out
-                         * of the lerp naturally. */
                         float t;
                         if (ink_bot > ink_top) {
                             size_t yc = y < ink_top ? ink_top : (y > ink_bot ? ink_bot : y);

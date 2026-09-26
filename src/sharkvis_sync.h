@@ -89,18 +89,10 @@ void sv_rgb_ansi_start(Rgb c, char *out, size_t n);
 void sv_swap_placeholders(const char *s, int has_live, Rgb live,
                             const Rgb *term_pal, char *out, size_t n);
 
-/* Real terminal palette via OSC 4 query (cached, once per process).
- * Returns 1 with the 16 colors, 0 when the terminal cannot be asked. */
 int sv_term_palette(Rgb out[16]);
 
-/* Escape for a live color: exact palette hits emit the terminal index
- * itself (identical to what sharkvis renders), blends stay truecolor.
- * pal may be NULL (always truecolor). */
 void sv_live_esc(const Rgb *pal, Rgb c, char *out, size_t n);
 
-/* Smooth flow through the given 16 terminal colors. Advances an internal
- * phase (music-reactive via energy) and returns the current gradient
- * endpoints. A fresh Sync starts at phase 0 (deterministic). */
 void sv_term_flow(struct Sync *s, float energy, const Rgb pal[16], Rgb *lo, Rgb *hi);
 
 #endif

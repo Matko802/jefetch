@@ -116,8 +116,6 @@ static void label_for(const char *mount_from, char *out, size_t n) {
             char canon[1024];
             ssize_t c = readlink(full, canon, sizeof canon - 1);
             (void)c;
-            /* NB: realpath(full, buf) aborts under _FORTIFY_SOURCE unless
-             * buf is at least PATH_MAX; use the allocating form instead. */
             char *resolved = realpath(full, NULL);
             if (resolved && !strcmp(resolved, mount_from)) {
                 snprintf(out, n, "%s", de->d_name);

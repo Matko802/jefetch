@@ -41,8 +41,6 @@ static int in_list(const char *base, const char *const *list) {
 
 static void resolve_path(const char *path, char *out, size_t n) {
     if (strchr(path, '/')) {
-        /* NB: realpath(path, buf) aborts under _FORTIFY_SOURCE unless
-         * buf is at least PATH_MAX; use the allocating form instead. */
         char *r = realpath(path, NULL);
         if (r) {
             snprintf(out, n, "%s", r);

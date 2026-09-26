@@ -1310,7 +1310,6 @@ static ModuleOutput *render_publicip(const ModuleInstance *inst, const JfConfig 
     return out_single("Public IP", ip);
 }
 
-
 static void pretty_pango_font(const char *raw, char *out, size_t n);
 
 static ModuleOutput *render_theme(const JfConfig *cfg, const char *which) {
@@ -2204,7 +2203,6 @@ JsonValue *module_json_result(const char *name, const ModuleInstance *inst,
         JsonValue *a = jarr();
         for (size_t k = 0; k < n; k++) {
             JsonValue *devid;
-            /* Rust: device_id.parse::<u32>() (decimal only, no 0x hex) */
             const char *ds = gpus[k].device_id;
             char *end = NULL;
             unsigned long v = 0;
