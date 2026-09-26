@@ -728,6 +728,7 @@ typedef struct {
     float ny;
     float nz;
     int color;
+    unsigned char sub;
     char glyph[8];
 } Point;
 
@@ -1096,7 +1097,7 @@ static void build_points(CellRow *cells, size_t nrows, int has_ansi, const AnimC
     size_t sbr = c->original_glyphs ? 1 : 2;
     size_t subdiv;
     if (c->original_glyphs) {
-        subdiv = 1;
+        subdiv = 2;
     } else {
         subdiv = (size_t)(sz * (float)sbr);
     }
@@ -1167,6 +1168,7 @@ static void build_points(CellRow *cells, size_t nrows, int has_ansi, const AnimC
                         pt->ny = 0.0f;
                         pt->nz = 1.0f;
                         pt->color = col_val;
+                        pt->sub = (c->original_glyphs && (sr > 0 || sc > 0)) ? 1 : 0;
                         size_t gl = strlen(gstr);
                         if (gl > 7)
                             gl = 7;
@@ -1271,6 +1273,7 @@ static void build_points(CellRow *cells, size_t nrows, int has_ansi, const AnimC
                         pt->ny = ny;
                         pt->nz = nz;
                         pt->color = col_val;
+                        pt->sub = (c->original_glyphs && (sr > 0 || sc > 0)) ? 1 : 0;
                         size_t gl = strlen(gstr);
                         if (gl > 7)
                             gl = 7;
@@ -1550,8 +1553,14 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         y_center = (float)h * 0.5f;
     float k1x2 = k1 * 2.0f;
     size_t ink_top = h, ink_bot = 0;
+    float eff = 0.0f;
+    if (k1 > 0.0f)
+        eff = k1 * 0.14f * oos;
+    int skip_sub = eff <= 1.0f;
     for (size_t pi = 0; pi < cloud->npoints; pi++) {
         const Point *pt = &cloud->points[pi];
+        if (skip_sub && pt->sub)
+            continue;
         float y1 = pt->y * ca - pt->z * sa;
         float z1 = pt->y * sa + pt->z * ca;
         float x2 = pt->x * cb + z1 * sb;
