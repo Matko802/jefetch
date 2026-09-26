@@ -2257,12 +2257,13 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 if (dt > 0.5f)
                     dt = 0.5f;
                 last_fx = fx_now;
+                float sens = ccfg->speed_set ? ccfg->speed : 1.0f;
                 float yaw_step = 0, pitch_step = 0;
                 anim_stereo_spin(shark_live.left, shark_live.right, &yaw_step, &pitch_step);
-                yaw_phase += yaw_step;
-                pitch_phase += pitch_step;
+                yaw_phase += (double)yaw_step * (double)sens;
+                pitch_phase += (double)pitch_step * (double)sens;
                 if (shark_live.energy > 0.04f) {
-                    roll_phase += (double)shark_live.energy * 0.09;
+                    roll_phase += (double)shark_live.energy * 0.09 * (double)sens;
                     last_sound = fx_now;
                 } else if (ccfg->has_return_secs) {
                     if ((float)(fx_now - last_sound) / 1000.0f >= ccfg->return_secs) {

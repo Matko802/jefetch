@@ -195,6 +195,7 @@ Without it the logo stays where the music left it.
 | `boom=N` | How much it swells with volume, `0`–`1` |
 | `grow=N` | Pulse strength, `0`–`0.3` (default `0.12`, `0` turns it off) |
 | `return=N` | Seconds of silence before easing back to root position; unset means it never returns |
+| `speed=N` | Volume sensitivity of the motion, unset means `1x`; `speed=2` answers twice as hard. Setting any speed also spins the logo on its own |
 
 ## CLI Overrides
 
