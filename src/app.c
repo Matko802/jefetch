@@ -1874,6 +1874,11 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
     jf_buf_put(out, "\x1b[J");
 }
 
+static double jf_wrap_angle(double phase) {
+    double tau = 6.283185307179586;
+    return fmod(phase, tau);
+}
+
 static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_animated) {
     ResolvedLogo *base_logo = logo_clone(app->logo);
     int animated = start_animated && base_logo != NULL;
@@ -2273,10 +2278,10 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 if (raw_energy > 1.0f)
                     raw_energy = 1.0f;
                 if (noise_floor < 0)
-                    noise_floor = raw_energy < 0.5 ? raw_energy : 0.5;
+                    noise_floor = raw_energy < 0.15 ? raw_energy : 0.15;
                 else if (raw_energy < (float)noise_floor)
                     noise_floor += (raw_energy - noise_floor) * (1.0 - exp((double)-dt / 3.0));
-                else if (noise_floor < 0.5)
+                else if (raw_energy < 0.15)
                     noise_floor += (raw_energy - noise_floor) * (1.0 - exp((double)-dt / 18.0));
                 float live_energy = raw_energy - (float)noise_floor;
                 if (live_energy < 0.0f)
@@ -2299,7 +2304,7 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                     roll_phase += (double)live_energy * 0.09;
                     sound_hold += (double)dt;
                     at_rest = 0;
-                    if (sound_hold >= 0.25)
+                    if (sound_hold >= 0.06)
                         last_sound = fx_now;
                 } else {
                     sound_hold = 0.0;
@@ -2308,17 +2313,10 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                             double ny = anim_ease_to_root(yaw_phase, dt);
                             double np = anim_ease_to_root(pitch_phase, dt);
                             double nr = anim_ease_to_root(roll_phase, dt);
-                            if (ny == yaw_phase && np == pitch_phase && nr == roll_phase) {
-                                yaw_phase = 0.0;
-                                pitch_phase = 0.0;
-                                roll_phase = 0.0;
-                                at_rest = 1;
-                            } else {
-                                yaw_phase = ny;
-                                pitch_phase = np;
-                                roll_phase = nr;
-                                at_rest = 0;
-                            }
+                            at_rest = (ny == yaw_phase && np == pitch_phase && nr == roll_phase);
+                            yaw_phase = ny;
+                            pitch_phase = np;
+                            roll_phase = nr;
                         } else {
                             at_rest = 0;
                         }
@@ -2326,14 +2324,16 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                         at_rest = 0;
                     }
                 }
-                fx.audio[0] = (float)pitch_phase;
-                fx.audio[1] = (float)yaw_phase;
-                fx.audio[2] = (float)roll_phase;
+                fx.audio[0] = (float)jf_wrap_angle(pitch_phase);
+                fx.audio[1] = (float)jf_wrap_angle(yaw_phase);
+                fx.audio[2] = (float)jf_wrap_angle(roll_phase);
                 float boom = ccfg->has_boom ? ccfg->boom : 0.0f;
                 float swell = at_rest ? 0.0f : ccfg->grow * shark_live.beat + boom * live_energy;
                 double env_k = 1.0 - exp((double)-dt / ((double)swell > swell_env ? 0.08 : 0.25));
                 swell_env += ((double)swell - swell_env) * env_k;
-                fx.scale = at_rest ? 1.0f : 1.0f + (float)swell_env;
+                fx.scale = 1.0f + (float)swell_env;
+                if (fx.scale < 1.02f)
+                    fx.scale = 1.0f;
             }
             if (term_flow && !fx.has_grad && shark_live.has_grad) {
                 fx.has_grad = 1;
