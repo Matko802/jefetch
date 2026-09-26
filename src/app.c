@@ -1892,6 +1892,7 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     uint64_t shark_polled = jf_now_ms() - 1000;
     double spin_phase = 0, yaw_phase = 0, pitch_phase = 0, roll_phase = 0;
     double noise_floor = -1;
+    double sound_hold = 0;
     uint64_t last_fx = jf_now_ms(), last_sound = jf_now_ms();
     char *watch_path = NULL;
     if (!app->options.no_config) {
@@ -2292,12 +2293,17 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 pitch_phase += pitch_step;
                 if (live_energy > 0.04f) {
                     roll_phase += (double)live_energy * 0.09;
-                    last_sound = fx_now;
-                } else if (ccfg->has_return_secs) {
-                    if ((float)(fx_now - last_sound) / 1000.0f >= ccfg->return_secs) {
-                        yaw_phase = anim_ease_to_root(yaw_phase, dt);
-                        pitch_phase = anim_ease_to_root(pitch_phase, dt);
-                        roll_phase = anim_ease_to_root(roll_phase, dt);
+                    sound_hold += (double)dt;
+                    if (sound_hold >= 0.25)
+                        last_sound = fx_now;
+                } else {
+                    sound_hold = 0.0;
+                    if (ccfg->has_return_secs) {
+                        if ((float)(fx_now - last_sound) / 1000.0f >= ccfg->return_secs) {
+                            yaw_phase = anim_ease_to_root(yaw_phase, dt);
+                            pitch_phase = anim_ease_to_root(pitch_phase, dt);
+                            roll_phase = anim_ease_to_root(roll_phase, dt);
+                        }
                     }
                 }
                 fx.audio[0] = (float)pitch_phase;
