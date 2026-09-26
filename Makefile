@@ -1,4 +1,4 @@
-VERSION ?= 0.2.17
+VERSION ?= 0.2.18
 PREFIX ?= /usr/local
 CC ?= cc
 CFLAGS ?= -O2

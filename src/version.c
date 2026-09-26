@@ -2,7 +2,7 @@
 
 #include "version.h"
 
-const char *JF_RAW_VERSION = "0.2.17";
+const char *JF_RAW_VERSION = "0.2.18";
 const char *JF_COMPILED_ON = "2026-09-01";
 const char *JF_BUILD_TYPE = "Release";
 
