@@ -15,7 +15,7 @@
         { pkgs }:
         pkgs.stdenv.mkDerivation {
           pname = "jefetch";
-          version = "0.1.0";
+          version = "0.2.9";
           src = pkgs.lib.cleanSource ./.;
 
           nativeBuildInputs = [ pkgs.gnumake ];
