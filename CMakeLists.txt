@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 add_compile_definitions(_POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
-add_compile_options(-Wall -Wextra -Wno-trigraphs)
+add_compile_options(-Wall -Wextra -Wno-trigraphs -Werror=implicit-function-declaration -Werror=implicit-int)
 
 # Bake the compiler target/libc identity (`JEFETCH_TARGET` / `JEFETCH_LIB`)
 # into the binary for `--version`.

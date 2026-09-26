@@ -19,7 +19,9 @@ endif
 DEFS := -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE \
 	'-DJEFETCH_TARGET="$(TARGET_TRIPLE)"' '-DJEFETCH_LIB="$(JEFETCH_LIB)"'
 STD := -std=c17
-WARN := -Wall -Wextra -Wno-trigraphs
+# Implicit declarations (e.g. a missing <string.h> for strlen) silently
+# truncate pointers on 64-bit and segfault: never allow them.
+WARN := -Wall -Wextra -Wno-trigraphs -Werror=implicit-function-declaration -Werror=implicit-int
 INCS := -Isrc
 LIBS := -lm -pthread
 

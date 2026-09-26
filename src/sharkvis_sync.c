@@ -1375,8 +1375,33 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         s->have_last_ok = 1;
         s->last_ok = now;
     } else if (s->last.active) {
-        if (s->have_last_ok && now - s->last_ok < 750)
-            return s->last;
+        if (s->have_last_ok && now - s->last_ok < 750) {
+            /* Deep copy: the caller takes ownership and frees its copy,
+             * so it must never alias s->last.glyphs (use-after-free). */
+            LiveFrame stale = s->last;
+            stale.glyphs = NULL;
+            stale.nglyphs = 0;
+            if (s->last.nglyphs && s->last.glyphs) {
+                stale.glyphs = malloc(s->last.nglyphs * sizeof(char *));
+                if (stale.glyphs) {
+                    size_t k = 0;
+                    for (; k < s->last.nglyphs; k++) {
+                        stale.glyphs[k] = strdup(s->last.glyphs[k]);
+                        if (!stale.glyphs[k])
+                            break;
+                    }
+                    stale.nglyphs = k;
+                    if (k != s->last.nglyphs) {
+                        for (size_t j = 0; j < k; j++)
+                            free(stale.glyphs[j]);
+                        free(stale.glyphs);
+                        stale.glyphs = NULL;
+                        stale.nglyphs = 0;
+                    }
+                }
+            }
+            return stale;
+        }
     }
     if (!has_energy || !has_beat) {
         if (!s->monitor)

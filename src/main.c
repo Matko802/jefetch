@@ -7,6 +7,7 @@
 #include "app.h"
 #include "logo.h"
 #include "modules.h"
+#include "sharkvis_sync.h"
 #include "version.h"
 
 static const char USAGE[] =
@@ -101,6 +102,18 @@ int main(int argc, char **argv) {
             for (size_t k = 0; k < n; k++)
                 printf("%s\n", dirs[k]);
             app_free_strs(dirs, n);
+            app_free(&app);
+            return 0;
+        }
+        if (!strcmp(a, "--dump-term-palette")) {
+            Rgb pal[16];
+            if (!sv_term_palette(pal)) {
+                fprintf(stderr, "terminal palette query failed\n");
+                app_free(&app);
+                return 1;
+            }
+            for (int k = 0; k < 16; k++)
+                printf("%2d: #%02x%02x%02x\n", k, pal[k].r, pal[k].g, pal[k].b);
             app_free(&app);
             return 0;
         }

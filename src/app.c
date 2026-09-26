@@ -1930,11 +1930,24 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 shark_live = *last;
                 shark_live.glyphs = NULL;
                 shark_live.nglyphs = 0;
-                if (last->nglyphs) {
+                if (last->nglyphs && last->glyphs) {
                     shark_live.glyphs = malloc(last->nglyphs * sizeof(char *));
-                    for (size_t i = 0; i < last->nglyphs; i++)
-                        shark_live.glyphs[i] = strdup(last->glyphs[i]);
-                    shark_live.nglyphs = last->nglyphs;
+                    if (shark_live.glyphs) {
+                        size_t k = 0;
+                        for (; k < last->nglyphs; k++) {
+                            shark_live.glyphs[k] = strdup(last->glyphs[k]);
+                            if (!shark_live.glyphs[k])
+                                break;
+                        }
+                        if (k == last->nglyphs) {
+                            shark_live.nglyphs = last->nglyphs;
+                        } else {
+                            for (size_t j = 0; j < k; j++)
+                                free(shark_live.glyphs[j]);
+                            free(shark_live.glyphs);
+                            shark_live.glyphs = NULL;
+                        }
+                    }
                 }
             }
             if (display_live && !animated && sv_has_display_color(&shark_live))
