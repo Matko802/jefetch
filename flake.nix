@@ -32,13 +32,23 @@
         };
     in
     {
-      packages = forAllSystems (pkgs: {
-        default = jefetch { pkgs = pkgs; };
-        jefetch = jefetch { pkgs = pkgs; };
-      });
+      packages = forAllSystems (pkgs:
+        let
+          build = jefetch { pkgs = pkgs.pkgsStatic; };
+        in
+        {
+          default = pkgs.runCommand "jefetch" { } ''
+            mkdir -p $out/bin
+            install -Dm755 ${build}/bin/jefetch $out/bin/jefetch
+          '';
+          jefetch = pkgs.runCommand "jefetch" { } ''
+            mkdir -p $out/bin
+            install -Dm755 ${build}/bin/jefetch $out/bin/jefetch
+          '';
+        });
 
       overlays.default = final: _prev: {
-        jefetch = jefetch { pkgs = final; };
+        jefetch = jefetch { pkgs = final.pkgsStatic; };
       };
 
       devShells = forAllSystems (pkgs:
