@@ -806,6 +806,15 @@ static void anim_configs(const App *app, AnimConfig *base, AnimConfig *active,
         }
     }
     anim_apply_style_chars(active, app->config.logo.style, app->config.logo.chars);
+    /* chars=ascii sticks across the sharkvis switch: keep the logo's own
+     * glyphs while it plays unless the sharkvis profile (or top-level
+     * chars) explicitly selects a charset. chars=sharkvis keeps using
+     * the daemon ramp. */
+    if (!active->chars_set && base->original_glyphs) {
+        active->original_glyphs = 1;
+        active->shading_explicit = 1;
+        active->chars_set = 1;
+    }
     if (!active->speed_set)
         active->speed = 0.0f;
     *mode = active->sharkvis_set ? active->sharkvis : base->sharkvis;
@@ -1809,22 +1818,14 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
                 char lcol[8192];
                 colorize_logo_str(logo_line, cn, lcol, sizeof lcol);
                 if (logo_live) {
-                    /* Parity with animated tint: same endpoints, same
-                     * top=hi direction, same render_height span, same
-                     * palette-vs-truecolor escape. Overrides builtin color. */
+                    /* Same mapping as the text beside it: this logo row
+                     * sits next to info row (row - 1) of an ninfo-row
+                     * block. sv_grad_for_row clamps overflow rows to the
+                     * last text color. Overrides builtin color. */
                     Rgb g;
                     int has = 0;
-                    if (live->has_flat) {
-                        g = live->flat;
-                        has = 1;
-                    } else if (live->has_grad) {
-                        float t = render_height > 1
-                                      ? (float)(render_height - 1 - row) /
-                                            (float)(render_height - 1)
-                                      : 0.5f;
-                        g = sv_lerp_rgb(live->glo, live->ghi, t);
-                        has = 1;
-                    }
+                    if (ninfo > 0 && row >= 1)
+                        has = sv_grad_for_row(live, row - 1, ninfo, &g);
                     if (has) {
                         char esc[32];
                         const Rgb *tp = live->has_term_pal ? live->term_pal : NULL;

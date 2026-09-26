@@ -169,7 +169,9 @@ idle). Same deal with characters:
 `chars=sharkvis` mimics sharkvis's `chars` charset while it plays
 (blocks otherwise). Custom `chars=` ramps are ignored — the logo
 renders shade blocks (`░▒▓█`) like fetch, unless `chars=ascii` keeps
-its original glyphs.
+its original glyphs. `chars=ascii` sticks when sharkvis plays too — the
+logo keeps its own glyphs unless the `sharkvis` profile explicitly sets
+`chars` (only `chars=sharkvis` there uses the daemon charset).
 
 The rotation always keeps winding up while there's sound. `return=N`
 eases the logo back to its root position after `N` seconds of silence.

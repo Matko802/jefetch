@@ -36,6 +36,7 @@ typedef struct {
     int has_boom;
     float boom;
     int shading_explicit;
+    int chars_set;
     int has_return_secs;
     float return_secs;
 } AnimConfig;

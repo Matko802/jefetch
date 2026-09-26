@@ -321,8 +321,13 @@ int sv_parse_color(const char *s, Rgb *out) {
         *out = (Rgb){255, 255, 0};
         return 1;
     }
-    if (!strcmp(low, "magenta") || !strcmp(low, "purple")) {
+    if (!strcmp(low, "magenta")) {
         *out = (Rgb){255, 0, 255};
+        return 1;
+    }
+    if (!strcmp(low, "purple")) {
+        /* Distinct from magenta, like sharkvis (8800ff vs ff00ff). */
+        *out = (Rgb){136, 0, 255};
         return 1;
     }
     if (!strcmp(low, "cyan")) {
@@ -351,6 +356,39 @@ int sv_parse_color(const char *s, Rgb *out) {
     }
     if (!strcmp(low, "black")) {
         *out = (Rgb){0, 0, 0};
+        return 1;
+    }
+    /* Bright approximations, same values as sharkvis color_to_rgb. */
+    if (!strcmp(low, "bright_black")) {
+        *out = (Rgb){128, 128, 128};
+        return 1;
+    }
+    if (!strcmp(low, "bright_red")) {
+        *out = (Rgb){255, 85, 85};
+        return 1;
+    }
+    if (!strcmp(low, "bright_green")) {
+        *out = (Rgb){85, 255, 85};
+        return 1;
+    }
+    if (!strcmp(low, "bright_yellow")) {
+        *out = (Rgb){255, 255, 85};
+        return 1;
+    }
+    if (!strcmp(low, "bright_blue")) {
+        *out = (Rgb){85, 85, 255};
+        return 1;
+    }
+    if (!strcmp(low, "bright_magenta")) {
+        *out = (Rgb){255, 85, 255};
+        return 1;
+    }
+    if (!strcmp(low, "bright_cyan")) {
+        *out = (Rgb){85, 255, 255};
+        return 1;
+    }
+    if (!strcmp(low, "bright_white")) {
+        *out = (Rgb){255, 255, 255};
         return 1;
     }
     return 0;

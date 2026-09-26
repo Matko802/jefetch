@@ -470,6 +470,7 @@ void anim_apply_style_chars(AnimConfig *c, const char *style, const char *chars)
     if (chars) {
         apply_chars_value(c, chars);
         c->shading_explicit = !is_sharkvis_chars_value(chars);
+        c->chars_set = 1;
     }
 }
 
@@ -611,6 +612,7 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
     if (have_chars) {
         apply_chars_value(c, chars_v);
         c->shading_explicit = !is_sharkvis_chars_value(chars_v);
+        c->chars_set = 1;
     } else if (has_word(low, "blocks") || has_word(low, "block")) {
         c->original_glyphs = 0;
         for (size_t k = 0; k < c->nshading; k++)
@@ -975,6 +977,7 @@ struct LogoCloud {
     unsigned char tint_lo[3];
     unsigned char tint_hi[3];
     size_t tint_h;
+    size_t tint_ninfo;
     int tint_has_term_pal;
     unsigned char tint_term_pal[16 * 3];
 };
@@ -1610,7 +1613,7 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         }
     }
     if (cloud->has_tint_key != (tint_now ? 1 : -1) || tint_pal_changed ||
-        (tint_now && (cloud->tint_h != h ||
+        (tint_now && (cloud->tint_h != h || cloud->tint_ninfo != info_line_count ||
                       memcmp(cloud->tint_lo, fx->grad_lo, 3) != 0 ||
                       memcmp(cloud->tint_hi, fx->grad_hi, 3) != 0))) {
         for (size_t i = 0; i < cloud->ntint; i++)
@@ -1621,6 +1624,7 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         if (tint_now) {
             if (h == 0 || h > 512) {
                 cloud->has_tint_key = tint_now ? 1 : -1;
+                cloud->tint_ninfo = info_line_count;
             } else {
                 char **rows_new = malloc(h * sizeof(char *));
                 if (!rows_new) {
@@ -1629,9 +1633,21 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
                     size_t built = 0;
                     int fail = 0;
                     for (size_t y = 0; y < h; y++) {
-                        /* Match sv_grad_for_row single-row midpoint (0.5).
-                         * Same top=hi direction and sv_lerp_rgb rounding as text. */
-                        float t = h > 1 ? (float)(h - 1 - y) / (float)(h - 1) : 0.5f;
+                        /* Same mapping as text (sv_grad_for_row): logo
+                         * row y sits beside info row y-1 of an
+                         * info_line_count-row block. Flat (lo==hi) falls
+                         * out of the lerp naturally. */
+                        float t;
+                        if (info_line_count > 1) {
+                            size_t idx = y >= 1 ? y - 1 : 0;
+                            size_t i = idx < info_line_count - 1
+                                           ? idx
+                                           : info_line_count - 1;
+                            t = (float)(info_line_count - 1 - i) /
+                                (float)(info_line_count - 1);
+                        } else {
+                            t = 0.5f;
+                        }
                         Rgb lo8 = {(uint8_t)(fx->grad_lo[0] + 0.5f),
                                    (uint8_t)(fx->grad_lo[1] + 0.5f),
                                    (uint8_t)(fx->grad_lo[2] + 0.5f)};
@@ -1662,6 +1678,7 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
                         memcpy(cloud->tint_lo, fx->grad_lo, 3);
                         memcpy(cloud->tint_hi, fx->grad_hi, 3);
                         cloud->tint_h = h;
+                        cloud->tint_ninfo = info_line_count;
                         cloud->tint_has_term_pal = fx->has_term_pal ? 1 : 0;
                         if (fx->has_term_pal) {
                             for (int pi = 0; pi < 16; pi++) {
