@@ -200,12 +200,17 @@ int img_decode_jpg(const uint8_t *d, size_t n, unsigned *w, unsigned *h,
         size_t slen = len - 2;
         if (marker == 0xDB) {
             size_t p = 0;
-            while (p + 65 <= slen) {
+            while (p + 2 <= slen) {
                 int tq = seg[p] & 0xF;
                 int prec = (seg[p] >> 4) & 0xF;
-                p++;
                 if (tq > 3)
                     break;
+                if (prec != 0 && prec != 1)
+                    break;
+                size_t need = prec ? 129 : 65;
+                if (p + need > slen)
+                    break;
+                p++;
                 for (int i = 0; i < 64; i++) {
                     if (prec)
                         quant[tq][ZIGZAG[i]] = (uint16_t)((seg[p] << 8) | seg[p + 1]);
@@ -277,6 +282,10 @@ int img_decode_jpg(const uint8_t *d, size_t n, unsigned *w, unsigned *h,
         return 0;
     }
     int hs = comp_h[0], vs = comp_v[0];
+    if (hs < 1 || hs > 4 || vs < 1 || vs > 4) {
+        snprintf(err, errn, "unsupported jpeg sampling");
+        return 0;
+    }
     if (ncomp == 3) {
         if (!((hs == 2 && vs == 2) || (hs == 2 && vs == 1) || (hs == 1 && vs == 2) ||
               (hs == 1 && vs == 1))) {

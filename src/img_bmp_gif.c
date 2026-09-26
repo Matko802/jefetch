@@ -239,10 +239,23 @@ int img_decode_gif(const uint8_t *d, size_t n, unsigned *w, unsigned *h,
             if (pos + sz > n)
                 break;
             if (clen + sz > ccap) {
+                if (clen + sz > 32 * 1024 * 1024) {
+                    free(comp);
+                    free(indices);
+                    snprintf(err, errn, "gif too large");
+                    return 0;
+                }
                 ccap = ccap ? ccap * 2 : 1024;
                 while (ccap < clen + sz)
                     ccap *= 2;
-                comp = realloc(comp, ccap);
+                uint8_t *nd = realloc(comp, ccap);
+                if (!nd) {
+                    free(comp);
+                    free(indices);
+                    snprintf(err, errn, "out of memory");
+                    return 0;
+                }
+                comp = nd;
             }
             memcpy(comp + clen, d + pos, sz);
             clen += sz;

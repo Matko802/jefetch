@@ -98,15 +98,27 @@ typedef int (*DoneFn)(const uint8_t *, size_t);
 static uint8_t *tty_read_until_fn(TtyQuery *q, unsigned budget_ms, DoneFn done, size_t *n) {
     size_t cap = 1024, len = 0;
     uint8_t *buf = malloc(cap);
+    if (!buf) {
+        *n = 0;
+        return NULL;
+    }
     uint64_t start = now_ms();
     for (;;) {
         uint8_t tmp[512];
         ssize_t k = read(q->fd, tmp, sizeof tmp);
         if (k > 0) {
             if (len + (size_t)k > cap) {
-                cap = (len + (size_t)k) * 2;
-                buf = realloc(buf, cap);
+                size_t ncap = (len + (size_t)k) * 2;
+                if (ncap > 256 * 1024)
+                    break;
+                uint8_t *nd = realloc(buf, ncap);
+                if (!nd)
+                    break;
+                buf = nd;
+                cap = ncap;
             }
+            if (len + (size_t)k > cap)
+                break;
             memcpy(buf + len, tmp, (size_t)k);
             len += (size_t)k;
             if (done(buf, len))
@@ -295,15 +307,27 @@ int graphics_cursor_pos(unsigned *row, unsigned *col) {
     int ok = 0;
     size_t cap = 256, len = 0;
     uint8_t *buf = malloc(cap);
+    if (!buf) {
+        tty_close(tty);
+        return 0;
+    }
     uint64_t start = now_ms();
     for (;;) {
         uint8_t tmp[128];
         ssize_t k = read(tty->fd, tmp, sizeof tmp);
         if (k > 0) {
             if (len + (size_t)k > cap) {
-                cap = (len + (size_t)k) * 2;
-                buf = realloc(buf, cap);
+                size_t ncap = (len + (size_t)k) * 2;
+                if (ncap > 8192)
+                    break;
+                uint8_t *nd = realloc(buf, ncap);
+                if (!nd)
+                    break;
+                buf = nd;
+                cap = ncap;
             }
+            if (len + (size_t)k > cap)
+                break;
             memcpy(buf + len, tmp, (size_t)k);
             len += (size_t)k;
             unsigned r = 0, c = 0;
@@ -368,15 +392,27 @@ int graphics_cell_size(unsigned *w, unsigned *h) {
     int ok = 0;
     size_t cap = 256, len = 0;
     uint8_t *buf = malloc(cap);
+    if (!buf) {
+        tty_close(tty);
+        return 0;
+    }
     uint64_t start = now_ms();
     for (;;) {
         uint8_t tmp[128];
         ssize_t k = read(tty->fd, tmp, sizeof tmp);
         if (k > 0) {
             if (len + (size_t)k > cap) {
-                cap = (len + (size_t)k) * 2;
-                buf = realloc(buf, cap);
+                size_t ncap = (len + (size_t)k) * 2;
+                if (ncap > 8192)
+                    break;
+                uint8_t *nd = realloc(buf, ncap);
+                if (!nd)
+                    break;
+                buf = nd;
+                cap = ncap;
             }
+            if (len + (size_t)k > cap)
+                break;
             memcpy(buf + len, tmp, (size_t)k);
             len += (size_t)k;
             unsigned ww = 0, hh = 0;
@@ -399,13 +435,25 @@ int graphics_cell_size(unsigned *w, unsigned *h) {
 
 char *graphics_kitty_transmit_seq(const uint8_t *rgba, unsigned w, unsigned h,
                                   unsigned id) {
+    if (!rgba || w == 0 || h == 0 || (size_t)w * h > 4 * 1024 * 1024)
+        return strdup("");
     size_t n = (size_t)w * h * 4;
     size_t bl = jf_b64_len(n);
     char *enc = malloc(bl);
+    if (!enc)
+        return strdup("");
     jf_b64_encode(rgba, n, enc);
     size_t el = strlen(enc);
     size_t cap = el + 256;
+    if (cap > 64 * 1024 * 1024) {
+        free(enc);
+        return strdup("");
+    }
     char *out = malloc(cap);
+    if (!out) {
+        free(enc);
+        return strdup("");
+    }
     size_t pos = 0;
     size_t i = 0;
     int first = 1;
@@ -420,20 +468,40 @@ char *graphics_kitty_transmit_seq(const uint8_t *rgba, unsigned w, unsigned h,
         if (first) {
             n2 = snprintf(NULL, 0, "\x1b_Ga=t,f=32,s=%u,v=%u,i=%u,m=%d,q=1;%s\x1b\\",
                           w, h, id, last ? 0 : 1, enc + i);
+            if (n2 < 0)
+                break;
             while (pos + (size_t)n2 + 1 > cap) {
-                cap *= 2;
-                out = realloc(out, cap);
+                if (cap >= 64 * 1024 * 1024)
+                    break;
+                size_t ncap = cap * 2;
+                char *nd = realloc(out, ncap);
+                if (!nd)
+                    break;
+                out = nd;
+                cap = ncap;
             }
+            if (pos + (size_t)n2 + 1 > cap)
+                break;
             pos += (size_t)snprintf(out + pos, cap - pos,
                                     "\x1b_Ga=t,f=32,s=%u,v=%u,i=%u,m=%d,q=1;%s\x1b\\",
                                     w, h, id, last ? 0 : 1, enc + i);
             first = 0;
         } else {
             n2 = snprintf(NULL, 0, "\x1b_Gm=%d,q=1;%s\x1b\\", last ? 0 : 1, enc + i);
+            if (n2 < 0)
+                break;
             while (pos + (size_t)n2 + 1 > cap) {
-                cap *= 2;
-                out = realloc(out, cap);
+                if (cap >= 64 * 1024 * 1024)
+                    break;
+                size_t ncap = cap * 2;
+                char *nd = realloc(out, ncap);
+                if (!nd)
+                    break;
+                out = nd;
+                cap = ncap;
             }
+            if (pos + (size_t)n2 + 1 > cap)
+                break;
             pos += (size_t)snprintf(out + pos, cap - pos, "\x1b_Gm=%d,q=1;%s\x1b\\",
                                     last ? 0 : 1, enc + i);
         }
@@ -441,6 +509,7 @@ char *graphics_kitty_transmit_seq(const uint8_t *rgba, unsigned w, unsigned h,
         i = j;
     }
     free(enc);
+    out[pos] = 0;
     return out;
 }
 
@@ -453,8 +522,12 @@ char *graphics_kitty_place_seq(unsigned id, unsigned cols, unsigned rows) {
 char *graphics_sixel_encode(const uint8_t *rgba, size_t w, size_t h) {
     if (w == 0 || h == 0)
         return strdup("");
+    if (!rgba || w > 2000 || h > 2000 || w * h > 4 * 1024 * 1024)
+        return strdup("");
     size_t np = w * h;
     uint8_t *regs = malloc(np);
+    if (!regs)
+        return strdup("");
     int used[216] = {0};
     for (size_t i = 0; i < np; i++) {
         unsigned a = rgba[i * 4 + 3];
@@ -466,14 +539,32 @@ char *graphics_sixel_encode(const uint8_t *rgba, size_t w, size_t h) {
         used[reg] = 1;
     }
     size_t cap = w * h / 2 + 1024;
+    if (cap > 16 * 1024 * 1024)
+        cap = 16 * 1024 * 1024;
     char *out = malloc(cap);
+    if (!out) {
+        free(regs);
+        return strdup("");
+    }
     size_t pos = 0;
-    pos += (size_t)snprintf(out + pos, cap - pos, "\x1bPq\"1;1;%zu;%zu", w, h);
+    int wlen = snprintf(out + pos, cap - pos, "\x1bPq\"1;1;%zu;%zu", w, h);
+    if (wlen < 0 || (size_t)wlen >= cap - pos) {
+        free(regs);
+        free(out);
+        return strdup("");
+    }
+    pos += (size_t)wlen;
     for (int reg = 0; reg < 216; reg++) {
         if (!used[reg])
             continue;
-        pos += (size_t)snprintf(out + pos, cap - pos, "#%d;2;%d;%d;%d", 16 + reg,
-                                (reg / 36) * 20, ((reg % 36) / 6) * 20, (reg % 6) * 20);
+        wlen = snprintf(out + pos, cap - pos, "#%d;2;%d;%d;%d", 16 + reg,
+                        (reg / 36) * 20, ((reg % 36) / 6) * 20, (reg % 6) * 20);
+        if (wlen < 0 || (size_t)wlen >= cap - pos) {
+            free(regs);
+            free(out);
+            return strdup("");
+        }
+        pos += (size_t)wlen;
     }
     size_t bands = (h + 5) / 6;
     for (size_t band = 0; band < bands; band++) {
@@ -482,10 +573,30 @@ char *graphics_sixel_encode(const uint8_t *rgba, size_t w, size_t h) {
             if (!used[reg])
                 continue;
             while (pos + 64 > cap) {
-                cap *= 2;
-                out = realloc(out, cap);
+                if (cap >= 16 * 1024 * 1024) {
+                    free(regs);
+                    free(out);
+                    return strdup("");
+                }
+                size_t ncap = cap * 2;
+                if (ncap > 16 * 1024 * 1024)
+                    ncap = 16 * 1024 * 1024;
+                char *nd = realloc(out, ncap);
+                if (!nd) {
+                    free(regs);
+                    free(out);
+                    return strdup("");
+                }
+                out = nd;
+                cap = ncap;
             }
-            pos += (size_t)snprintf(out + pos, cap - pos, "#%d", 16 + reg);
+            wlen = snprintf(out + pos, cap - pos, "#%d", 16 + reg);
+            if (wlen < 0 || (size_t)wlen >= cap - pos) {
+                free(regs);
+                free(out);
+                return strdup("");
+            }
+            pos += (size_t)wlen;
             size_t x = 0;
             while (x < w) {
                 unsigned bits = 0;
@@ -509,14 +620,44 @@ char *graphics_sixel_encode(const uint8_t *rgba, size_t w, size_t h) {
                 char ch = (char)(63 + bits);
                 if (run > 3) {
                     while (pos + 32 > cap) {
-                        cap *= 2;
-                        out = realloc(out, cap);
+                        if (cap >= 16 * 1024 * 1024) {
+                            free(regs);
+                            free(out);
+                            return strdup("");
+                        }
+                        size_t ncap = cap * 2;
+                        char *nd = realloc(out, ncap);
+                        if (!nd) {
+                            free(regs);
+                            free(out);
+                            return strdup("");
+                        }
+                        out = nd;
+                        cap = ncap;
                     }
-                    pos += (size_t)snprintf(out + pos, cap - pos, "!%zu%c", run, ch);
+                    wlen = snprintf(out + pos, cap - pos, "!%zu%c", run, ch);
+                    if (wlen < 0 || (size_t)wlen >= cap - pos) {
+                        free(regs);
+                        free(out);
+                        return strdup("");
+                    }
+                    pos += (size_t)wlen;
                 } else {
                     while (pos + run + 1 > cap) {
-                        cap *= 2;
-                        out = realloc(out, cap);
+                        if (cap >= 16 * 1024 * 1024) {
+                            free(regs);
+                            free(out);
+                            return strdup("");
+                        }
+                        size_t ncap = cap * 2;
+                        char *nd = realloc(out, ncap);
+                        if (!nd) {
+                            free(regs);
+                            free(out);
+                            return strdup("");
+                        }
+                        out = nd;
+                        cap = ncap;
                     }
                     for (size_t k = 0; k < run; k++)
                         out[pos++] = ch;
@@ -525,9 +666,20 @@ char *graphics_sixel_encode(const uint8_t *rgba, size_t w, size_t h) {
                 x += run;
             }
         }
-        if (band + 1 < bands)
+        if (band + 1 < bands) {
+            if (pos + 1 >= cap) {
+                free(regs);
+                free(out);
+                return strdup("");
+            }
             out[pos++] = '-';
+        }
         out[pos] = 0;
+    }
+    if (pos + 3 > cap) {
+        free(regs);
+        free(out);
+        return strdup("");
     }
     memcpy(out + pos, "\x1b\\", 2);
     pos += 2;
@@ -538,14 +690,27 @@ char *graphics_sixel_encode(const uint8_t *rgba, size_t w, size_t h) {
 
 char *graphics_iterm2_seq(const uint8_t *png, size_t pngn, const char *name,
                           unsigned cols, unsigned rows) {
+    if (!png || pngn == 0 || pngn > 32 * 1024 * 1024 || !name)
+        return strdup("");
     size_t nl = jf_b64_len(strlen(name));
     char *nb = malloc(nl);
+    if (!nb)
+        return strdup("");
     jf_b64_encode((const uint8_t *)name, strlen(name), nb);
     size_t pl = jf_b64_len(pngn);
     char *pb = malloc(pl);
+    if (!pb) {
+        free(nb);
+        return strdup("");
+    }
     jf_b64_encode(png, pngn, pb);
     size_t cap = strlen(nb) + pl + 256;
     char *o = malloc(cap);
+    if (!o) {
+        free(nb);
+        free(pb);
+        return strdup("");
+    }
     snprintf(o, cap,
              "\x1b]1337;File=name=%s;size=%zu;width=%u;height=%u;"
              "preserveAspectRatio=0;inline=1:%s\x07",

@@ -32,11 +32,19 @@ typedef struct {
 static void wput(Wr *w, const void *p, size_t n) {
     if (w->len + n > w->cap) {
         size_t c = w->cap ? w->cap : 128;
-        while (c < w->len + n)
+        while (c < w->len + n) {
             c *= 2;
-        w->data = realloc(w->data, c);
+            if (c > 4 * 1024 * 1024)
+                return;
+        }
+        uint8_t *nd = realloc(w->data, c);
+        if (!nd)
+            return;
+        w->data = nd;
         w->cap = c;
     }
+    if (w->len + n > w->cap)
+        return;
     memcpy(w->data + w->len, p, n);
     w->len += n;
 }
@@ -194,6 +202,10 @@ static int read_packet(PaClient *c, uint32_t *cmd, uint32_t *tag, uint8_t **body
         return 0;
     }
     uint8_t *p = malloc(len);
+    if (!p) {
+        snprintf(err, errn, "pulse: out of memory");
+        return 0;
+    }
     if (!read_exact(c->fd, p, len, err, errn)) {
         free(p);
         return 0;
@@ -204,13 +216,18 @@ static int read_packet(PaClient *c, uint32_t *cmd, uint32_t *tag, uint8_t **body
     *tag = get_u32(&q, &qn);
     *bodylen = qn;
     *body = malloc(qn ? qn : 1);
+    if (!*body) {
+        free(p);
+        snprintf(err, errn, "pulse: out of memory");
+        return 0;
+    }
     memcpy(*body, q, qn);
     free(p);
     return 1;
 }
 
 static int reply_for(PaClient *c, uint32_t want, char *err, size_t errn) {
-    for (;;) {
+    for (int iter = 0; iter < 64; iter++) {
         uint32_t cmd = 0, tag = 0;
         uint8_t *b = NULL;
         size_t bl = 0;
@@ -229,6 +246,8 @@ static int reply_for(PaClient *c, uint32_t want, char *err, size_t errn) {
         }
         free(b);
     }
+    snprintf(err, errn, "pulse: too many notifications");
+    return 0;
 }
 
 static void load_cookie(uint8_t *cookie) {
@@ -558,6 +577,10 @@ PaRecord *pa_record(PaClient *c, const char *device, unsigned rate, unsigned cha
         (void)rbl;
     }
     PaRecord *rec = calloc(1, sizeof *rec);
+    if (!rec) {
+        snprintf(err, errn, "pulse: out of memory");
+        return NULL;
+    }
     rec->fd = c->fd;
     rec->stream = stream;
     free(c);
@@ -600,6 +623,10 @@ long pa_read_chunk(PaRecord *r, uint8_t *out, size_t cap, const volatile int *st
             return -1;
         }
         uint8_t *p = malloc(len);
+        if (!p) {
+            snprintf(err, errn, "pulse: out of memory");
+            return -1;
+        }
         if (!read_exact(r->fd, p, len, err, errn)) {
             free(p);
             return -1;
@@ -624,9 +651,12 @@ long pa_read_chunk(PaRecord *r, uint8_t *out, size_t cap, const volatile int *st
             size_t n = len < cap ? len : cap;
             memcpy(out, p, n);
             if (len > cap) {
-                r->pending = malloc(len - cap);
-                memcpy(r->pending, p + cap, len - cap);
-                r->plen = len - cap;
+                uint8_t *pend = malloc(len - cap);
+                if (pend) {
+                    memcpy(pend, p + cap, len - cap);
+                    r->pending = pend;
+                    r->plen = len - cap;
+                }
             }
             free(p);
             return (long)n;

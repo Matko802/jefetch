@@ -203,8 +203,24 @@ ResolvedLogo *logo_image_to_resolved(const LogoImage *img, size_t padding_right)
     if (!r)
         return NULL;
     r->padding_right = padding_right;
+    if (!img || !img->rgba || img->rows == 0 || img->cols == 0) {
+        r->lines = calloc(1, sizeof(char *));
+        r->colors = calloc(1, sizeof(char *));
+        if (r->lines)
+            r->lines[0] = strdup("");
+        if (r->colors)
+            r->colors[0] = strdup("");
+        r->nlines = r->ncolors = 1;
+        return r;
+    }
     r->lines = calloc(img->rows ? img->rows : 1, sizeof(char *));
     r->colors = calloc(img->rows ? img->rows : 1, sizeof(char *));
+    if (!r->lines || !r->colors) {
+        free(r->lines);
+        free(r->colors);
+        free(r);
+        return NULL;
+    }
     for (size_t rr = 0; rr < img->rows; rr++) {
         size_t last = img->cols;
         while (last > 0) {
@@ -216,6 +232,8 @@ ResolvedLogo *logo_image_to_resolved(const LogoImage *img, size_t padding_right)
         }
         size_t cap = 128;
         char *line = malloc(cap);
+        if (!line)
+            continue;
         size_t len = 0;
         for (size_t c = 0; c < last; c++) {
             size_t p0 = (((rr * 2) * img->cols + c) * 4);
@@ -239,8 +257,18 @@ ResolvedLogo *logo_image_to_resolved(const LogoImage *img, size_t padding_right)
             }
             size_t tl = strlen(tmp);
             while (len + tl + 5 > cap) {
-                cap *= 2;
-                line = realloc(line, cap);
+                if (cap >= 1 * 1024 * 1024) {
+                    free(line);
+                    return r;
+                }
+                size_t ncap = cap * 2;
+                char *nd = realloc(line, ncap);
+                if (!nd) {
+                    free(line);
+                    return r;
+                }
+                line = nd;
+                cap = ncap;
             }
             memcpy(line + len, tmp, tl);
             len += tl;
@@ -251,7 +279,15 @@ ResolvedLogo *logo_image_to_resolved(const LogoImage *img, size_t padding_right)
         }
         line[len] = 0;
         r->lines[rr] = line;
-        r->colors[rr] = strdup("");
+        char *cs = strdup("");
+        r->colors[rr] = cs ? cs : strdup("");
+        if (!r->colors[rr]) {
+            free(r->lines[rr]);
+            r->lines[rr] = strdup("");
+            r->colors[rr] = strdup("");
+            if (!r->lines[rr] || !r->colors[rr])
+                continue;
+        }
         r->nlines++;
         r->ncolors++;
         if (last > r->width)

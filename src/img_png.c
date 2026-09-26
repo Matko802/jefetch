@@ -165,11 +165,27 @@ int img_decode_png(const uint8_t *d, size_t n, unsigned *w, unsigned *h,
                 trns_b = (uint16_t)((d[pos + 4] << 8) | d[pos + 5]);
             }
         } else if (!memcmp(type, "IDAT", 4)) {
+            if (len > 64 * 1024 * 1024 || idat_len + len > 64 * 1024 * 1024) {
+                free(idat);
+                snprintf(err, errn, "png too large");
+                return 0;
+            }
             if (idat_len + len > idat_cap) {
                 size_t c = idat_cap ? idat_cap : 65536;
-                while (c < idat_len + len)
+                while (c < idat_len + len) {
                     c *= 2;
-                idat = realloc(idat, c);
+                    if (c > 64 * 1024 * 1024) {
+                        c = 64 * 1024 * 1024;
+                        break;
+                    }
+                }
+                uint8_t *nd = realloc(idat, c);
+                if (!nd) {
+                    free(idat);
+                    snprintf(err, errn, "out of memory");
+                    return 0;
+                }
+                idat = nd;
                 idat_cap = c;
             }
             memcpy(idat + idat_len, d + pos, len);

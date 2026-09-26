@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -526,9 +525,10 @@ char **sv_glyph_ramp(size_t *n) {
                 v++;
             size_t m = 0;
             const char *p = v;
+            size_t vrem = strlen(v);
             int allblank = 1;
             char **ramp = NULL;
-            while (*p) {
+            while (vrem > 0 && *p) {
                 size_t kl2;
                 unsigned char c = (unsigned char)*p;
                 if (c < 0x80)
@@ -539,14 +539,37 @@ char **sv_glyph_ramp(size_t *n) {
                     kl2 = 3;
                 else
                     kl2 = 4;
+                /* Truncated multibyte at end: stop instead of over-reading. */
+                if (kl2 > vrem)
+                    break;
+                int valid = 1;
+                for (size_t k = 1; k < kl2; k++) {
+                    if ((p[k] & 0xC0) != 0x80) {
+                        valid = 0;
+                        break;
+                    }
+                }
+                if (!valid) {
+                    p += 1;
+                    vrem -= 1;
+                    continue;
+                }
                 char *s = malloc(kl2 + 1);
+                if (!s)
+                    break;
                 memcpy(s, p, kl2);
                 s[kl2] = 0;
                 if (strcmp(s, " ") && strcmp(s, "\t"))
                     allblank = 0;
-                ramp = realloc(ramp, (m + 1) * sizeof(char *));
+                char **nr = realloc(ramp, (m + 1) * sizeof(char *));
+                if (!nr) {
+                    free(s);
+                    break;
+                }
+                ramp = nr;
                 ramp[m++] = s;
                 p += kl2;
+                vrem -= kl2;
                 if (m >= 64)
                     break;
             }
@@ -1274,11 +1297,32 @@ static void frame_free_glyphs(LiveFrame *f) {
 
 static void frame_copy_glyphs(LiveFrame *dst, char **glyphs, size_t n) {
     frame_free_glyphs(dst);
-    if (n == 0)
+    if (n == 0 || !glyphs)
         return;
-    dst->glyphs = malloc(n * sizeof(char *));
-    for (size_t i = 0; i < n; i++)
-        dst->glyphs[i] = strdup(glyphs[i]);
+    if (n > 64)
+        n = 64;
+    char **ng = malloc(n * sizeof(char *));
+    if (!ng)
+        return;
+    size_t k = 0;
+    for (; k < n; k++) {
+        if (!glyphs[k]) {
+            ng[k] = strdup(" ");
+            if (!ng[k])
+                break;
+            continue;
+        }
+        ng[k] = strdup(glyphs[k]);
+        if (!ng[k])
+            break;
+    }
+    if (k != n) {
+        for (size_t j = 0; j < k; j++)
+            free(ng[j]);
+        free(ng);
+        return;
+    }
+    dst->glyphs = ng;
     dst->nglyphs = n;
 }
 
@@ -1309,12 +1353,17 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         memset(&out, 0, sizeof out);
         return out;
     }
-    if (!s->have_visual_at || now - s->visual_at >= 500) {
+    if (!s->have_visual_at || now - s->visual_at >= 250) {
         Rgb lo, hi;
         if (sv_gradient_colors(&lo, &hi)) {
-            s->has_gradients = 1;
-            s->grad_lo = lo;
-            s->grad_hi = hi;
+            /* Only latch when actually changed; otherwise tint caches churn. */
+            if (!s->has_gradients || s->grad_lo.r != lo.r || s->grad_lo.g != lo.g ||
+                s->grad_lo.b != lo.b || s->grad_hi.r != hi.r || s->grad_hi.g != hi.g ||
+                s->grad_hi.b != hi.b) {
+                s->has_gradients = 1;
+                s->grad_lo = lo;
+                s->grad_hi = hi;
+            }
         } else {
             s->has_gradients = 0;
         }
@@ -1432,23 +1481,27 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
     memset(&frame, 0, sizeof frame);
     frame.active = 1;
     if (live_colors) {
+        /* Fresh state wins over everything. Sticky fallback to s->last is
+         * only allowed when we have NO fresh state (transient gap); when
+         * have_state==1 a missing grad/color means "no live color", not
+         * "keep showing the previous logo's color".
+         * Priority: live grad > fresh flat > config grad > last (gap only). */
         if (has_live_grad) {
             frame.has_grad = 1;
             frame.glo = live_lo;
             frame.ghi = live_hi;
+        } else if (have_state && has_color) {
+            frame.has_flat = 1;
+            frame.flat = color;
         } else if (s->has_gradients) {
             frame.has_grad = 1;
             frame.glo = s->grad_lo;
             frame.ghi = s->grad_hi;
-        } else if (s->last.has_grad) {
-            frame.has_grad = 1;
-            frame.glo = s->last.glo;
-            frame.ghi = s->last.ghi;
-        }
-        if (!frame.has_grad) {
-            if (has_color) {
-                frame.has_flat = 1;
-                frame.flat = color;
+        } else if (!have_state) {
+            if (s->last.has_grad) {
+                frame.has_grad = 1;
+                frame.glo = s->last.glo;
+                frame.ghi = s->last.ghi;
             } else if (s->last.has_flat) {
                 frame.has_flat = 1;
                 frame.flat = s->last.flat;
@@ -1490,11 +1543,32 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
     ret.left = s->last.left;
     ret.right = s->last.right;
     ret.speed_mult = s->last.speed_mult;
-    if (s->last.nglyphs) {
+    ret.has_term_pal = s->last.has_term_pal;
+    if (ret.has_term_pal)
+        memcpy(ret.term_pal, s->last.term_pal, sizeof ret.term_pal);
+    if (s->last.nglyphs && s->last.glyphs) {
         ret.glyphs = malloc(s->last.nglyphs * sizeof(char *));
-        for (size_t i = 0; i < s->last.nglyphs; i++)
-            ret.glyphs[i] = strdup(s->last.glyphs[i]);
-        ret.nglyphs = s->last.nglyphs;
+        if (ret.glyphs) {
+            size_t k = 0;
+            for (; k < s->last.nglyphs; k++) {
+                if (!s->last.glyphs[k]) {
+                    ret.glyphs[k] = NULL;
+                    break;
+                }
+                ret.glyphs[k] = strdup(s->last.glyphs[k]);
+                if (!ret.glyphs[k])
+                    break;
+            }
+            if (k == s->last.nglyphs) {
+                ret.nglyphs = s->last.nglyphs;
+            } else {
+                for (size_t j = 0; j < k; j++)
+                    free(ret.glyphs[j]);
+                free(ret.glyphs);
+                ret.glyphs = NULL;
+                ret.nglyphs = 0;
+            }
+        }
     }
     return ret;
 }

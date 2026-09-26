@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>

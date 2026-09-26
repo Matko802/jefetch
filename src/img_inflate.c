@@ -126,8 +126,11 @@ static int ogrow(uint8_t **out, size_t *pos, size_t *cap, size_t need) {
     if (*pos + need <= *cap)
         return 1;
     size_t c = *cap ? *cap : 256;
-    while (c < *pos + need)
+    while (c < *pos + need) {
         c *= 2;
+        if (c > 64 * 1024 * 1024)
+            return 0;
+    }
     uint8_t *p = realloc(*out, c);
     if (!p)
         return 0;
@@ -286,8 +289,20 @@ int img_inflate(const uint8_t *in, size_t n, uint8_t **out, size_t *outlen) {
             return 0;
         }
         while (pos + 300 > cap) {
-            cap *= 2;
-            o = realloc(o, cap);
+            if (cap >= 64 * 1024 * 1024) {
+                free(o);
+                return 0;
+            }
+            size_t ncap = cap * 2;
+            if (ncap > 64 * 1024 * 1024)
+                ncap = 64 * 1024 * 1024;
+            uint8_t *nd = realloc(o, ncap);
+            if (!nd) {
+                free(o);
+                return 0;
+            }
+            o = nd;
+            cap = ncap;
         }
     }
     *out = o;

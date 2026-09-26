@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -979,6 +978,8 @@ struct LogoCloud {
     unsigned char tint_lo[3];
     unsigned char tint_hi[3];
     size_t tint_h;
+    int tint_has_term_pal;
+    unsigned char tint_term_pal[16 * 3];
 };
 
 static void build_points(CellRow *cells, size_t nrows, int has_ansi, const AnimConfig *c,
@@ -1080,18 +1081,27 @@ static void build_points(CellRow *cells, size_t nrows, int has_ansi, const AnimC
             }
         }
     }
-    int z_layers = (int)(6.0f * c->size);
+    float sz = c->size;
+    if (!(sz == sz) || sz < 0.1f)
+        sz = 0.1f;
+    if (sz > 4.0f)
+        sz = 4.0f;
+    int z_layers = (int)(6.0f * sz);
     if (z_layers < 6)
         z_layers = 6;
+    if (z_layers > 24)
+        z_layers = 24;
     size_t sbr = c->original_glyphs ? 1 : 2;
     size_t subdiv;
     if (c->original_glyphs) {
         subdiv = 1;
     } else {
-        subdiv = (size_t)(c->size * (float)sbr);
+        subdiv = (size_t)(sz * (float)sbr);
     }
     if (subdiv < 1)
         subdiv = 1;
+    if (subdiv > 4)
+        subdiv = 4;
     Point *points = NULL;
     size_t npoints = 0, pcap = 0;
     for (size_t row = 0; row < rows; row++) {
@@ -1461,20 +1471,35 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
     size_t h = rh;
     size_t sw = w * sub_cols;
     size_t sh = h * sub_rows;
+    if (sw == 0 || sh == 0 || sw > 4096 || sh > 4096)
+        return NULL;
     if (cloud->buf_w != sw || cloud->buf_h != sh) {
+        float *nz = calloc(sh * sw, sizeof(float));
+        float *nl = calloc(sh * sw, sizeof(float));
+        int *nc = calloc(sh * sw, sizeof(int));
+        char(*ng)[8] = calloc(sh * sw, sizeof(*cloud->buf_glyph));
+        if (!nz || !nl || !nc || !ng) {
+            free(nz);
+            free(nl);
+            free(nc);
+            free(ng);
+            return NULL;
+        }
         free(cloud->buf_z);
         free(cloud->buf_lum);
         free(cloud->buf_col);
         free(cloud->buf_glyph);
-        cloud->buf_z = calloc(sh * sw, sizeof(float));
-        cloud->buf_lum = calloc(sh * sw, sizeof(float));
-        cloud->buf_col = calloc(sh * sw, sizeof(int));
-        cloud->buf_glyph = calloc(sh * sw, sizeof(*cloud->buf_glyph));
+        cloud->buf_z = nz;
+        cloud->buf_lum = nl;
+        cloud->buf_col = nc;
+        cloud->buf_glyph = ng;
         cloud->buf_w = sw;
         cloud->buf_h = sh;
         for (size_t i = 0; i < sh * sw; i++)
             cloud->buf_glyph[i][0] = ' ';
     } else {
+        if (!cloud->buf_z || !cloud->buf_lum || !cloud->buf_col || !cloud->buf_glyph)
+            return NULL;
         for (size_t i = 0; i < sh * sw; i++) {
             cloud->buf_z[i] = 0.0f;
             cloud->buf_lum[i] = 0.0f;
@@ -1574,7 +1599,20 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
     size_t smax = scount - 1;
     size_t total_sub = sub_rows * sub_cols;
     int tint_now = fx->has_grad ? 1 : 0;
-    if (cloud->has_tint_key != (tint_now ? 1 : -1) ||
+    int tint_pal_changed = 0;
+    if (tint_now) {
+        if (!!cloud->tint_has_term_pal != !!fx->has_term_pal)
+            tint_pal_changed = 1;
+        else if (fx->has_term_pal) {
+            for (int pi = 0; pi < 16 && !tint_pal_changed; pi++) {
+                if (cloud->tint_term_pal[pi * 3] != (unsigned char)fx->term_pal[pi].r ||
+                    cloud->tint_term_pal[pi * 3 + 1] != (unsigned char)fx->term_pal[pi].g ||
+                    cloud->tint_term_pal[pi * 3 + 2] != (unsigned char)fx->term_pal[pi].b)
+                    tint_pal_changed = 1;
+            }
+        }
+    }
+    if (cloud->has_tint_key != (tint_now ? 1 : -1) || tint_pal_changed ||
         (tint_now && (cloud->tint_h != h ||
                       memcmp(cloud->tint_lo, fx->grad_lo, 3) != 0 ||
                       memcmp(cloud->tint_hi, fx->grad_hi, 3) != 0))) {
@@ -1584,31 +1622,83 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         cloud->tint_rows = NULL;
         cloud->ntint = 0;
         if (tint_now) {
-            cloud->tint_rows = malloc(h * sizeof(char *));
-            for (size_t y = 0; y < h; y++) {
-                float t = h > 1 ? (float)(h - 1 - y) / (float)(h - 1) : 0.0f;
-                unsigned cr = (unsigned)(fx->grad_lo[0] + (fx->grad_hi[0] - fx->grad_lo[0]) * t + 0.5f);
-                unsigned cg = (unsigned)(fx->grad_lo[1] + (fx->grad_hi[1] - fx->grad_lo[1]) * t + 0.5f);
-                unsigned cb2 = (unsigned)(fx->grad_lo[2] + (fx->grad_hi[2] - fx->grad_lo[2]) * t + 0.5f);
-                char tmp[32];
-                Rgb tc = {(uint8_t)cr, (uint8_t)cg, (uint8_t)cb2};
-                sv_live_esc(fx->has_term_pal ? fx->term_pal : NULL, tc, tmp,
-                            sizeof tmp);
-                size_t l = strlen(tmp);
-                cloud->tint_rows[y] = malloc(l + 1);
-                memcpy(cloud->tint_rows[y], tmp, l + 1);
+            if (h == 0 || h > 512) {
+                cloud->has_tint_key = tint_now ? 1 : -1;
+            } else {
+                char **rows_new = malloc(h * sizeof(char *));
+                if (!rows_new) {
+                    cloud->has_tint_key = -1;
+                } else {
+                    size_t built = 0;
+                    int fail = 0;
+                    for (size_t y = 0; y < h; y++) {
+                        /* Match sv_grad_for_row single-row midpoint (0.5).
+                         * Same top=hi direction and sv_lerp_rgb rounding as text. */
+                        float t = h > 1 ? (float)(h - 1 - y) / (float)(h - 1) : 0.5f;
+                        Rgb lo8 = {(uint8_t)(fx->grad_lo[0] + 0.5f),
+                                   (uint8_t)(fx->grad_lo[1] + 0.5f),
+                                   (uint8_t)(fx->grad_lo[2] + 0.5f)};
+                        Rgb hi8 = {(uint8_t)(fx->grad_hi[0] + 0.5f),
+                                   (uint8_t)(fx->grad_hi[1] + 0.5f),
+                                   (uint8_t)(fx->grad_hi[2] + 0.5f)};
+                        Rgb tc = sv_lerp_rgb(lo8, hi8, t);
+                        char tmp[32];
+                        sv_live_esc(fx->has_term_pal ? fx->term_pal : NULL, tc, tmp,
+                                    sizeof tmp);
+                        size_t l = strlen(tmp);
+                        rows_new[y] = malloc(l + 1);
+                        if (!rows_new[y]) {
+                            fail = 1;
+                            break;
+                        }
+                        memcpy(rows_new[y], tmp, l + 1);
+                        built++;
+                    }
+                    if (fail) {
+                        for (size_t k = 0; k < built; k++)
+                            free(rows_new[k]);
+                        free(rows_new);
+                        cloud->has_tint_key = -1;
+                    } else {
+                        cloud->tint_rows = rows_new;
+                        cloud->ntint = h;
+                        memcpy(cloud->tint_lo, fx->grad_lo, 3);
+                        memcpy(cloud->tint_hi, fx->grad_hi, 3);
+                        cloud->tint_h = h;
+                        cloud->tint_has_term_pal = fx->has_term_pal ? 1 : 0;
+                        if (fx->has_term_pal) {
+                            for (int pi = 0; pi < 16; pi++) {
+                                cloud->tint_term_pal[pi * 3] = fx->term_pal[pi].r;
+                                cloud->tint_term_pal[pi * 3 + 1] = fx->term_pal[pi].g;
+                                cloud->tint_term_pal[pi * 3 + 2] = fx->term_pal[pi].b;
+                            }
+                        }
+                        cloud->has_tint_key = 1;
+                    }
+                }
             }
-            cloud->ntint = h;
-            memcpy(cloud->tint_lo, fx->grad_lo, 3);
-            memcpy(cloud->tint_hi, fx->grad_hi, 3);
-            cloud->tint_h = h;
+        } else {
+            cloud->has_tint_key = -1;
         }
-        cloud->has_tint_key = tint_now ? 1 : -1;
     }
     ResolvedLogo *res = calloc(1, sizeof *res);
+    if (!res)
+        return NULL;
     res->lines = malloc(h * sizeof(char *));
     res->colors = calloc(1, sizeof(char *));
+    if (!res->lines || !res->colors) {
+        free(res->lines);
+        free(res->colors);
+        free(res);
+        return NULL;
+    }
     res->colors[0] = strdup("");
+    if (!res->colors[0]) {
+        free(res->lines);
+        free(res->colors);
+        free(res);
+        return NULL;
+    }
     res->ncolors = 1;
     for (size_t row = 0; row < h; row++) {
         JfBuf line;

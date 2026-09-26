@@ -1,5 +1,4 @@
 #include <dirent.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -1103,9 +1102,13 @@ static void instance_for(const BuildEntry *e, ModuleInstance *inst) {
 }
 
 static int entry_disabled(const App *app, const char *name) {
+    if (!name)
+        return 1;
     for (size_t i = 0; i < app->options.ndisabled; i++) {
         const char *a = app->options.structure_disabled[i];
         const char *b = name;
+        if (!a || !b)
+            continue;
         int eq = 1;
         while (*a && *b) {
             char ca = *a, cb = *b;
@@ -1170,7 +1173,7 @@ typedef struct {
 
 static void *render_job_fn(void *arg) {
     RenderJob *job = arg;
-    if (entry_disabled(job->app, job->entry->name)) {
+    if (!job->entry || !job->entry->name || entry_disabled(job->app, job->entry->name)) {
         job->out = NULL;
         return NULL;
     }
@@ -1193,28 +1196,76 @@ static char **render_modules_with(const App *app, const BuildEntry *entries, siz
     if (n > 1) {
         RenderJob *jobs = calloc(n, sizeof(RenderJob));
         pthread_t *ths = calloc(n, sizeof(pthread_t));
-        for (size_t i = 0; i < n; i++) {
-            jobs[i].app = app;
-            jobs[i].entry = (BuildEntry *)&entries[i];
-            jobs[i].idx = i;
-            pthread_create(&ths[i], NULL, render_job_fn, &jobs[i]);
-        }
-        for (size_t i = 0; i < n; i++) {
-            pthread_join(ths[i], NULL);
-            ordered = realloc(ordered, (nordered + 1) * sizeof(Ordered));
-            ordered[nordered].idx = jobs[i].idx;
-            ordered[nordered].out = jobs[i].out;
-            nordered++;
-        }
-        free(jobs);
-        free(ths);
-        for (size_t i = 0; i < nordered; i++) {
-            for (size_t j = i + 1; j < nordered; j++) {
-                if (ordered[j].idx < ordered[i].idx) {
-                    Ordered t = ordered[i];
-                    ordered[i] = ordered[j];
-                    ordered[j] = t;
+        unsigned char *started = calloc(n, 1);
+        if (!jobs || !ths || !started) {
+            free(jobs);
+            free(ths);
+            free(started);
+            /* Fall through to serial path on OOM. */
+        } else {
+            for (size_t i = 0; i < n; i++) {
+                jobs[i].app = app;
+                jobs[i].entry = (BuildEntry *)&entries[i];
+                jobs[i].idx = i;
+                jobs[i].out = NULL;
+                if (pthread_create(&ths[i], NULL, render_job_fn, &jobs[i]) == 0)
+                    started[i] = 1;
+                else {
+                    /* Spawn failed: run inline so ordering is preserved. */
+                    render_job_fn(&jobs[i]);
                 }
+            }
+            for (size_t i = 0; i < n; i++) {
+                if (started[i])
+                    pthread_join(ths[i], NULL);
+                Ordered *no = realloc(ordered, (nordered + 1) * sizeof(Ordered));
+                if (!no)
+                    break;
+                ordered = no;
+                ordered[nordered].idx = jobs[i].idx;
+                ordered[nordered].out = jobs[i].out;
+                nordered++;
+            }
+            free(jobs);
+            free(ths);
+            free(started);
+            for (size_t i = 0; i < nordered; i++) {
+                for (size_t j = i + 1; j < nordered; j++) {
+                    if (ordered[j].idx < ordered[i].idx) {
+                        Ordered t = ordered[i];
+                        ordered[i] = ordered[j];
+                        ordered[j] = t;
+                    }
+                }
+            }
+        }
+        if (nordered == 0 && (n > 1)) {
+            /* Thread path failed entirely; render serially below. */
+            for (size_t i = 0; i < n; i++) {
+                if (entry_disabled(app, entries[i].name)) {
+                    Ordered *no = realloc(ordered, (nordered + 1) * sizeof(Ordered));
+                    if (!no)
+                        break;
+                    ordered = no;
+                    ordered[nordered].idx = i;
+                    ordered[nordered].out = NULL;
+                    nordered++;
+                    continue;
+                }
+                ModuleInstance inst;
+                instance_for(&entries[i], &inst);
+                ModuleOutput *o = module_run_instance(&inst, &app->config);
+                module_instance_free(&inst);
+                Ordered *no = realloc(ordered, (nordered + 1) * sizeof(Ordered));
+                if (!no) {
+                    module_output_free_contents(o);
+                    free(o);
+                    break;
+                }
+                ordered = no;
+                ordered[nordered].idx = i;
+                ordered[nordered].out = o;
+                nordered++;
             }
         }
     } else {
@@ -1337,16 +1388,19 @@ static int live_have_term = 0;
 
 static void live_signal_restore(int sig) {
     const char seq[] = "\x1b[?25h\x1b[0m\n";
+    /* Async-signal-safe only: write + re-raise. tcsetattr/signal are not
+     * safe inside a fault handler and deadlocked on allocator crashes. */
     write(STDOUT_FILENO, seq, sizeof seq - 1);
-    if (live_have_term)
-        tcsetattr(STDOUT_FILENO, TCSANOW, &live_saved_term);
     signal(sig, SIG_DFL);
     raise(sig);
 }
 
 static void install_live_signal_handlers(void) {
-    int sigs[] = {SIGTERM, SIGINT, SIGHUP, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGABRT};
-    for (size_t i = 0; i < 8; i++)
+    /* Only termination signals. Never catch SIGBUS/SIGFPE/SIGILL/SIGSEGV/
+     * SIGABRT: running non-async-safe code in a fault handler causes
+     * deadlock/double-fault and masks the real crash. */
+    int sigs[] = {SIGTERM, SIGINT, SIGHUP};
+    for (size_t i = 0; i < 3; i++)
         signal(sigs[i], live_signal_restore);
 }
 
@@ -1370,6 +1424,30 @@ typedef struct {
     size_t cap;
 } KeyQueue;
 
+static int keyqueue_push(KeyQueue *pending, const uint8_t *buf, size_t k) {
+    if (k <= 1)
+        return 1;
+    size_t need = pending->len + k - 1;
+    if (need > pending->cap) {
+        size_t ncap = pending->cap ? pending->cap * 2 : 32;
+        while (ncap < need) {
+            ncap *= 2;
+            if (ncap > 4096) {
+                /* Drop overflow instead of OOM-crashing live loop. */
+                return 0;
+            }
+        }
+        uint8_t *nd = realloc(pending->data, ncap);
+        if (!nd)
+            return 0;
+        pending->data = nd;
+        pending->cap = ncap;
+    }
+    memcpy(pending->data + pending->len, buf + 1, k - 1);
+    pending->len += k - 1;
+    return 1;
+}
+
 static int poll_key_byte(int tty_fd, int is_tty, KeyQueue *pending) {
     if (pending->len > 0) {
         int b = pending->data[0];
@@ -1382,14 +1460,7 @@ static int poll_key_byte(int tty_fd, int is_tty, KeyQueue *pending) {
         ssize_t k = read(tty_fd, buf, sizeof buf);
         if (k > 0) {
             debug_log_keys("tty", buf, (size_t)k);
-            if ((size_t)k > 1) {
-                while (pending->len + (size_t)k - 1 > pending->cap) {
-                    pending->cap = pending->cap ? pending->cap * 2 : 32;
-                    pending->data = realloc(pending->data, pending->cap);
-                }
-                memcpy(pending->data + pending->len, buf + 1, (size_t)k - 1);
-                pending->len += (size_t)k - 1;
-            }
+            keyqueue_push(pending, buf, (size_t)k);
             return buf[0];
         }
     }
@@ -1403,14 +1474,7 @@ static int poll_key_byte(int tty_fd, int is_tty, KeyQueue *pending) {
         fcntl(STDIN_FILENO, F_SETFL, flags);
         if (k > 0) {
             debug_log_keys("stdin", buf, (size_t)k);
-            if ((size_t)k > 1) {
-                while (pending->len + (size_t)k - 1 > pending->cap) {
-                    pending->cap = pending->cap ? pending->cap * 2 : 32;
-                    pending->data = realloc(pending->data, pending->cap);
-                }
-                memcpy(pending->data + pending->len, buf + 1, (size_t)k - 1);
-                pending->len += (size_t)k - 1;
-            }
+            keyqueue_push(pending, buf, (size_t)k);
             return buf[0];
         }
     }
@@ -1443,12 +1507,13 @@ static KeyAction poll_key_action(int tty_fd, int is_tty, KeyQueue *pending) {
 }
 
 static void apply_display_sharkvis_static(char **lines, size_t n) {
-    LiveFrame fr;
-    memset(&fr, 0, sizeof fr);
     for (size_t i = 0; i < n; i++) {
         Rgb live = {0, 0, 0};
-        char *tmp = malloc(strlen(lines[i]) + 32);
-        sv_swap_placeholders(lines[i], 0, live, NULL, tmp, strlen(lines[i]) + 32);
+        size_t need = strlen(lines[i]) + 32;
+        char *tmp = malloc(need);
+        if (!tmp)
+            continue;
+        sv_swap_placeholders(lines[i], 0, live, NULL, tmp, need);
         free(lines[i]);
         lines[i] = tmp;
     }
@@ -1573,32 +1638,107 @@ typedef struct {
 
 static void *refresh_thread_fn(void *arg) {
     RefreshState *st = arg;
+    /* Snapshot shared inputs under lock so the main thread cannot
+     * free/realloc cfg/disabled/entries underneath us. Rendering itself
+     * runs without the lock. */
     App tmp;
     memset(&tmp, 0, sizeof tmp);
+    BuildEntry *entries = NULL;
+    size_t nentries = 0;
+    pthread_mutex_lock(&st->mu);
     config_clone(&tmp.config, &st->cfg);
     tmp.options.structure_disabled = NULL;
     tmp.options.ndisabled = 0;
     for (size_t i = 0; i < st->ndisabled; i++) {
-        tmp.options.structure_disabled =
-            realloc(tmp.options.structure_disabled, (i + 1) * sizeof(char *));
-        tmp.options.structure_disabled[i] = strdup(st->disabled[i]);
-        tmp.options.ndisabled++;
+        char *d = st->disabled[i] ? strdup(st->disabled[i]) : NULL;
+        if (!d)
+            continue;
+        char **nd = realloc(tmp.options.structure_disabled,
+                            (tmp.options.ndisabled + 1) * sizeof(char *));
+        if (!nd) {
+            free(d);
+            continue;
+        }
+        tmp.options.structure_disabled = nd;
+        tmp.options.structure_disabled[tmp.options.ndisabled++] = d;
     }
+    nentries = st->nentries;
+    if (nentries > 0) {
+        entries = calloc(nentries, sizeof(BuildEntry));
+        if (entries) {
+            for (size_t i = 0; i < nentries; i++) {
+                entries[i].is_object = st->entries[i].is_object;
+                entries[i].name = st->entries[i].name ? strdup(st->entries[i].name) : NULL;
+                if (st->entries[i].args.key)
+                    entries[i].args.key = strdup(st->entries[i].args.key);
+                if (st->entries[i].args.key_color)
+                    entries[i].args.key_color = strdup(st->entries[i].args.key_color);
+                if (st->entries[i].args.format)
+                    entries[i].args.format = strdup(st->entries[i].args.format);
+                if (st->entries[i].args.prefix)
+                    entries[i].args.prefix = strdup(st->entries[i].args.prefix);
+                entries[i].args.hide_if_empty = st->entries[i].args.hide_if_empty;
+                entries[i].args.hide_if_not_supported =
+                    st->entries[i].args.hide_if_not_supported;
+                if (st->entries[i].args.output_color)
+                    entries[i].args.output_color = strdup(st->entries[i].args.output_color);
+                entries[i].args.title = st->entries[i].args.title;
+                if (st->entries[i].args.type)
+                    entries[i].args.type = strdup(st->entries[i].args.type);
+                entries[i].args.has_fmt = st->entries[i].args.has_fmt;
+                entries[i].raw = json_clone(st->entries[i].raw);
+                if (!entries[i].name) {
+                    /* Mark unusable; render skips NULL names safely. */
+                    json_free(entries[i].raw);
+                    entries[i].raw = NULL;
+                }
+            }
+        } else {
+            nentries = 0;
+        }
+    }
+    unsigned long long gen = st->gen;
+    pthread_mutex_unlock(&st->mu);
     size_t nl = 0;
-    char **lines = render_modules_with(&tmp, st->entries, st->nentries, &nl);
+    char **lines = NULL;
+    if (entries || nentries == 0)
+        lines = render_modules_with(&tmp, entries ? entries : st->entries,
+                                    entries ? nentries : 0, &nl);
     config_free(&tmp.config);
     for (size_t i = 0; i < tmp.options.ndisabled; i++)
         free(tmp.options.structure_disabled[i]);
     free(tmp.options.structure_disabled);
+    if (entries) {
+        for (size_t i = 0; i < nentries; i++) {
+            free(entries[i].name);
+            free(entries[i].args.key);
+            free(entries[i].args.key_color);
+            free(entries[i].args.format);
+            free(entries[i].args.prefix);
+            free(entries[i].args.output_color);
+            free(entries[i].args.type);
+            json_free(entries[i].raw);
+        }
+        free(entries);
+    }
     pthread_mutex_lock(&st->mu);
     if (st->ready) {
         for (size_t i = 0; i < st->nlines; i++)
             free(st->lines[i]);
         free(st->lines);
     }
-    st->lines = lines;
-    st->nlines = nl;
-    st->ready = 1;
+    /* Drop stale results: only publish if generation still matches, else
+     * free immediately so a config reload never resurrects old lines. */
+    if (gen == st->gen) {
+        st->lines = lines;
+        st->nlines = nl;
+        st->ready = 1;
+    } else {
+        for (size_t i = 0; i < nl; i++)
+            free(lines[i]);
+        free(lines);
+        /* ready stays 0; main thread will clear busy on timeout/join. */
+    }
     pthread_mutex_unlock(&st->mu);
     return NULL;
 }
@@ -1627,17 +1767,26 @@ static void draw_animated_frame(JfBuf *out, const char **anim_lines, size_t nani
             }
         }
         char *t = line.data ? line.data : strdup("");
+        if (!t) {
+            jf_buf_free(&line);
+            continue;
+        }
         char *e = t + strlen(t);
         while (e > t && (e[-1] == ' ' || e[-1] == '\t'))
             *--e = 0;
-        char *clipped = malloc(strlen(t) + 16);
-        jf_truncate_visible(t, cols, clipped, strlen(t) + 16);
-        jf_buf_put(out, clipped);
+        size_t tl = strlen(t);
+        char *clipped = malloc(tl + 16);
+        if (!clipped) {
+            jf_buf_put(out, t);
+        } else {
+            jf_truncate_visible(t, cols, clipped, tl + 16);
+            jf_buf_put(out, clipped);
+            free(clipped);
+        }
         jf_buf_put(out, "\x1b[K");
         if (row + 1 < nanim)
             jf_buf_putc(out, '\n');
         free(t);
-        free(clipped);
     }
     jf_buf_put(out, "\x1b[J");
 }
@@ -1648,6 +1797,7 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
     size_t logo_h = logo ? logo->nlines : 0;
     size_t logo_w = logo ? logo->width : 0;
     size_t logo_gap = logo ? logo->padding_right : 0;
+    int logo_live = display_live && live && sv_has_display_color(live);
     for (size_t row = 0; row < render_height; row++) {
         JfBuf line;
         memset(&line, 0, sizeof line);
@@ -1658,10 +1808,48 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
                 const char *cn = i < logo->ncolors ? logo->colors[i] : "";
                 char lcol[8192];
                 colorize_logo_str(logo_line, cn, lcol, sizeof lcol);
-                size_t vis = jf_visible_len(lcol);
-                jf_buf_put(&line, lcol);
-                for (size_t k = vis; k < logo_w; k++)
-                    jf_buf_putc(&line, ' ');
+                if (logo_live) {
+                    /* Parity with animated tint: same endpoints, same
+                     * top=hi direction, same render_height span, same
+                     * palette-vs-truecolor escape. Overrides builtin color. */
+                    Rgb g;
+                    int has = 0;
+                    if (live->has_flat) {
+                        g = live->flat;
+                        has = 1;
+                    } else if (live->has_grad) {
+                        float t = render_height > 1
+                                      ? (float)(render_height - 1 - row) /
+                                            (float)(render_height - 1)
+                                      : 0.5f;
+                        g = sv_lerp_rgb(live->glo, live->ghi, t);
+                        has = 1;
+                    }
+                    if (has) {
+                        char esc[32];
+                        const Rgb *tp = live->has_term_pal ? live->term_pal : NULL;
+                        sv_live_esc(tp, g, esc, sizeof esc);
+                        /* Strip builtin SGR so gradient is exact like anim. */
+                        char plain[8192];
+                        jf_strip_sgr(lcol, plain, sizeof plain);
+                        size_t vis = jf_visible_len(plain);
+                        jf_buf_put(&line, esc);
+                        jf_buf_put(&line, plain);
+                        jf_buf_put(&line, "\x1b[0m");
+                        for (size_t k = vis; k < logo_w; k++)
+                            jf_buf_putc(&line, ' ');
+                    } else {
+                        size_t vis = jf_visible_len(lcol);
+                        jf_buf_put(&line, lcol);
+                        for (size_t k = vis; k < logo_w; k++)
+                            jf_buf_putc(&line, ' ');
+                    }
+                } else {
+                    size_t vis = jf_visible_len(lcol);
+                    jf_buf_put(&line, lcol);
+                    for (size_t k = vis; k < logo_w; k++)
+                        jf_buf_putc(&line, ' ');
+                }
             } else if (logo_w > 0) {
                 for (size_t k = 0; k < logo_w; k++)
                     jf_buf_putc(&line, ' ');
@@ -1686,16 +1874,26 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
             }
         }
         char *t = line.data ? line.data : strdup("");
+        if (!t) {
+            jf_buf_free(&line);
+            continue;
+        }
         char *e = t + strlen(t);
         while (e > t && (e[-1] == ' ' || e[-1] == '\t'))
             *--e = 0;
-        char *clipped = malloc(strlen(t) + 16);
-        jf_buf_put(out, clipped);
+        size_t tl = strlen(t);
+        char *clipped = malloc(tl + 16);
+        if (!clipped) {
+            jf_buf_put(out, t);
+        } else {
+            jf_truncate_visible(t, cols, clipped, tl + 16);
+            jf_buf_put(out, clipped);
+            free(clipped);
+        }
         jf_buf_put(out, "\x1b[K");
         if (row + 1 < render_height)
             jf_buf_putc(out, '\n');
         free(t);
-        free(clipped);
     }
     jf_buf_put(out, "\x1b[J");
 }
@@ -1767,6 +1965,8 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     memset(&refresh, 0, sizeof refresh);
     pthread_mutex_init(&refresh.mu, NULL);
     int refresh_busy = 0;
+    pthread_t refresh_thr;
+    int has_refresh_thr = 0;
     unsigned long long refresh_gen = 0;
     uint64_t last_refresh = jf_now_ms();
     uint64_t last_config_check = jf_now_ms() - 1000;
@@ -1809,8 +2009,21 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                             base_logo ? anim_build_cloud(base_logo, &active_cfg) : NULL;
                         using_active = 0;
                         animated = should_animate(app) && base_logo != NULL;
+                        /* Bump generation so any in-flight refresh result is
+                         * discarded. Do NOT touch refresh.cfg/entries or clear
+                         * refresh_busy here: the worker may still be reading
+                         * them. The next snapshot happens once it finishes. */
                         refresh_gen++;
-                        refresh_busy = 0;
+                        pthread_mutex_lock(&refresh.mu);
+                        refresh.gen = refresh_gen;
+                        /* Drop any already-ready stale lines. */
+                        refresh.ready = 0;
+                        for (size_t i = 0; i < refresh.nlines; i++)
+                            free(refresh.lines[i]);
+                        free(refresh.lines);
+                        refresh.lines = NULL;
+                        refresh.nlines = 0;
+                        pthread_mutex_unlock(&refresh.mu);
                         last_refresh = jf_now_ms() - 2000;
                     } else {
                         config_free(&nc);
@@ -1819,9 +2032,15 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             }
         }
         if (now - last_refresh >= 1000 && !refresh_busy) {
+            /* Reclaim the previous joinable worker before reusing state. */
+            if (has_refresh_thr) {
+                pthread_join(refresh_thr, NULL);
+                has_refresh_thr = 0;
+            }
             last_refresh = now;
             refresh_busy = 1;
             refresh_gen++;
+            pthread_mutex_lock(&refresh.mu);
             config_free(&refresh.cfg);
             memset(&refresh.cfg, 0, sizeof refresh.cfg);
             config_clone(&refresh.cfg, &app->config);
@@ -1831,25 +2050,50 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             refresh.disabled = NULL;
             refresh.ndisabled = 0;
             for (size_t i = 0; i < app->options.ndisabled; i++) {
-                refresh.disabled =
-                    realloc(refresh.disabled, (refresh.ndisabled + 1) * sizeof(char *));
-                refresh.disabled[refresh.ndisabled++] =
-                    strdup(app->options.structure_disabled[i]);
+                if (!app->options.structure_disabled[i])
+                    continue;
+                char *d = strdup(app->options.structure_disabled[i]);
+                if (!d)
+                    continue;
+                char **nd = realloc(refresh.disabled,
+                                    (refresh.ndisabled + 1) * sizeof(char *));
+                if (!nd) {
+                    free(d);
+                    continue;
+                }
+                refresh.disabled = nd;
+                refresh.disabled[refresh.ndisabled++] = d;
             }
             for (size_t i = 0; i < refresh.nentries; i++) {
                 free(refresh.entries[i].name);
+                free(refresh.entries[i].args.key);
+                free(refresh.entries[i].args.key_color);
+                free(refresh.entries[i].args.format);
+                free(refresh.entries[i].args.prefix);
+                free(refresh.entries[i].args.output_color);
+                free(refresh.entries[i].args.type);
                 json_free(refresh.entries[i].raw);
             }
             free(refresh.entries);
             refresh.entries = NULL;
             refresh.nentries = 0;
+            int entries_ok = 1;
             for (size_t i = 0; i < nentries; i++) {
-                refresh.entries =
-                    realloc(refresh.entries, (refresh.nentries + 1) * sizeof(BuildEntry));
+                BuildEntry *nd = realloc(refresh.entries,
+                                         (refresh.nentries + 1) * sizeof(BuildEntry));
+                if (!nd) {
+                    entries_ok = 0;
+                    break;
+                }
+                refresh.entries = nd;
                 BuildEntry *d = &refresh.entries[refresh.nentries++];
                 memset(d, 0, sizeof *d);
                 d->is_object = entries[i].is_object;
-                d->name = strdup(entries[i].name);
+                d->name = entries[i].name ? strdup(entries[i].name) : NULL;
+                if (!d->name) {
+                    refresh.nentries--;
+                    continue;
+                }
                 if (entries[i].args.key)
                     d->args.key = strdup(entries[i].args.key);
                 if (entries[i].args.key_color)
@@ -1868,8 +2112,8 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 d->args.has_fmt = entries[i].args.has_fmt;
                 d->raw = json_clone(entries[i].raw);
             }
+            (void)entries_ok;
             refresh.gen = refresh_gen;
-            pthread_mutex_lock(&refresh.mu);
             refresh.ready = 0;
             for (size_t i = 0; i < refresh.nlines; i++)
                 free(refresh.lines[i]);
@@ -1877,16 +2121,28 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             refresh.lines = NULL;
             refresh.nlines = 0;
             pthread_mutex_unlock(&refresh.mu);
-            pthread_t th;
-            pthread_attr_t at;
-            pthread_attr_init(&at);
-            pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-            pthread_create(&th, &at, refresh_thread_fn, &refresh);
-            pthread_attr_destroy(&at);
+            if (pthread_create(&refresh_thr, NULL, refresh_thread_fn, &refresh) == 0) {
+                has_refresh_thr = 1;
+            } else {
+                /* Thread spawn failed: fall back to synchronous refresh so
+                 * we never join a garbage handle. */
+                pthread_mutex_lock(&refresh.mu);
+                refresh_busy = 0;
+                pthread_mutex_unlock(&refresh.mu);
+            }
         }
         pthread_mutex_lock(&refresh.mu);
         if (refresh.ready) {
             refresh.ready = 0;
+            /* Join here (worker has exited once ready==1) so the handle is
+             * reclaimed before the next spawn. Non-blocking: worker already
+             * done, join returns immediately. */
+            pthread_mutex_unlock(&refresh.mu);
+            if (has_refresh_thr) {
+                pthread_join(refresh_thr, NULL);
+                has_refresh_thr = 0;
+            }
+            pthread_mutex_lock(&refresh.mu);
             refresh_busy = 0;
             if (refresh.gen == refresh_gen) {
                 for (size_t i = 0; i < nbase; i++)
@@ -1990,19 +2246,44 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                         fx.grad_hi[0] = shark_live.ghi.r;
                         fx.grad_hi[1] = shark_live.ghi.g;
                         fx.grad_hi[2] = shark_live.ghi.b;
+                        /* Text path uses live->term_pal for exact palette hits;
+                         * logo must too or same RGB renders differently. */
+                        if (shark_live.has_term_pal) {
+                            fx.has_term_pal = 1;
+                            memcpy(fx.term_pal, shark_live.term_pal, sizeof fx.term_pal);
+                        }
                     } else if (shark_live.has_flat) {
                         fx.has_grad = 1;
                         fx.grad_lo[0] = fx.grad_hi[0] = shark_live.flat.r;
                         fx.grad_lo[1] = fx.grad_hi[1] = shark_live.flat.g;
                         fx.grad_lo[2] = fx.grad_hi[2] = shark_live.flat.b;
+                        if (shark_live.has_term_pal) {
+                            fx.has_term_pal = 1;
+                            memcpy(fx.term_pal, shark_live.term_pal, sizeof fx.term_pal);
+                        }
                     }
                 }
-                if (!ccfg->original_glyphs && !ccfg->shading_explicit && shark_live.nglyphs) {
-                    fx.has_shading = 1;
-                    fx.shading = malloc(shark_live.nglyphs * sizeof(char *));
-                    fx.nshading = 0;
-                    for (size_t i = 0; i < shark_live.nglyphs; i++)
-                        fx.shading[fx.nshading++] = strdup(shark_live.glyphs[i]);
+                if (!ccfg->original_glyphs && !ccfg->shading_explicit && shark_live.nglyphs &&
+                    shark_live.glyphs) {
+                    char **sh = malloc(shark_live.nglyphs * sizeof(char *));
+                    if (sh) {
+                        fx.has_shading = 1;
+                        fx.shading = sh;
+                        fx.nshading = 0;
+                        for (size_t i = 0; i < shark_live.nglyphs; i++) {
+                            if (!shark_live.glyphs[i])
+                                continue;
+                            char *d = strdup(shark_live.glyphs[i]);
+                            if (!d)
+                                continue;
+                            fx.shading[fx.nshading++] = d;
+                        }
+                        if (fx.nshading == 0) {
+                            free(fx.shading);
+                            fx.shading = NULL;
+                            fx.has_shading = 0;
+                        }
+                    }
                 }
                 float yaw_step = 0, pitch_step = 0;
                 anim_stereo_spin(shark_live.left, shark_live.right, &yaw_step, &pitch_step);
@@ -2067,9 +2348,13 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             jf_buf_free(&frame);
             if (!jf_colors_enabled()) {
                 char *tmp = malloc(out.len + 1);
-                jf_strip_sgr(out.data ? out.data : "", tmp, out.len + 1);
-                printf("%s", tmp);
-                free(tmp);
+                if (tmp) {
+                    jf_strip_sgr(out.data ? out.data : "", tmp, out.len + 1);
+                    printf("%s", tmp);
+                    free(tmp);
+                } else {
+                    printf("%s", out.data ? out.data : "");
+                }
             } else {
                 printf("%s", out.data ? out.data : "");
             }
@@ -2086,9 +2371,13 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             jf_buf_free(&frame);
             if (!jf_colors_enabled()) {
                 char *tmp = malloc(out.len + 1);
-                jf_strip_sgr(out.data ? out.data : "", tmp, out.len + 1);
-                printf("%s", tmp);
-                free(tmp);
+                if (tmp) {
+                    jf_strip_sgr(out.data ? out.data : "", tmp, out.len + 1);
+                    printf("%s", tmp);
+                    free(tmp);
+                } else {
+                    printf("%s", out.data ? out.data : "");
+                }
             } else {
                 printf("%s", out.data ? out.data : "");
             }
@@ -2120,23 +2409,21 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     }
     printf("\x1b[?25h\x1b[0m\n");
     fflush(stdout);
-    /* The refresh worker is detached and borrows this frame (refresh.cfg,
-     * entries, mutex). Wait for it before tearing anything down. */
-    for (int w = 0; w < 400 && refresh_busy; w++) {
-        struct timespec tw = {0, 5000000};
-        nanosleep(&tw, NULL);
-        pthread_mutex_lock(&refresh.mu);
-        if (refresh.ready) {
-            refresh.ready = 0;
-            refresh_busy = 0;
-            for (size_t i = 0; i < refresh.nlines; i++)
-                free(refresh.lines[i]);
-            free(refresh.lines);
-            refresh.lines = NULL;
-            refresh.nlines = 0;
-        }
-        pthread_mutex_unlock(&refresh.mu);
+    /* Joinable worker borrows refresh state: join before teardown so we never
+     * free cfg/entries/mutex underneath it. */
+    if (has_refresh_thr) {
+        pthread_join(refresh_thr, NULL);
+        has_refresh_thr = 0;
     }
+    pthread_mutex_lock(&refresh.mu);
+    refresh_busy = 0;
+    refresh.ready = 0;
+    for (size_t i = 0; i < refresh.nlines; i++)
+        free(refresh.lines[i]);
+    free(refresh.lines);
+    refresh.lines = NULL;
+    refresh.nlines = 0;
+    pthread_mutex_unlock(&refresh.mu);
     if (have_term)
         tcsetattr(tty_fd, TCSANOW, &orig_term);
     if (ttyf)
