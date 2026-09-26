@@ -1550,6 +1550,18 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         y_center = (float)h * 0.5f;
     float k1x2 = k1 * 2.0f;
     size_t ink_top = h, ink_bot = 0;
+    int xspan = 1, yspan = 1;
+    if (k1 > 0.0f && sub_cols > 0 && sub_rows > 0) {
+        float eff = k1 * 0.14f * oos;
+        if (eff > 1.0f) {
+            xspan = (int)ceilf(eff * (float)sub_cols);
+            yspan = (int)ceilf(eff * (float)sub_rows);
+            if (xspan < 1)
+                xspan = 1;
+            if (yspan < 1)
+                yspan = 1;
+        }
+    }
     for (size_t pi = 0; pi < cloud->npoints; pi++) {
         const Point *pt = &cloud->points[pi];
         float y1 = pt->y * ca - pt->z * sa;
@@ -1581,29 +1593,39 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         int ys = (int)floorf((y_center - k1 * y3 * oos) * (float)sub_rows + 0.5f);
         if (xs < 0 || xs >= (int)sw || ys < 0 || ys >= (int)sh)
             continue;
-        size_t idx = (size_t)ys * sw + (size_t)xs;
-        if (ooz > zbuf[idx]) {
-            float diff = nx3 * lx + ny3 * ly + nz3 * lz;
-            if (diff < 0.0f)
-                diff = 0.0f;
-            float sd = nx3 * hlx + ny3 * hly + nz3 * hlz;
-            if (sd < 0.0f)
-                sd = 0.0f;
-            float spec = sd * sd;
-            spec = spec * spec;
-            spec = spec * spec;
-            float lum = 0.08f + 0.62f * diff + 0.30f * spec;
-            if (lum > 1.0f)
-                lum = 1.0f;
-            zbuf[idx] = ooz;
-            lumbuf[idx] = lum;
-            colorbuf[idx] = pt->color;
-            memcpy(glyphbuf[idx], pt->glyph, 8);
-            size_t yr = (size_t)ys / sub_rows;
-            if (yr < ink_top)
-                ink_top = yr;
-            if (yr > ink_bot)
-                ink_bot = yr;
+        float diff = nx3 * lx + ny3 * ly + nz3 * lz;
+        if (diff < 0.0f)
+            diff = 0.0f;
+        float sd = nx3 * hlx + ny3 * hly + nz3 * hlz;
+        if (sd < 0.0f)
+            sd = 0.0f;
+        float spec = sd * sd;
+        spec = spec * spec;
+        spec = spec * spec;
+        float lum = 0.08f + 0.62f * diff + 0.30f * spec;
+        if (lum > 1.0f)
+            lum = 1.0f;
+        for (int dy = 0; dy < yspan; dy++) {
+            int yy = ys + dy;
+            if (yy < 0 || yy >= (int)sh)
+                continue;
+            for (int dx = 0; dx < xspan; dx++) {
+                int xx = xs + dx;
+                if (xx < 0 || xx >= (int)sw)
+                    continue;
+                size_t idx = (size_t)yy * sw + (size_t)xx;
+                if (ooz > zbuf[idx]) {
+                    zbuf[idx] = ooz;
+                    lumbuf[idx] = lum;
+                    colorbuf[idx] = pt->color;
+                    memcpy(glyphbuf[idx], pt->glyph, 8);
+                    size_t yr = (size_t)yy / sub_rows;
+                    if (yr < ink_top)
+                        ink_top = yr;
+                    if (yr > ink_bot)
+                        ink_bot = yr;
+                }
+            }
         }
     }
     const char **shading;
