@@ -981,6 +981,7 @@ struct LogoCloud {
     size_t tint_ymax;
     int tint_has_term_pal;
     unsigned char tint_term_pal[16 * 3];
+    size_t src_rows;
 };
 
 static void build_points(CellRow *cells, size_t nrows, int has_ansi, const AnimConfig *c,
@@ -1322,6 +1323,7 @@ LogoCloud *anim_build_cloud(const ResolvedLogo *logo, const AnimConfig *config) 
     c->points = points;
     c->npoints = npoints;
     c->has_ansi = has_ansi;
+    c->src_rows = nrows;
     c->sub_rows = sr;
     c->sub_cols = sc;
     c->palette_ansi = malloc((npalette ? npalette : 1) * sizeof(char *));
@@ -1455,9 +1457,6 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
     size_t sub_cols = cloud->sub_cols;
     int has_ansi = cloud->has_ansi;
     size_t rh = render_height > 1 ? render_height : 1;
-    size_t logo_height = rh < (size_t)(60 * 3 / 5) ? rh : (size_t)(60 * 3 / 5);
-    if (logo_height < 1)
-        logo_height = 1;
     float zoom = 1.0f;
     if (fx->scale == fx->scale && fx->scale > 0.0f) {
         zoom = fx->scale;
@@ -1466,7 +1465,17 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         if (zoom > 2.0f)
             zoom = 2.0f;
     }
-    float k1 = 37.0f * (float)logo_height / 36.0f * zoom;
+    /* Exact 1:1 projection scale (cells are 0.07 wide, 0.14 tall): source
+     * rows/cols land on distinct output rows/cols so symbols match the
+     * static logo instead of merging. Shrinks only when the logo would
+     * not fit the frame. True depth is still used for occlusion below. */
+    float oos = 1.0f / 5.5f;
+    float k1 = 1.0f / (0.14f * oos) * zoom;
+    if (cloud->src_rows > 1 && rh > 1) {
+        float fit = (float)(rh - 1) / ((float)(cloud->src_rows - 1) * 0.14f * oos);
+        if (fit < k1)
+            k1 = fit > 0.0f ? fit : 0.0f;
+    }
     float half_aw = 60.0f * 0.5f;
     size_t w = 60;
     size_t h = rh;
@@ -1563,8 +1572,13 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         if (zc < 0.1f)
             continue;
         float ooz = 1.0f / zc;
-        int xs = (int)((half_aw + k1x2 * x3 * ooz) * (float)sub_cols);
-        int ys = (int)((y_center - k1 * y3 * ooz) * (float)sub_rows);
+        /* Orthographic screen mapping at the logo plane: both shells land
+         * in the same cells so the depth test picks the camera-facing one
+         * instead of smearing back-shell glyphs into neighboring gaps.
+         * Round to nearest: with ~1.0 cell steps, float dust plus
+         * truncation would otherwise eat whole columns. */
+        int xs = (int)floorf((half_aw + k1x2 * x3 * oos) * (float)sub_cols + 0.5f);
+        int ys = (int)floorf((y_center - k1 * y3 * oos) * (float)sub_rows + 0.5f);
         if (xs < 0 || xs >= (int)sw || ys < 0 || ys >= (int)sh)
             continue;
         size_t idx = (size_t)ys * sw + (size_t)xs;
