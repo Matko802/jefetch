@@ -1893,6 +1893,7 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     double spin_phase = 0, yaw_phase = 0, pitch_phase = 0, roll_phase = 0;
     double noise_floor = -1;
     double sound_hold = 0;
+    double swell_env = 0;
     int at_rest = 0;
     uint64_t last_fx = jf_now_ms(), last_sound = jf_now_ms();
     char *watch_path = NULL;
@@ -2322,7 +2323,10 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 fx.audio[1] = (float)yaw_phase;
                 fx.audio[2] = (float)roll_phase;
                 float boom = ccfg->has_boom ? ccfg->boom : 0.0f;
-                fx.scale = at_rest ? 1.0f : 1.0f + ccfg->grow * shark_live.beat + boom * live_energy;
+                float swell = at_rest ? 0.0f : ccfg->grow * shark_live.beat + boom * live_energy;
+                double env_k = 1.0 - exp((double)-dt / ((double)swell > swell_env ? 0.08 : 0.25));
+                swell_env += ((double)swell - swell_env) * env_k;
+                fx.scale = at_rest ? 1.0f : 1.0f + (float)swell_env;
             }
             if (term_flow && !fx.has_grad && shark_live.has_grad) {
                 fx.has_grad = 1;
