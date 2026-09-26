@@ -43,7 +43,7 @@ Config is located in `~/.config/jefetch/config.jsonc`
     "logo": {
         "source": "cachyos",
         "animation": "spin speed=0 xyz",
-        "sharkvis": "return=10 chars=blocks",
+        "sharkvis": "return=10 boom=10 chars=blocks",
         "padding": {
             "top": 0,
             "left": 0,
@@ -158,7 +158,7 @@ are ignored.
 Only the axes you enabled respond to audio: heavy right channel yaws `y`
 right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 `z`. Silence holds still. Each kick dips the logo, it never dims, and
-the 3D itself never changes size with volume.
+`boom=N` makes it swell with volume.
 
 Colors stay the logo's own unless you add `color=sharkvis`, which hands them
 over to sharkvis's `gradient_low` → `gradient_high` from
@@ -179,7 +179,7 @@ Without it the logo stays where the music left it.
 
 ```jsonc
 "animation": "spin y speed=2.0 sharkvis"
-{ "logo": { "animation": "spin xz flat", "sharkvis": "speed=0 chars=ascii" } }
+{ "logo": { "animation": "spin xz flat", "sharkvis": "speed=0 boom=0.3 chars=ascii" } }
 ```
 
 | Value | What it does |
@@ -192,6 +192,8 @@ Without it the logo stays where the music left it.
 | `textcolor=terminal` | Text follows the terminal-color flow too |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
+| `boom=N` | How much it swells with volume, `0`–`1` |
+| `grow=N` | Pulse strength, `0`–`0.3` (default `0.12`, `0` turns it off) |
 | `return=N` | Seconds of silence before easing back to root position; unset means it never returns |
 
 ## CLI Overrides

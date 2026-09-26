@@ -32,6 +32,9 @@ typedef struct {
     int live_term_colors;
     int text_live_colors;
     float beat_depth;
+    float grow;
+    int has_boom;
+    float boom;
     int shading_explicit;
     int chars_set;
     int has_return_secs;

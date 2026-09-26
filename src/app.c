@@ -813,8 +813,7 @@ static void anim_configs(const App *app, AnimConfig *base, AnimConfig *active,
     }
     /* Unset speed stays 0 in sharkvis mode (Rust behavior): with no
      * audio playing the logo holds still; motion comes from audio
-     * (yaw/pitch/roll, beat dip) or an explicit profile speed. The 3D
-     * itself never changes size with volume. */
+     * (yaw/pitch/roll, beat dip, boom) or an explicit profile speed. */
     if (!active->speed_set)
         active->speed = 0.0f;
     *mode = active->sharkvis_set ? active->sharkvis : base->sharkvis;
@@ -2278,6 +2277,8 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 fx.audio[0] = (float)pitch_phase;
                 fx.audio[1] = (float)yaw_phase;
                 fx.audio[2] = (float)roll_phase;
+                float boom = ccfg->has_boom ? ccfg->boom : 0.0f;
+                fx.scale = 1.0f + ccfg->grow * shark_live.beat + boom * shark_live.energy;
             }
             if (term_flow && !fx.has_grad && shark_live.has_grad) {
                 fx.has_grad = 1;
