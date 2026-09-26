@@ -40,7 +40,7 @@ makepkg -si
 ## Usage
 
 <div align="center">
-  <a href="./wiki/Configuration.md"><b>📖 Configuration wiki</b></a>
+  <a href="./wiki/Configuration.md"><b>Wiki</b></a>
 </div>
 
 Its everything here
