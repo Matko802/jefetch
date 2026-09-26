@@ -1896,10 +1896,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     memset(&shark_live, 0, sizeof shark_live);
     uint64_t shark_polled = jf_now_ms() - 1000;
     double spin_phase = 0, yaw_phase = 0, pitch_phase = 0, roll_phase = 0;
-    double noise_floor = -1;
-    double sound_hold = 0;
-    double swell_env = 0;
-    int at_rest = 0;
     uint64_t last_fx = jf_now_ms(), last_sound = jf_now_ms();
     char *watch_path = NULL;
     if (!app->options.no_config) {
@@ -2202,20 +2198,9 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
         if (animated) {
             int logo_active = mode != SVM_OFF && shark_live.active;
             using_active = logo_active ? 1 : 0;
-            if (!using_active)
-                at_rest = 0;
             AnimConfig *ccfg = using_active ? &active_cfg : &base_cfg;
             LogoCloud *cloud = using_active ? active_cloud : base_cloud;
-            float step = shark_live.speed_mult;
-            if (using_active) {
-                float e = shark_live.energy;
-                if (e < 0.0f)
-                    e = 0.0f;
-                if (e > 1.0f)
-                    e = 1.0f;
-                step *= 1.0f + e;
-            }
-            spin_phase += step;
+            spin_phase += (double)shark_live.speed_mult;
             RenderFx fx;
             render_fx_none(&fx);
             if (using_active) {
@@ -2272,66 +2257,25 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 if (dt > 0.5f)
                     dt = 0.5f;
                 last_fx = fx_now;
-                float raw_energy = shark_live.energy;
-                if (raw_energy < 0.0f)
-                    raw_energy = 0.0f;
-                if (raw_energy > 1.0f)
-                    raw_energy = 1.0f;
-                if (noise_floor < 0)
-                    noise_floor = raw_energy < 0.15 ? raw_energy : 0.15;
-                else if (raw_energy < (float)noise_floor)
-                    noise_floor += (raw_energy - noise_floor) * (1.0 - exp((double)-dt / 3.0));
-                else if (raw_energy < 0.15)
-                    noise_floor += (raw_energy - noise_floor) * (1.0 - exp((double)-dt / 18.0));
-                float live_energy = raw_energy - (float)noise_floor;
-                if (live_energy < 0.0f)
-                    live_energy = 0.0f;
-                float live_left = shark_live.left - (float)noise_floor;
-                if (live_left < 0.0f)
-                    live_left = 0.0f;
-                if (live_left > 1.0f)
-                    live_left = 1.0f;
-                float live_right = shark_live.right - (float)noise_floor;
-                if (live_right < 0.0f)
-                    live_right = 0.0f;
-                if (live_right > 1.0f)
-                    live_right = 1.0f;
                 float yaw_step = 0, pitch_step = 0;
-                anim_stereo_spin(live_left, live_right, &yaw_step, &pitch_step);
+                anim_stereo_spin(shark_live.left, shark_live.right, &yaw_step, &pitch_step);
                 yaw_phase += yaw_step;
                 pitch_phase += pitch_step;
-                if (live_energy > 0.04f) {
-                    roll_phase += (double)live_energy * 0.09;
-                    sound_hold += (double)dt;
-                    at_rest = 0;
-                    if (sound_hold >= 0.06)
-                        last_sound = fx_now;
-                } else {
-                    sound_hold = 0.0;
-                    if (ccfg->has_return_secs) {
-                        if ((float)(fx_now - last_sound) / 1000.0f >= ccfg->return_secs) {
-                            double ny = anim_ease_to_root(yaw_phase, dt);
-                            double np = anim_ease_to_root(pitch_phase, dt);
-                            double nr = anim_ease_to_root(roll_phase, dt);
-                            at_rest = (ny == yaw_phase && np == pitch_phase && nr == roll_phase);
-                            yaw_phase = ny;
-                            pitch_phase = np;
-                            roll_phase = nr;
-                        } else {
-                            at_rest = 0;
-                        }
-                    } else {
-                        at_rest = 0;
+                if (shark_live.energy > 0.04f) {
+                    roll_phase += (double)shark_live.energy * 0.09;
+                    last_sound = fx_now;
+                } else if (ccfg->has_return_secs) {
+                    if ((float)(fx_now - last_sound) / 1000.0f >= ccfg->return_secs) {
+                        yaw_phase = anim_ease_to_root(yaw_phase, dt);
+                        pitch_phase = anim_ease_to_root(pitch_phase, dt);
+                        roll_phase = anim_ease_to_root(roll_phase, dt);
                     }
                 }
                 fx.audio[0] = (float)jf_wrap_angle(pitch_phase);
                 fx.audio[1] = (float)jf_wrap_angle(yaw_phase);
                 fx.audio[2] = (float)jf_wrap_angle(roll_phase);
                 float boom = ccfg->has_boom ? ccfg->boom : 0.0f;
-                float swell = at_rest ? 0.0f : ccfg->grow * shark_live.beat + boom * live_energy;
-                double env_k = 1.0 - exp((double)-dt / ((double)swell > swell_env ? 0.08 : 0.25));
-                swell_env += ((double)swell - swell_env) * env_k;
-                fx.scale = 1.0f + (float)swell_env;
+                fx.scale = 1.0f + ccfg->grow * shark_live.beat + boom * shark_live.energy;
                 if (fx.scale < 1.02f)
                     fx.scale = 1.0f;
             }
