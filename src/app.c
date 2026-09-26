@@ -1,5 +1,6 @@
 #include <dirent.h>
 #include <fcntl.h>
+#include <math.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -1890,6 +1891,7 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
     memset(&shark_live, 0, sizeof shark_live);
     uint64_t shark_polled = jf_now_ms() - 1000;
     double spin_phase = 0, yaw_phase = 0, pitch_phase = 0, roll_phase = 0;
+    double noise_floor = -1;
     uint64_t last_fx = jf_now_ms(), last_sound = jf_now_ms();
     char *watch_path = NULL;
     if (!app->options.no_config) {
@@ -2253,8 +2255,6 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                         }
                     }
                 }
-                float yaw_step = 0, pitch_step = 0;
-                anim_stereo_spin(shark_live.left, shark_live.right, &yaw_step, &pitch_step);
                 uint64_t fx_now = jf_now_ms();
                 float dt = (float)(fx_now - last_fx) / 1000.0f;
                 if (dt < 0.001f)
@@ -2262,10 +2262,36 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 if (dt > 0.5f)
                     dt = 0.5f;
                 last_fx = fx_now;
+                float raw_energy = shark_live.energy;
+                if (raw_energy < 0.0f)
+                    raw_energy = 0.0f;
+                if (raw_energy > 1.0f)
+                    raw_energy = 1.0f;
+                if (noise_floor < 0)
+                    noise_floor = raw_energy < 0.5 ? raw_energy : 0.5;
+                else if (raw_energy < (float)noise_floor)
+                    noise_floor += (raw_energy - noise_floor) * (1.0 - exp((double)-dt / 3.0));
+                else if (noise_floor < 0.5)
+                    noise_floor += (raw_energy - noise_floor) * (1.0 - exp((double)-dt / 18.0));
+                float live_energy = raw_energy - (float)noise_floor;
+                if (live_energy < 0.0f)
+                    live_energy = 0.0f;
+                float live_left = shark_live.left - (float)noise_floor;
+                if (live_left < 0.0f)
+                    live_left = 0.0f;
+                if (live_left > 1.0f)
+                    live_left = 1.0f;
+                float live_right = shark_live.right - (float)noise_floor;
+                if (live_right < 0.0f)
+                    live_right = 0.0f;
+                if (live_right > 1.0f)
+                    live_right = 1.0f;
+                float yaw_step = 0, pitch_step = 0;
+                anim_stereo_spin(live_left, live_right, &yaw_step, &pitch_step);
                 yaw_phase += yaw_step;
                 pitch_phase += pitch_step;
-                if (shark_live.energy > 0.04f) {
-                    roll_phase += (double)shark_live.energy * 0.09;
+                if (live_energy > 0.04f) {
+                    roll_phase += (double)live_energy * 0.09;
                     last_sound = fx_now;
                 } else if (ccfg->has_return_secs) {
                     if ((float)(fx_now - last_sound) / 1000.0f >= ccfg->return_secs) {
@@ -2278,7 +2304,7 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
                 fx.audio[1] = (float)yaw_phase;
                 fx.audio[2] = (float)roll_phase;
                 float boom = ccfg->has_boom ? ccfg->boom : 0.0f;
-                fx.scale = 1.0f + ccfg->grow * shark_live.beat + boom * shark_live.energy;
+                fx.scale = 1.0f + ccfg->grow * shark_live.beat + boom * live_energy;
             }
             if (term_flow && !fx.has_grad && shark_live.has_grad) {
                 fx.has_grad = 1;
