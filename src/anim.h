@@ -10,7 +10,6 @@ typedef struct {
     int spin_x;
     int spin_y;
     int spin_z;
-    int spin_set;
     float speed;
     int speed_set;
     float speed_x;

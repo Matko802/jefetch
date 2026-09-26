@@ -663,7 +663,6 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
             c->spin_x = has_x;
             c->spin_y = has_y;
             c->spin_z = has_z;
-            c->spin_set = 1;
         }
     }
     float f = 0;

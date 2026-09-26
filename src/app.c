@@ -811,20 +811,11 @@ static void anim_configs(const App *app, AnimConfig *base, AnimConfig *active,
         active->shading_explicit = 1;
         active->chars_set = 1;
     }
-    /* Unset options follow the base animation so the logo keeps spinning
-     * (on the same axes) while sharkvis plays; explicit profile options
-     * still win (e.g. speed=0 freezes it deliberately). */
-    if (!active->speed_set) {
-        active->speed = base->speed;
-        active->speed_x = base->speed_x;
-        active->speed_y = base->speed_y;
-        active->speed_z = base->speed_z;
-    }
-    if (!active->spin_set) {
-        active->spin_x = base->spin_x;
-        active->spin_y = base->spin_y;
-        active->spin_z = base->spin_z;
-    }
+    /* Unset speed stays 0 in sharkvis mode (Rust behavior): with no
+     * audio playing the logo holds still; motion comes from audio
+     * (yaw/pitch/roll, beat dip, boom) or an explicit profile speed. */
+    if (!active->speed_set)
+        active->speed = 0.0f;
     *mode = active->sharkvis_set ? active->sharkvis : base->sharkvis;
 }
 

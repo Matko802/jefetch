@@ -108,7 +108,7 @@ jefetch --structure "os:kernel:uptime:break:colors"
 | `width` / `height` | Image logos only: target size in terminal columns / rows (default fits 48 columns, aspect kept). Set one side and the other follows the aspect; set both to stretch |
 | `animation` | Needs an explicit `speed` or the logo won't move; `off` turns it off |
 | `style` / `chars` | `"flat"` or `"3d"`; `"ascii"` keeps the logo's own glyphs, anything else is shade blocks like fetch. These beat `animation` |
-| `sharkvis` | Its own profile for when sharkvis is running. Options it doesn't set (`speed`, axes, `chars=ascii` glyphs) follow the base `animation` |
+| `sharkvis` | Its own profile for when sharkvis is running (own speed and axes; unset speed stays 0 so silence holds still). `chars=ascii` glyphs still carry over unless the profile sets `chars` |
 
 `jefetch --logo arch` swaps the logo for one run. Point `--logo` at an
 image file (`jefetch --logo ~/pic.png`) for a one-run image logo.
