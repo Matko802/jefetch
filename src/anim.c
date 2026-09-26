@@ -611,9 +611,6 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
     if (have_chars) {
         apply_chars_value(c, chars_v);
         c->shading_explicit = !is_sharkvis_chars_value(chars_v);
-    } else if (has_word(low, "ascii") || has_word(low, "original")) {
-        c->original_glyphs = 1;
-        c->shading_explicit = 1;
     } else if (has_word(low, "blocks") || has_word(low, "block")) {
         c->original_glyphs = 0;
         for (size_t k = 0; k < c->nshading; k++)

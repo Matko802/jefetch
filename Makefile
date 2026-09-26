@@ -1,4 +1,4 @@
-VERSION ?= 0.1.0
+VERSION ?= 0.2.9
 PREFIX ?= /usr/local
 CC ?= cc
 CFLAGS ?= -O2
@@ -19,13 +19,10 @@ endif
 DEFS := -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE \
 	'-DJEFETCH_TARGET="$(TARGET_TRIPLE)"' '-DJEFETCH_LIB="$(JEFETCH_LIB)"'
 STD := -std=c17
-# Implicit declarations (e.g. a missing <string.h> for strlen) silently
-# truncate pointers on 64-bit and segfault: never allow them.
 WARN := -Wall -Wextra -Wno-trigraphs -Werror=implicit-function-declaration -Werror=implicit-int
 INCS := -Isrc
 LIBS := -lm -pthread
 
-# On NixOS, run inside `nix develop` or use `nix build`.
 all: $(BUILDDIR)/jefetch
 
 $(BUILDDIR)/jefetch: $(OBJS)
@@ -46,7 +43,6 @@ clean:
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/jefetch
 
-# Install the build dependencies for the detected distro.
 deps:
 	@if command -v apt-get >/dev/null 2>&1; then \
 		sudo apt-get install -y gcc make; \

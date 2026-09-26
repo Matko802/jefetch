@@ -1,5 +1,5 @@
 {
-  description = "jefetch - a fastfetch clone written in pure C";
+  description = "jefetch is the Fastest C Fetcher";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";

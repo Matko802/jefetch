@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "common.h"
+#include "json.h"
 #include "pa.h"
 #include "sharkvis_sync.h"
 
@@ -202,10 +203,16 @@ char **sv_config_paths(size_t *n) {
     e = getenv("HOME");
     if (e) {
         char p[1152];
+        /* JSONC first: sharkvis prefers config.jsonc for new files. */
+        snprintf(p, sizeof p, "%s/.config/sharkvis/config.jsonc", e);
+        out = realloc(out, (m + 1) * sizeof(char *));
+        out[m++] = strdup(p);
         snprintf(p, sizeof p, "%s/.config/sharkvis/config.toml", e);
         out = realloc(out, (m + 1) * sizeof(char *));
         out[m++] = strdup(p);
     }
+    out = realloc(out, (m + 1) * sizeof(char *));
+    out[m++] = strdup("./config.jsonc");
     out = realloc(out, (m + 1) * sizeof(char *));
     out[m++] = strdup("./config.toml");
     *n = m;
@@ -355,7 +362,49 @@ int sv_parse_color(const char *s, Rgb *out) {
     return 0;
 }
 
+static int text_is_jsonc(const char *text) {
+    const unsigned char *p = (const unsigned char *)text;
+    if (p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF)
+        p += 3;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+    return *p == '{';
+}
+
+/* JSONC branch: same schema sharkvis writes
+ * ({"color": {"gradient_low": ..., "gradient_high": ...}}). */
+static int parse_cfg_gradients_jsonc(const char *text, Rgb *lo, Rgb *hi) {
+    char err[256];
+    JsonValue *root = json_parse(text, err, sizeof err);
+    if (!root)
+        return 0;
+    int have_lo = 0, have_hi = 0;
+    const JsonValue *color = json_get(root, "color");
+    if (color && color->type == JV_OBJ) {
+        const char *slo = json_str(json_get(color, "gradient_low"));
+        const char *shi = json_str(json_get(color, "gradient_high"));
+        if (slo && sv_parse_color(slo, lo))
+            have_lo = 1;
+        if (shi && sv_parse_color(shi, hi))
+            have_hi = 1;
+    }
+    json_free(root);
+    if (have_lo && have_hi)
+        return 1;
+    if (have_lo && !have_hi) {
+        *hi = *lo;
+        return 1;
+    }
+    if (!have_lo && have_hi) {
+        *lo = *hi;
+        return 1;
+    }
+    return 0;
+}
+
 static int parse_cfg_gradients(const char *text, Rgb *lo, Rgb *hi) {
+    if (text_is_jsonc(text))
+        return parse_cfg_gradients_jsonc(text, lo, hi);
     int have_lo = 0, have_hi = 0;
     char section[64] = "general";
     char *dup = strdup(text);
@@ -455,6 +504,87 @@ int sv_gradient_colors(Rgb *lo, Rgb *hi) {
     return found;
 }
 
+/* Split a chars string into one malloc'd glyph per codepoint.
+ * Returns NULL (with *n == 0) for blank/empty ramps. */
+static char **ramp_from_chars(const char *v, size_t *n) {
+    size_t m = 0;
+    const char *p = v;
+    size_t vrem = strlen(v);
+    int allblank = 1;
+    char **ramp = NULL;
+    while (vrem > 0 && *p) {
+        size_t kl2;
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x80)
+            kl2 = 1;
+        else if ((c & 0xE0) == 0xC0)
+            kl2 = 2;
+        else if ((c & 0xF0) == 0xE0)
+            kl2 = 3;
+        else
+            kl2 = 4;
+        /* Truncated multibyte at end: stop instead of over-reading. */
+        if (kl2 > vrem)
+            break;
+        int valid = 1;
+        for (size_t k = 1; k < kl2; k++) {
+            if ((p[k] & 0xC0) != 0x80) {
+                valid = 0;
+                break;
+            }
+        }
+        if (!valid) {
+            p += 1;
+            vrem -= 1;
+            continue;
+        }
+        char *s = malloc(kl2 + 1);
+        if (!s)
+            break;
+        memcpy(s, p, kl2);
+        s[kl2] = 0;
+        if (strcmp(s, " ") && strcmp(s, "\t"))
+            allblank = 0;
+        char **nr = realloc(ramp, (m + 1) * sizeof(char *));
+        if (!nr) {
+            free(s);
+            break;
+        }
+        ramp = nr;
+        ramp[m++] = s;
+        p += kl2;
+        vrem -= kl2;
+        if (m >= 64)
+            break;
+    }
+    if (m > 0 && !allblank) {
+        *n = m;
+        return ramp;
+    }
+    for (size_t k2 = 0; k2 < m; k2++)
+        free(ramp[k2]);
+    free(ramp);
+    *n = 0;
+    return NULL;
+}
+
+/* JSONC branch: {"visualizer": {"chars": "..."}}. */
+static char **glyph_ramp_jsonc(const char *text, size_t *n) {
+    char err[256];
+    JsonValue *root = json_parse(text, err, sizeof err);
+    if (!root)
+        return NULL;
+    char **out = NULL;
+    const JsonValue *vis = json_get(root, "visualizer");
+    if (vis && vis->type == JV_OBJ) {
+        const char *v = json_str(json_get(vis, "chars"));
+        if (v)
+            out = ramp_from_chars(v, n);
+    }
+    json_free(root);
+    return out;
+}
+
 char **sv_glyph_ramp(size_t *n) {
     size_t np = 0;
     char **paths = sv_config_paths(&np);
@@ -464,6 +594,13 @@ char **sv_glyph_ramp(size_t *n) {
         char *text = read_file_all(paths[i]);
         if (!text)
             continue;
+        if (text_is_jsonc(text)) {
+            char **r = glyph_ramp_jsonc(text, n);
+            if (r)
+                out = r;
+            free(text);
+            continue;
+        }
         char section[64] = "general";
         char *dup = strdup(text);
         char *save = NULL;
@@ -524,62 +661,10 @@ char **sv_glyph_ramp(size_t *n) {
             while (*v == ' ' || *v == '\t')
                 v++;
             size_t m = 0;
-            const char *p = v;
-            size_t vrem = strlen(v);
-            int allblank = 1;
-            char **ramp = NULL;
-            while (vrem > 0 && *p) {
-                size_t kl2;
-                unsigned char c = (unsigned char)*p;
-                if (c < 0x80)
-                    kl2 = 1;
-                else if ((c & 0xE0) == 0xC0)
-                    kl2 = 2;
-                else if ((c & 0xF0) == 0xE0)
-                    kl2 = 3;
-                else
-                    kl2 = 4;
-                /* Truncated multibyte at end: stop instead of over-reading. */
-                if (kl2 > vrem)
-                    break;
-                int valid = 1;
-                for (size_t k = 1; k < kl2; k++) {
-                    if ((p[k] & 0xC0) != 0x80) {
-                        valid = 0;
-                        break;
-                    }
-                }
-                if (!valid) {
-                    p += 1;
-                    vrem -= 1;
-                    continue;
-                }
-                char *s = malloc(kl2 + 1);
-                if (!s)
-                    break;
-                memcpy(s, p, kl2);
-                s[kl2] = 0;
-                if (strcmp(s, " ") && strcmp(s, "\t"))
-                    allblank = 0;
-                char **nr = realloc(ramp, (m + 1) * sizeof(char *));
-                if (!nr) {
-                    free(s);
-                    break;
-                }
-                ramp = nr;
-                ramp[m++] = s;
-                p += kl2;
-                vrem -= kl2;
-                if (m >= 64)
-                    break;
-            }
-            if (m > 0 && !allblank) {
+            char **ramp = ramp_from_chars(v, &m);
+            if (ramp) {
                 out = ramp;
                 *n = m;
-            } else {
-                for (size_t k2 = 0; k2 < m; k2++)
-                    free(ramp[k2]);
-                free(ramp);
             }
             break;
         }
@@ -1336,6 +1421,9 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         memset(&s->last, 0, sizeof s->last);
         LiveFrame out;
         memset(&out, 0, sizeof out);
+        /* Like Rust's LiveFrame::inactive(): no beat info means full speed,
+         * otherwise the base animation never advances (spin_phase += 0). */
+        out.speed_mult = 1.0f;
         return out;
     }
     uint64_t now = jf_now_ms();
@@ -1351,6 +1439,8 @@ LiveFrame sync_poll(Sync *s, SharkvisMode mode, float beat_depth, int live_color
         memset(&s->last, 0, sizeof s->last);
         LiveFrame out;
         memset(&out, 0, sizeof out);
+        /* Like Rust's LiveFrame::inactive(): no beat info means full speed. */
+        out.speed_mult = 1.0f;
         return out;
     }
     if (!s->have_visual_at || now - s->visual_at >= 250) {
