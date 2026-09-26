@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - "-D_POSIX_C_SOURCE=200809L"
+    - "-D_DEFAULT_SOURCE"
+    - "-std=c17"
+---
+If:
+  PathMatch: .*\.(h|H)$
+CompileFlags:
+  Add: [-xc-header]
