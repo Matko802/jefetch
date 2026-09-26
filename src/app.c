@@ -1818,14 +1818,15 @@ static void draw_static_live(JfBuf *out, const ResolvedLogo *logo, char **info, 
                 char lcol[8192];
                 colorize_logo_str(logo_line, cn, lcol, sizeof lcol);
                 if (logo_live) {
-                    /* Same mapping as the text beside it: this logo row
-                     * sits next to info row (row - 1) of an ninfo-row
-                     * block. sv_grad_for_row clamps overflow rows to the
-                     * last text color. Overrides builtin color. */
+                    /* Full gradient across the logo itself (like sharkvis
+                     * bars span their area): endpoints land on the logo's
+                     * own top/bottom rows so neither color sits far away
+                     * outside it. Same lerp/rounding as text. Overrides
+                     * builtin color. */
                     Rgb g;
                     int has = 0;
-                    if (ninfo > 0 && row >= 1)
-                        has = sv_grad_for_row(live, row - 1, ninfo, &g);
+                    if (logo_h > 0)
+                        has = sv_grad_for_row(live, row - 1, logo_h, &g);
                     if (has) {
                         char esc[32];
                         const Rgb *tp = live->has_term_pal ? live->term_pal : NULL;
@@ -2234,7 +2235,18 @@ static int run_live(App *app, BuildEntry *entries, size_t nentries, int start_an
             using_active = logo_active ? 1 : 0;
             AnimConfig *ccfg = using_active ? &active_cfg : &base_cfg;
             LogoCloud *cloud = using_active ? active_cloud : base_cloud;
-            spin_phase += shark_live.speed_mult;
+            /* Sharkvis mode only: volume winds the spin up on top of the
+             * beat dip. Plain jefetch mode keeps a constant rate. */
+            float step = shark_live.speed_mult;
+            if (using_active) {
+                float e = shark_live.energy;
+                if (e < 0.0f)
+                    e = 0.0f;
+                if (e > 1.0f)
+                    e = 1.0f;
+                step *= 1.0f + e;
+            }
+            spin_phase += step;
             RenderFx fx;
             render_fx_none(&fx);
             if (using_active) {

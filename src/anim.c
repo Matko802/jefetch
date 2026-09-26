@@ -977,7 +977,8 @@ struct LogoCloud {
     unsigned char tint_lo[3];
     unsigned char tint_hi[3];
     size_t tint_h;
-    size_t tint_ninfo;
+    size_t tint_ymin;
+    size_t tint_ymax;
     int tint_has_term_pal;
     unsigned char tint_term_pal[16 * 3];
 };
@@ -1539,6 +1540,7 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
     else
         y_center = (float)h * 0.5f;
     float k1x2 = k1 * 2.0f;
+    size_t ink_top = h, ink_bot = 0;
     for (size_t pi = 0; pi < cloud->npoints; pi++) {
         const Point *pt = &cloud->points[pi];
         float y1 = pt->y * ca - pt->z * sa;
@@ -1583,6 +1585,11 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
             lumbuf[idx] = lum;
             colorbuf[idx] = pt->color;
             memcpy(glyphbuf[idx], pt->glyph, 8);
+            size_t yr = (size_t)ys / sub_rows;
+            if (yr < ink_top)
+                ink_top = yr;
+            if (yr > ink_bot)
+                ink_bot = yr;
         }
     }
     const char **shading;
@@ -1613,7 +1620,8 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         }
     }
     if (cloud->has_tint_key != (tint_now ? 1 : -1) || tint_pal_changed ||
-        (tint_now && (cloud->tint_h != h || cloud->tint_ninfo != info_line_count ||
+        (tint_now && (cloud->tint_h != h || cloud->tint_ymin != ink_top ||
+                      cloud->tint_ymax != ink_bot ||
                       memcmp(cloud->tint_lo, fx->grad_lo, 3) != 0 ||
                       memcmp(cloud->tint_hi, fx->grad_hi, 3) != 0))) {
         for (size_t i = 0; i < cloud->ntint; i++)
@@ -1624,7 +1632,8 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
         if (tint_now) {
             if (h == 0 || h > 512) {
                 cloud->has_tint_key = tint_now ? 1 : -1;
-                cloud->tint_ninfo = info_line_count;
+                cloud->tint_ymin = ink_top;
+                cloud->tint_ymax = ink_bot;
             } else {
                 char **rows_new = malloc(h * sizeof(char *));
                 if (!rows_new) {
@@ -1633,18 +1642,15 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
                     size_t built = 0;
                     int fail = 0;
                     for (size_t y = 0; y < h; y++) {
-                        /* Same mapping as text (sv_grad_for_row): logo
-                         * row y sits beside info row y-1 of an
-                         * info_line_count-row block. Flat (lo==hi) falls
-                         * out of the lerp naturally. */
+                        /* Full gradient across the visible ink, like
+                         * sharkvis bars: endpoints land on the logo's
+                         * own top/bottom rows so neither color sits far
+                         * away in empty space. Flat (lo==hi) falls out
+                         * of the lerp naturally. */
                         float t;
-                        if (info_line_count > 1) {
-                            size_t idx = y >= 1 ? y - 1 : 0;
-                            size_t i = idx < info_line_count - 1
-                                           ? idx
-                                           : info_line_count - 1;
-                            t = (float)(info_line_count - 1 - i) /
-                                (float)(info_line_count - 1);
+                        if (ink_bot > ink_top) {
+                            size_t yc = y < ink_top ? ink_top : (y > ink_bot ? ink_bot : y);
+                            t = (float)(ink_bot - yc) / (float)(ink_bot - ink_top);
                         } else {
                             t = 0.5f;
                         }
@@ -1678,7 +1684,8 @@ static ResolvedLogo *render_cloud_with_fx(LogoCloud *cloud, double frame,
                         memcpy(cloud->tint_lo, fx->grad_lo, 3);
                         memcpy(cloud->tint_hi, fx->grad_hi, 3);
                         cloud->tint_h = h;
-                        cloud->tint_ninfo = info_line_count;
+                        cloud->tint_ymin = ink_top;
+                        cloud->tint_ymax = ink_bot;
                         cloud->tint_has_term_pal = fx->has_term_pal ? 1 : 0;
                         if (fx->has_term_pal) {
                             for (int pi = 0; pi < 16; pi++) {
