@@ -43,7 +43,7 @@ const char *JF_DEFAULT_JSONC_CONFIG =
     "    \"logo\": {\n"
     "        \"source\": \"\",\n"
     "        \"animation\": \"speed=1 xy\",\n"
-    "        \"sharkvis\": \"xzy return=10 boom=25 chars=blocks color=sharkvis\",\n"
+    "        \"sharkvis\": \"xzy return=10 chars=blocks color=sharkvis\",\n"
     "        \"padding\": {\n"
     "            \"top\": 0,\n"
     "            \"left\": 0,\n"

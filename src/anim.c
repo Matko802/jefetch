@@ -40,7 +40,6 @@ void anim_config_default(AnimConfig *c) {
     anim_default_shading(&c->shading, &c->nshading);
     c->sharkvis = SVM_OFF;
     c->beat_depth = 0.6f;
-    c->grow = 0.12f;
 }
 
 void anim_config_free(AnimConfig *c) {
@@ -519,7 +518,7 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
         "speed_x", "speed_y", "speed_z", "speed", "size", "depth", "height", "style",
         "mode", "characters", "chars", "glyphs", "glyph", "shading", "symbols",
         "symbol", "ramp", "color", "textcolor", "light", "sharkvis", "nosharkvis",
-        "no-sharkvis", "beat", "grow", "boom", "return"
+        "no-sharkvis", "beat", "return"
     };
     if (!s)
         return;
@@ -654,7 +653,7 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
         c->sharkvis_set = 1;
     }
     char axis_src[2048];
-    blank_option_spans(low, OPTION_KEYS, 27, axis_src, sizeof axis_src);
+    blank_option_spans(low, OPTION_KEYS, 25, axis_src, sizeof axis_src);
     int has_x = strchr(axis_src, 'x') != NULL;
     int has_y = strchr(axis_src, 'y') != NULL;
     int has_z = strchr(axis_src, 'z') != NULL;
@@ -688,21 +687,6 @@ void anim_config_from_str(AnimConfig *c, const char *s) {
         if (f > 0.9f)
             f = 0.9f;
         c->beat_depth = f;
-    }
-    if (extract_number(low, "grow", &f)) {
-        if (f < 0.0f)
-            f = 0.0f;
-        if (f > 0.3f)
-            f = 0.3f;
-        c->grow = f;
-    }
-    if (extract_number(low, "boom", &f)) {
-        if (f < 0.0f)
-            f = 0.0f;
-        if (f > 1.0f)
-            f = 1.0f;
-        c->has_boom = 1;
-        c->boom = f;
     }
     if (extract_number(low, "return", &f)) {
         if (f < 0.0f)
