@@ -45,11 +45,13 @@ pub struct AnimConfig {
     pub sharkvis: crate::sharkvis::SharkvisMode,
     pub sharkvis_set: bool,
     pub live_colors: bool,
+    pub live_term_colors: bool,
     pub text_live_colors: bool,
     pub beat_depth: f32,
     pub grow: f32,
     pub boom: Option<f32>,
     pub shading_explicit: bool,
+    pub chars_set: bool,
     pub return_secs: Option<f32>,
 }
 
@@ -77,11 +79,13 @@ impl Default for AnimConfig {
             sharkvis: crate::sharkvis::SharkvisMode::default(),
             sharkvis_set: false,
             live_colors: false,
+            live_term_colors: false,
             text_live_colors: false,
             beat_depth: crate::sharkvis::DEFAULT_BEAT_DEPTH,
             grow: crate::sharkvis::DEFAULT_GROW,
             boom: None,
             shading_explicit: false,
+            chars_set: false,
             return_secs: None,
         }
     }
@@ -130,10 +134,14 @@ impl AnimConfig {
             if let Some(v) = extract_word(&low, raw, "color", true) {
                 if v.trim().eq_ignore_ascii_case("sharkvis") {
                     cfg.live_colors = true;
+                } else if v.trim().eq_ignore_ascii_case("terminal") {
+                    cfg.live_term_colors = true;
                 }
             }
             if let Some(v) = extract_word(&low, raw, "textcolor", true) {
-                if v.trim().eq_ignore_ascii_case("sharkvis") {
+                if v.trim().eq_ignore_ascii_case("sharkvis")
+                    || v.trim().eq_ignore_ascii_case("terminal")
+                {
                     cfg.text_live_colors = true;
                 }
             }
@@ -158,6 +166,7 @@ impl AnimConfig {
             if let Some(v) = chars_opt {
                 cfg.apply_chars_value(&v);
                 cfg.shading_explicit = !Self::is_sharkvis_chars_value(&v);
+                cfg.chars_set = true;
             } else if has_word(&low, "ascii") || has_word(&low, "original") {
                 cfg.original_glyphs = true;
                 cfg.shading_explicit = true;
@@ -350,6 +359,7 @@ impl AnimConfig {
         if let Some(c) = &logo.chars {
             self.apply_chars_value(c);
             self.shading_explicit = !Self::is_sharkvis_chars_value(c);
+            self.chars_set = true;
         }
     }
 }
@@ -828,13 +838,19 @@ fn build_points(
     let z_layers = ((6.0 * config.size) as i32).max(6) as usize;
 
     let (sbr, _) = config.sub_divs();
+    // Original glyphs render at subdiv 2 with sub-points restricted to
+    // fully interior cells, filling scaled gaps without changing the rest
+    // silhouette or flipping render paths between quiet and loud frames.
     let mut subdiv = if config.original_glyphs {
-        1
+        2
     } else {
         (config.size * sbr as f32) as usize
     };
     if subdiv < 1 {
         subdiv = 1;
+    }
+    if subdiv > 4 {
+        subdiv = 4;
     }
 
     let mut points: Vec<Point> = Vec::new();
@@ -879,6 +895,30 @@ fn build_points(
                     };
                     if ih <= 0.0 {
                         continue;
+                    }
+                    if config.original_glyphs && (sr > 0 || sc > 0) {
+                        let mut interior = true;
+                        'outer: for dr in -1..=1 {
+                            for dc in -1..=1 {
+                                if dr == 0 && dc == 0 {
+                                    continue;
+                                }
+                                let nr = row as isize + dr;
+                                let nc = col as isize + dc;
+                                if nr < 0
+                                    || nc < 0
+                                    || nr >= rows as isize
+                                    || nc >= cols as isize
+                                    || hmap[nr as usize][nc as usize] <= 0.0
+                                {
+                                    interior = false;
+                                    break 'outer;
+                                }
+                            }
+                        }
+                        if !interior {
+                            continue;
+                        }
                     }
                     let ox = (fcol - cx) * SX;
                     let oy = (cy - frow) * SY;
@@ -1023,7 +1063,7 @@ pub struct LogoCloud {
     buf_w: usize,
     buf_h: usize,
     tint_rows: Vec<String>,
-    tint_key: Option<(Option<((u8, u8, u8), (u8, u8, u8))>, usize)>,
+    tint_key: Option<(Option<((u8, u8, u8), (u8, u8, u8))>, usize, usize, usize)>,
 }
 
 pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud> {
@@ -1099,6 +1139,7 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
 
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
+    pub term_pal: Option<[crate::sharkvis::Rgb; 16]>,
     pub shading: Option<Vec<String>>,
     pub scale: f32,
     pub audio: [f32; 3],
@@ -1114,6 +1155,7 @@ impl RenderFx {
     pub fn none() -> RenderFx {
         RenderFx {
             grad: None,
+            term_pal: None,
             shading: None,
             scale: 1.0,
             audio: [0.0, 0.0, 0.0],
@@ -1148,6 +1190,7 @@ pub fn render_frame_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
+        term_pal: None,
         shading: None,
         scale: 1.0,
         audio: [0.0, 0.0, 0.0],
@@ -1191,6 +1234,7 @@ pub fn render_cloud_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
+        term_pal: None,
         shading: None,
         scale: 1.0,
         audio: [0.0, 0.0, 0.0],
@@ -1253,20 +1297,30 @@ pub fn render_cloud_with_fx(
     }
     let (zbuf, lumbuf, colorbuf, glyphbuf) = (&mut **buf_z, &mut **buf_lum, &mut **buf_col, &mut **buf_glyph);
 
-    let mul = frame as f32 * BASE_FPS / config.auto_fps();
+    // Spin angles in f64, wrapped before the f32 trig calls: spin_phase
+    // grows without bound, so unwrapped float angles would lose fractional
+    // precision over long runs and jitter at every loop seam.
+    let base = frame * f64::from(BASE_FPS) / f64::from(config.auto_fps());
+    let tau = std::f64::consts::TAU;
     let boost = fx.audio;
     let ax = if config.spin_x {
-        mul * 0.04 * config.speed * config.speed_x + boost[0]
+        ((base * 0.04 * f64::from(config.speed) * f64::from(config.speed_x)
+            + f64::from(boost[0]))
+            % tau) as f32
     } else {
         0.0
     };
     let ay = if config.spin_y {
-        mul * 0.06 * config.speed * config.speed_y + boost[1]
+        ((base * 0.06 * f64::from(config.speed) * f64::from(config.speed_y)
+            + f64::from(boost[1]))
+            % tau) as f32
     } else {
         0.0
     };
     let az = if config.spin_z {
-        mul * 0.05 * config.speed * config.speed_z + boost[2]
+        ((base * 0.05 * f64::from(config.speed) * f64::from(config.speed_z)
+            + f64::from(boost[2]))
+            % tau) as f32
     } else {
         0.0
     };
@@ -1294,6 +1348,8 @@ pub fn render_cloud_with_fx(
         h as f32 * 0.5
     };
     let k1x2 = k1 * 2.0;
+    let mut ink_top = h;
+    let mut ink_bot = 0usize;
 
     for p in points.iter() {
         let (px, py, pz) = (p.x, p.y, p.z);
@@ -1347,6 +1403,13 @@ pub fn render_cloud_with_fx(
             lumbuf[idx] = lum;
             colorbuf[idx] = p.color;
             glyphbuf[idx] = p.glyph;
+            let yr = ys as usize / sub_rows;
+            if yr < ink_top {
+                ink_top = yr;
+            }
+            if yr > ink_bot {
+                ink_bot = yr;
+            }
         }
     }
 
@@ -1358,22 +1421,23 @@ pub fn render_cloud_with_fx(
     let smax = scount.saturating_sub(1);
     let total_sub = sub_rows * sub_cols;
 
-    let tint_key_now = Some((fx.grad, h));
+    // Gradient spans the actual ink so both endpoint colors land on the
+    // logo itself instead of the full frame height.
+    let tint_key_now = Some((fx.grad, h, ink_top, ink_bot));
     if *tint_key != tint_key_now {
         tint_rows.clear();
         if let Some(((lr, lg, lb), (hr, hg, hb))) = fx.grad {
             for y in 0..h {
-                let t = if h > 1 {
-                    (h - 1 - y) as f32 / (h - 1) as f32
+                let t = if ink_bot > ink_top {
+                    let yc = y.clamp(ink_top, ink_bot);
+                    (ink_bot - yc) as f32 / (ink_bot - ink_top) as f32
                 } else {
-                    0.0
+                    0.5
                 };
                 let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
-                tint_rows.push(format!(
-                    "\x1b[38;2;{};{};{}m",
-                    mix(lr, hr),
-                    mix(lg, hg),
-                    mix(lb, hb)
+                tint_rows.push(crate::sharkvis::live_esc(
+                    fx.term_pal.as_ref(),
+                    (mix(lr, hr), mix(lg, hg), mix(lb, hb)),
                 ));
             }
         }
@@ -2126,6 +2190,7 @@ mod tests {
     fn fx_grad() -> RenderFx {
         RenderFx {
             grad: Some(((255, 0, 0), (0, 0, 255))),
+            term_pal: None,
             shading: None,
             scale: 1.0,
             audio: [0.0, 0.0, 0.0],
@@ -2262,6 +2327,7 @@ mod tests {
             4,
             &RenderFx {
                 grad: None,
+                term_pal: None,
                 shading: None,
                 scale: 1.2,
                 audio: [0.0, 0.0, 0.0],
@@ -2309,6 +2375,7 @@ mod tests {
             4,
             &RenderFx {
                 grad: None,
+                term_pal: None,
                 shading: Some(vec!["@".to_string()]),
                 scale: 1.0,
                 audio: [0.0, 0.0, 0.0],

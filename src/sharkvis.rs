@@ -44,6 +44,7 @@ pub struct LiveFrame {
     pub active: bool,
     pub grad: Option<(Rgb, Rgb)>,
     pub flat: Option<Rgb>,
+    pub term_pal: Option<[Rgb; 16]>,
     pub glyphs: Option<Vec<String>>,
     pub energy: f32,
     pub beat: f32,
@@ -59,6 +60,7 @@ impl LiveFrame {
             active: false,
             grad: None,
             flat: None,
+            term_pal: None,
             glyphs: None,
             energy: 0.0,
             beat: 0.0,
@@ -133,9 +135,9 @@ pub fn config_paths() -> Vec<String> {
         }
     }
     if let Ok(home) = std::env::var("HOME") {
-        out.push(format!("{}/.config/sharkvis/config.toml", home));
+        out.push(format!("{}/.config/sharkvis/config.jsonc", home));
     }
-    out.push("./config.toml".to_string());
+    out.push("./config.jsonc".to_string());
     out
 }
 
@@ -175,38 +177,15 @@ fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String
 }
 
 fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
-    let mut section = String::from("general");
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') {
-            if let Some(end) = line.find(']') {
-                section = line[1..end].trim().to_ascii_lowercase();
-            }
-            continue;
-        }
-        if section != "visualizer" {
-            continue;
-        }
-        let eq = match line.find('=') {
-            Some(i) => i,
-            None => continue,
-        };
-        if line[..eq].trim().to_ascii_lowercase() != "chars" {
-            continue;
-        }
-        let ramp: Vec<String> = line[eq + 1..].trim().chars().map(|c| c.to_string()).collect();
-        if ramp.is_empty() {
-            return None;
-        }
-        if ramp.iter().all(|s| s.trim().is_empty()) {
-            return None;
-        }
-        return Some(if ramp.len() > 64 { ramp[..64].to_vec() } else { ramp });
+    let root = crate::config::parse(text).ok()?;
+    let vis = root.get("visualizer")?;
+    let chars = vis.get("chars")?.as_str()?;
+    let mut ramp: Vec<String> = chars.chars().map(|c| c.to_string()).collect();
+    if ramp.is_empty() || ramp.iter().all(|s| s.trim().is_empty()) {
+        return None;
     }
-    None
+    ramp.truncate(64);
+    Some(ramp)
 }
 
 fn gradient_colors_from_paths(paths: &[String]) -> Option<(Rgb, Rgb)> {
@@ -221,38 +200,16 @@ fn gradient_colors_from_paths(paths: &[String]) -> Option<(Rgb, Rgb)> {
 }
 
 fn parse_sharkvis_config(text: &str) -> Option<(Rgb, Rgb)> {
-    let mut section = String::from("general");
-    let mut low: Option<Rgb> = None;
-    let mut high: Option<Rgb> = None;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') {
-            if let Some(end) = line.find(']') {
-                section = line[1..end].trim().to_ascii_lowercase();
-            }
-            continue;
-        }
-        let eq = match line.find('=') {
-            Some(i) => i,
-            None => continue,
-        };
-        let key = line[..eq].trim().to_ascii_lowercase();
-        let mut val = line[eq + 1..].trim();
-        if let Some(semi) = val.find(';') {
-            val = val[..semi].trim();
-        }
-        if section != "color" {
-            continue;
-        }
-        match key.as_str() {
-            "gradient_low" => low = parse_color(val),
-            "gradient_high" => high = parse_color(val),
-            _ => {}
-        }
-    }
+    let root = crate::config::parse(text).ok()?;
+    let color = root.get("color")?;
+    let low = color
+        .get("gradient_low")
+        .and_then(|v| v.as_str())
+        .and_then(parse_color);
+    let high = color
+        .get("gradient_high")
+        .and_then(|v| v.as_str())
+        .and_then(parse_color);
     match (low, high) {
         (Some(l), Some(h)) => Some((l, h)),
         (Some(l), None) => Some((l, l)),
@@ -1254,6 +1211,9 @@ pub struct Sync {
     last: LiveFrame,
     last_ok: Option<Instant>,
     state_mem: Option<(StateSig, LiveState)>,
+    term_phase: f64,
+    term_at: Option<Instant>,
+    term_init: bool,
 }
 
 impl Sync {
@@ -1268,30 +1228,43 @@ impl Sync {
             last: LiveFrame::inactive(),
             last_ok: None,
             state_mem: None,
+            term_phase: 0.0,
+            term_at: None,
+            term_init: false,
         }
     }
 
     pub fn poll(&mut self, mode: SharkvisMode, beat_depth: f32, live_colors: bool) -> LiveFrame {
-        if mode == SharkvisMode::Off {
-            self.monitor = None;
-            self.last = LiveFrame::inactive();
-            return self.last.clone();
-        }
         let now = Instant::now();
         if self.running_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             self.running = is_running();
             self.running_at = Some(now);
         }
-        if !mode.enabled(self.running) {
-            self.monitor = None;
-            self.last = LiveFrame::inactive();
-            return self.last.clone();
-        }
+        // Config visuals stay fresh even with sharkvis off so the fallback
+        // below (and instant resume) always has current values.
         if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             let (grad, glyphs) = visual_from_paths(&config_paths());
             self.gradients = grad;
             self.glyphs = glyphs;
             self.visual_at = Some(now);
+        }
+        if mode == SharkvisMode::Off || !mode.enabled(self.running) {
+            // No motion data, but keep text colors stable via the fallback:
+            // config-file gradients first, then last live colors, so
+            // live-driven text never drops to terminal default while
+            // anything is known. Mirrored into `last` so sub-30ms frames
+            // (via `last()`) carry the same colors.
+            let mut out = LiveFrame::inactive();
+            if let Some(g) = self.gradients {
+                out.grad = Some(g);
+            } else if let Some(g) = self.last.grad {
+                out.grad = Some(g);
+            } else {
+                out.flat = self.last.flat;
+            }
+            self.monitor = None;
+            self.last = out.clone();
+            return out;
         }
 
         let mut energy: Option<f32> = None;
@@ -1357,6 +1330,7 @@ impl Sync {
             active: true,
             grad,
             flat,
+            term_pal: None,
             glyphs: self.glyphs.clone(),
             energy,
             beat,
@@ -1384,10 +1358,19 @@ pub fn is_live_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
-pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> {
-    if !frame.active {
-        return None;
+/// Effective text color carried by a frame, live or fallback (config-file
+/// gradient kept on inactive frames). `None` when nothing is known and the
+/// caller should use the terminal default. Unlike `grad_for_row` it does
+/// not require the frame to be active.
+pub fn text_color_key(frame: &LiveFrame) -> Option<(Rgb, Rgb)> {
+    if let Some(c) = frame.flat {
+        Some((c, c))
+    } else {
+        frame.grad
     }
+}
+
+pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> {
     if let Some(c) = frame.flat {
         return Some(c);
     }
@@ -1434,7 +1417,11 @@ pub fn swap_display_placeholders_row(
     idx: usize,
     total: usize,
 ) -> String {
-    swap_display_placeholders(s, grad_for_row(frame, idx, total))
+    swap_display_placeholders_pal(
+        s,
+        grad_for_row(frame, idx, total),
+        frame.term_pal.as_ref(),
+    )
 }
 
 pub fn swap_display_lines_frame(lines: &[String], frame: &LiveFrame) -> Vec<String> {
@@ -1444,6 +1431,307 @@ pub fn swap_display_lines_frame(lines: &[String], frame: &LiveFrame) -> Vec<Stri
         .enumerate()
         .map(|(i, l)| swap_display_placeholders_row(l, frame, i, total))
         .collect()
+}
+
+/// Live color escape, mapped through the terminal palette on exact hits
+/// (indexes 0-7 as 30-37, 8-15 as 90-97), truecolor otherwise.
+pub fn live_esc(pal: Option<&[Rgb; 16]>, c: Rgb) -> String {
+    if let Some(p) = pal {
+        for (i, e) in p.iter().enumerate() {
+            if *e == c {
+                return if i < 8 {
+                    format!("\x1b[{}m", 30 + i)
+                } else {
+                    format!("\x1b[{}m", 90 + (i - 8))
+                };
+            }
+        }
+    }
+    rgb_ansi_start(c)
+}
+
+pub fn swap_display_placeholders_pal(
+    s: &str,
+    live: Option<Rgb>,
+    pal: Option<&[Rgb; 16]>,
+) -> String {
+    let ph = crate::print::color::SHARKVIS_PLACEHOLDER_START;
+    if !s.contains(ph) {
+        return s.to_string();
+    }
+    match live {
+        Some(c) => s.replace(ph, &live_esc(pal, c)),
+        None => s.replace(ph, ""),
+    }
+}
+
+// --- Terminal palette (OSC 4 query) and terminal-color flow ---
+
+fn term_env_ok() -> bool {
+    match std::env::var("TERM") {
+        Ok(t) => !t.is_empty() && !t.eq_ignore_ascii_case("dumb"),
+        Err(_) => false,
+    }
+}
+
+fn osc4_hex_comp(s: &str) -> Option<u32> {
+    if s.is_empty() || s.len() > 4 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let v = u32::from_str_radix(s, 16).ok()?;
+    let max: u32 = match s.len() {
+        1 => 15,
+        2 => 255,
+        3 => 4095,
+        _ => 65535,
+    };
+    Some((v * 255 + max / 2) / max)
+}
+
+fn parse_osc4_spec(s: &str) -> Option<Rgb> {
+    if let Some(rest) = s.strip_prefix("rgb:") {
+        let mut it = rest.split('/');
+        let r = osc4_hex_comp(it.next()?)?;
+        let g = osc4_hex_comp(it.next()?)?;
+        let b = osc4_hex_comp(it.next()?)?;
+        if it.next().is_some() {
+            return None;
+        }
+        return Some((r as u8, g as u8, b as u8));
+    }
+    if let Some(hex) = s.strip_prefix('#') {
+        if hex.len() != 3 && hex.len() != 6 {
+            return None;
+        }
+        let w = hex.len() / 3;
+        let mut c = [0u32; 3];
+        for k in 0..3 {
+            c[k] = osc4_hex_comp(&hex[k * w..(k + 1) * w])?;
+        }
+        return Some((c[0] as u8, c[1] as u8, c[2] as u8));
+    }
+    None
+}
+
+fn osc4_parse(buf: &[u8], pal: &mut [Rgb; 16], have: &mut [bool; 16]) {
+    let mut i = 0;
+    while i + 5 < buf.len() {
+        if buf[i] != 0x1b || buf[i + 1] != b']' {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 2;
+        if j + 1 >= buf.len() || buf[j] != b'4' || buf[j + 1] != b';' {
+            i += 1;
+            continue;
+        }
+        j += 2;
+        let mut idx: usize = 0;
+        let mut digits = 0;
+        while j < buf.len() && buf[j].is_ascii_digit() {
+            idx = idx * 10 + (buf[j] - b'0') as usize;
+            digits += 1;
+            j += 1;
+        }
+        if digits == 0 || idx > 15 {
+            i += 1;
+            continue;
+        }
+        if j >= buf.len() || (buf[j] != b';' && buf[j] != b':') {
+            i += 1;
+            continue;
+        }
+        j += 1;
+        let s = j;
+        while j < buf.len()
+            && buf[j] != 0x07
+            && !(buf[j] == 0x1b && j + 1 < buf.len() && buf[j + 1] == b'\\')
+        {
+            j += 1;
+        }
+        if j >= buf.len() {
+            break;
+        }
+        if j > s {
+            if let Ok(spec) = std::str::from_utf8(&buf[s..j]) {
+                if !have[idx] {
+                    if let Some(c) = parse_osc4_spec(spec) {
+                        pal[idx] = c;
+                        have[idx] = true;
+                    }
+                }
+            }
+        }
+        i = j;
+    }
+}
+
+fn osc4_query(pal: &mut [Rgb; 16]) -> bool {
+    if !term_env_ok() {
+        return false;
+    }
+    let fd = unsafe {
+        libc::open(
+            b"/dev/tty\0".as_ptr() as *const libc::c_char,
+            libc::O_RDWR | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return false;
+    }
+    let mut orig: libc::termios = unsafe { std::mem::zeroed() };
+    if unsafe { libc::tcgetattr(fd, &mut orig) } != 0 {
+        unsafe { libc::close(fd) };
+        return false;
+    }
+    let mut raw = orig;
+    raw.c_lflag &= !(libc::ICANON | libc::ECHO);
+    raw.c_cc[libc::VMIN as usize] = 0;
+    raw.c_cc[libc::VTIME as usize] = 1;
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
+        unsafe { libc::close(fd) };
+        return false;
+    }
+    let mut req = Vec::new();
+    for i in 0..16 {
+        req.extend_from_slice(format!("\x1b]4;{i};?\x1b\\").as_bytes());
+    }
+    let mut wr = 0;
+    while wr < req.len() {
+        let k = unsafe {
+            libc::write(
+                fd,
+                req[wr..].as_ptr() as *const libc::c_void,
+                (req.len() - wr) as libc::size_t,
+            )
+        };
+        if k <= 0 {
+            break;
+        }
+        wr += k as usize;
+    }
+    let mut buf = vec![0u8; 4096];
+    let mut bl = 0usize;
+    let mut have = [false; 16];
+    let mut empty = 0;
+    for _ in 0..6 {
+        if have.iter().all(|x| *x) || bl + 64 >= buf.len() {
+            break;
+        }
+        let k = unsafe {
+            libc::read(
+                fd,
+                buf[bl..].as_mut_ptr() as *mut libc::c_void,
+                (buf.len() - bl - 1) as libc::size_t,
+            )
+        };
+        if k < 0 {
+            let e = std::io::Error::last_os_error().raw_os_error();
+            if e == Some(libc::EINTR) {
+                continue;
+            }
+            break;
+        }
+        if k == 0 {
+            empty += 1;
+            if empty >= 3 {
+                break;
+            }
+            continue;
+        }
+        empty = 0;
+        bl += k as usize;
+        osc4_parse(&buf[..bl], pal, &mut have);
+    }
+    let mut tmp = [0u8; 1];
+    unsafe {
+        libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, 1);
+    }
+    unsafe {
+        libc::tcsetattr(fd, libc::TCSANOW, &orig);
+        libc::close(fd);
+    }
+    have.iter().all(|x| *x)
+}
+
+struct TermPalCache {
+    state: i8,
+    at: Option<Instant>,
+    pal: [Rgb; 16],
+}
+
+static TERM_CACHE: std::sync::Mutex<TermPalCache> = std::sync::Mutex::new(TermPalCache {
+    state: 0,
+    at: None,
+    pal: [(0, 0, 0); 16],
+});
+
+const TERM_REQUERY_MS: u128 = 10000;
+
+/// Real terminal palette via OSC 4 query, cached for 10s. `None` when the
+/// terminal does not answer (all 16 entries are required).
+pub fn term_palette() -> Option<[Rgb; 16]> {
+    let mut c = TERM_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let stale = match c.at {
+        Some(t) => now.duration_since(t).as_millis() > TERM_REQUERY_MS,
+        None => true,
+    };
+    if c.state == 0 || stale {
+        let mut pal = [(0, 0, 0); 16];
+        c.state = if osc4_query(&mut pal) { 1 } else { -1 };
+        c.pal = pal;
+        c.at = Some(now);
+    }
+    if c.state < 0 {
+        return None;
+    }
+    Some(c.pal)
+}
+
+fn term_at(pal: &[Rgb; 16], pos: f64) -> Rgb {
+    let f = pos.floor();
+    let frac = (pos - f).clamp(0.0, 1.0);
+    let mut i = f as i64 % 16;
+    if i < 0 {
+        i += 16;
+    }
+    let j = (i + 1) % 16;
+    let (a, b) = (pal[i as usize], pal[j as usize]);
+    let mix = |x: u8, y: u8| (x as f64 + (y as f64 - x as f64) * frac + 0.5) as u8;
+    (mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
+}
+
+impl Sync {
+    /// Glide the logo/text colors through the 16 terminal colors, sped up
+    /// by audio energy. Returns the (low, high) gradient ends.
+    pub fn term_flow(&mut self, energy: f32, pal: &[Rgb; 16]) -> (Rgb, Rgb) {
+        const SPAN: f64 = 4.0;
+        const PERIOD_MS: f64 = 6400.0;
+        let now = Instant::now();
+        if !self.term_init {
+            self.term_phase = 0.0;
+            self.term_at = Some(now);
+            self.term_init = true;
+        } else {
+            let dt = self
+                .term_at
+                .map(|t| now.duration_since(t).as_millis() as f64)
+                .unwrap_or(0.0)
+                .clamp(0.0, 1000.0);
+            let rate = 16.0 / PERIOD_MS;
+            let e = energy.clamp(0.0, 1.0) as f64;
+            self.term_phase += dt * rate * (1.0 + 2.0 * e);
+            if self.term_phase >= 4096.0 {
+                self.term_phase %= 16.0;
+            }
+            self.term_at = Some(now);
+        }
+        (
+            term_at(pal, self.term_phase),
+            term_at(pal, self.term_phase + SPAN),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -1480,13 +1768,14 @@ mod tests {
     }
 
     #[test]
-    fn sharkvis_config_parses_gradients() {        let cfg = "[general]\nbars = 0\n[color]\ngradient_low = ffff00\ngradient_high = ff0000\n";
+    fn sharkvis_config_parses_gradients() {        let cfg = r#"{"general": {"bars": 0}, "color": {"gradient_low": "ffff00", "gradient_high": "ff0000"}}"#;
         assert_eq!(
             parse_sharkvis_config(cfg),
             Some(((255, 255, 0), (255, 0, 0)))
         );
-        assert_eq!(parse_sharkvis_config("[general]\n"), None);
-        let single = "[color]\ngradient_low = #00ff00 ; comment\n";
+        assert_eq!(parse_sharkvis_config(r#"{"general": {}}"#), None);
+        let single = r##"{"color": {"gradient_low": "#00ff00" // comment
+}}"##;
         assert_eq!(
             parse_sharkvis_config(single),
             Some(((0, 255, 0), (0, 255, 0)))
@@ -1661,18 +1950,32 @@ mod tests {
         let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1").unwrap();
+        let cfg_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-gatecfg-{}", std::process::id()));
+        std::fs::write(
+            &cfg_path,
+            r#"{"color": {"gradient_low": "001122", "gradient_high": "334455"}}"#,
+        )
+        .unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
         for mode in [SharkvisMode::Auto, SharkvisMode::On] {
             let mut s = Sync::new();
             let f = s.poll(mode, DEFAULT_BEAT_DEPTH, false);
             assert!(!f.active, "{:?} must stay inactive without the process", mode);
             assert!((f.speed_mult - 1.0).abs() < 1e-5);
-            assert!(f.grad.is_none() && f.flat.is_none());
+            assert_eq!(
+                f.grad,
+                Some(((0x00, 0x11, 0x22), (0x33, 0x44, 0x55))),
+                "{mode:?} keeps config fallback instead of dropping to default"
+            );
         }
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&cfg_path);
     }
 
     #[test]
@@ -1698,15 +2001,18 @@ mod tests {
 
     #[test]
     fn glyphs_parse_from_config() {
-        let cfg = "[general]\nbars = 0\n[visualizer]\nmode = bars\nchars = 1234567\n";
+        let cfg = r#"{"general": {"bars": 0}, "visualizer": {"mode": "bars", "chars": "1234567"}}"#;
         assert_eq!(
             parse_sharkvis_glyphs(cfg),
             Some(vec!["1", "2", "3", "4", "5", "6", "7"].into_iter().map(str::to_string).collect::<Vec<_>>())
         );
-        let blocks = "[visualizer]\nchars = ▁▂▃▄▅▆▇█\n";
+        let blocks = r#"{"visualizer": {"chars": "▁▂▃▄▅▆▇█"}}"#;
         assert_eq!(parse_sharkvis_glyphs(blocks).map(|v| v.len()), Some(8));
-        assert_eq!(parse_sharkvis_glyphs("[general]\n"), None);
-        assert_eq!(parse_sharkvis_glyphs("[visualizer]\nmode = bars\n"), None);
+        assert_eq!(parse_sharkvis_glyphs(r#"{"general": {}}"#), None);
+        assert_eq!(
+            parse_sharkvis_glyphs(r#"{"visualizer": {"mode": "bars"}}"#),
+            None
+        );
     }
 
     #[test]
@@ -1773,7 +2079,7 @@ mod tests {
         let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-prio-{}", std::process::id()));
-        std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = 111111\n").unwrap();
+        std::fs::write(&cfg_path, r#"{"color": {"gradient_low": "000000", "gradient_high": "111111"}}"#).unwrap();
         let state_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-prio-live-{}", std::process::id()));
         std::fs::write(
@@ -1825,7 +2131,7 @@ mod tests {
         let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-gate-{}", std::process::id()));
-        std::fs::write(&cfg_path, "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n").unwrap();
+        std::fs::write(&cfg_path, r#"{"color": {"gradient_low": "ff0000", "gradient_high": "0000ff"}}"#).unwrap();
         let state_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-gate-live-{}", std::process::id()));
         std::fs::write(&state_path, "color=#00ff00 energy=0.7 beat=1").unwrap();
@@ -1853,14 +2159,14 @@ mod tests {
         let _guard = super::test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-reload-{}", std::process::id()));
-        std::fs::write(&cfg_path, "[color]\ngradient_low = 000000\ngradient_high = 111111\n").unwrap();
+        std::fs::write(&cfg_path, r#"{"color": {"gradient_low": "000000", "gradient_high": "111111"}}"#).unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert_eq!(f.grad, Some(((0, 0, 0), (17, 17, 17))));
-        std::fs::write(&cfg_path, "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n").unwrap();
+        std::fs::write(&cfg_path, r#"{"color": {"gradient_low": "ff0000", "gradient_high": "0000ff"}}"#).unwrap();
         std::thread::sleep(Duration::from_millis(600));
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert_eq!(
@@ -1881,7 +2187,7 @@ mod tests {
             std::env::temp_dir().join(format!("jefetch-sharkvis-cfg-{}", std::process::id()));
         std::fs::write(
             &cfg_path,
-            "[color]\ngradient_low = 000000\ngradient_high = ff0000\n[visualizer]\nchars = 123\n",
+            r#"{"color": {"gradient_low": "000000", "gradient_high": "ff0000"}, "visualizer": {"chars": "123"}}"#,
         )
         .unwrap();
         let state_path =
@@ -1906,5 +2212,64 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&cfg_path);
         let _ = std::fs::remove_file(&state_path);
+    }
+
+    #[test]
+    fn osc4_spec_parsing() {
+        assert_eq!(parse_osc4_spec("rgb:ff/00/80"), Some((255, 0, 128)));
+        assert_eq!(parse_osc4_spec("rgb:f/0/8"), Some((255, 0, 136)));
+        assert_eq!(parse_osc4_spec("#abc"), Some((170, 187, 204)));
+        assert_eq!(parse_osc4_spec("#aabbcc"), Some((170, 187, 204)));
+        assert_eq!(parse_osc4_spec("rgb:ff/ff"), None);
+        assert_eq!(parse_osc4_spec("#abcd"), None);
+        assert_eq!(parse_osc4_spec("red"), None);
+    }
+
+    #[test]
+    fn live_esc_exact_hits_use_term_index() {
+        let mut pal = [(0, 0, 0); 16];
+        pal[0] = (0, 0, 0);
+        pal[8] = (128, 128, 128);
+        assert_eq!(live_esc(Some(&pal), (0, 0, 0)), "\x1b[30m");
+        assert_eq!(live_esc(Some(&pal), (128, 128, 128)), "\x1b[90m");
+        assert_eq!(live_esc(Some(&pal), (1, 2, 3)), "\x1b[38;2;1;2;3m");
+        assert_eq!(live_esc(None, (1, 2, 3)), "\x1b[38;2;1;2;3m");
+    }
+
+    #[test]
+    fn inactive_frame_keeps_config_fallback() {
+        let _guard = test_env_lock();
+        let cfg_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-fb-{}", std::process::id()));
+        std::fs::write(
+            &cfg_path,
+            r#"{"color": {"gradient_low": "112233", "gradient_high": "aabbcc"}}"#,
+        )
+        .unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
+        assert!(!f.active, "no process running");
+        assert_eq!(
+            f.grad,
+            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc))),
+            "config gradient carried on inactive frame"
+        );
+        assert_eq!(
+            text_color_key(&f),
+            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc)))
+        );
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&cfg_path);
+    }
+
+    #[test]
+    fn text_color_key_empty_without_colors() {
+        assert_eq!(text_color_key(&LiveFrame::inactive()), None);
+        let mut f = LiveFrame::inactive();
+        f.flat = Some((9, 9, 9));
+        assert_eq!(text_color_key(&f), Some(((9, 9, 9), (9, 9, 9))));
     }
 }

@@ -30,3 +30,28 @@ pub fn by_name(name: &str) -> Option<&'static Logo> {
 pub fn list_names() -> impl Iterator<Item = &'static str> {
     LOGOS.iter().map(|l| l.name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_logos_resolve() {
+        for (name, alias) in [("clang", "llvm"), ("python", "py"), ("rust", "rs")] {
+            let logo = by_name(name).unwrap_or_else(|| panic!("missing logo {name}"));
+            assert_eq!(logo.name, name);
+            assert!(
+                by_name(alias).is_some(),
+                "missing alias {alias} for {name}"
+            );
+            assert!(!logo.slots.is_empty());
+            assert!(!logo.lines.is_empty());
+        }
+    }
+
+    #[test]
+    fn unknown_stays_last_fallback() {
+        assert!(by_name("unknown").is_some());
+        assert!(by_name("definitely-not-a-logo").is_none());
+    }
+}

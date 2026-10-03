@@ -112,6 +112,11 @@ impl App {
             }
         }
         active.apply_style_chars(&self.config.logo);
+        if !active.chars_set && base.original_glyphs {
+            active.original_glyphs = true;
+            active.shading_explicit = true;
+            active.chars_set = true;
+        }
         if !active.speed_set {
             active.speed = 0.0;
         }
@@ -362,6 +367,12 @@ impl App {
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
         let mut needs_draw = true;
+        // Last painted live-text colors (static view): repaint only when the
+        // effective text colors change, so steady gradients don't burn CPU
+        // and a lost live source freezes on the last colors instead of
+        // flashing terminal-default.
+        let mut text_key: Option<((u8, u8, u8), (u8, u8, u8))> = None;
+        let mut have_text_key = false;
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
         let (info_tx, info_rx) = std::sync::mpsc::channel::<(u64, Vec<String>)>();
         let mut refresh_gen: u64 = 0;
@@ -458,8 +469,23 @@ impl App {
                 } else {
                     shark_live = shark_sync.last();
                 }
-                if display_live {
-                    if !animated && crate::sharkvis::has_display_color(&shark_live) {
+                if base_cfg.live_term_colors || active_cfg.live_term_colors {
+                    if let Some(pal) = crate::sharkvis::term_palette() {
+                        let (lo, hi) =
+                            shark_sync.term_flow(shark_live.energy, &pal);
+                        shark_live.active = true;
+                        shark_live.grad = Some((lo, hi));
+                        shark_live.flat = None;
+                        shark_live.term_pal = Some(pal);
+                    }
+                }
+                if display_live && !animated {
+                    // Repaint on effective text-color changes only: covers
+                    // live gradients as well as the config/last fallback on
+                    // inactive frames, so the screen can neither miss a color
+                    // change nor flash default grey when the source quiets.
+                    let key = crate::sharkvis::text_color_key(&shark_live);
+                    if !have_text_key || key != text_key {
                         needs_draw = true;
                     }
                 }
@@ -482,8 +508,10 @@ impl App {
                     if cfg.live_colors {
                         if let Some(g) = shark_live.grad {
                             fx.grad = Some(g);
+                            fx.term_pal = shark_live.term_pal;
                         } else if let Some(c) = shark_live.flat {
                             fx.grad = Some((c, c));
+                            fx.term_pal = shark_live.term_pal;
                         }
                     }
                     if !cfg.original_glyphs && !cfg.shading_explicit {
@@ -497,11 +525,15 @@ impl App {
                         .as_secs_f32()
                         .clamp(0.001, 0.5);
                     last_fx = fx_now;
-                    yaw_phase += f64::from(yaw_step);
-                    pitch_phase += f64::from(pitch_step);
+                    // Profile speed scales audio motion like volume
+                    // sensitivity; unset speed counts as 1.0 here.
+                    let sens = if cfg.speed_set { cfg.speed } else { 1.0 };
+                    yaw_phase += f64::from(yaw_step) * f64::from(sens);
+                    pitch_phase += f64::from(pitch_step) * f64::from(sens);
                     if shark_live.energy > crate::anim::AUDIO_FLOOR {
                         roll_phase += f64::from(shark_live.energy)
-                            * f64::from(crate::anim::AUDIO_ROLL);
+                            * f64::from(crate::anim::AUDIO_ROLL)
+                            * f64::from(sens);
                         last_sound = fx_now;
                     } else if let Some(secs) = cfg.return_secs {
                         if fx_now.duration_since(last_sound).as_secs_f32() >= secs {
@@ -518,6 +550,9 @@ impl App {
                     let boom = cfg.boom.unwrap_or(0.0);
                     fx.scale =
                         1.0 + cfg.grow * shark_live.beat + boom * shark_live.energy;
+                    if fx.scale < 1.02 {
+                        fx.scale = 1.0;
+                    }
                 }
                 let anim_logo = match cloud.as_mut() {
                     Some(c) => crate::anim::render_cloud_with_fx(
@@ -640,6 +675,10 @@ impl App {
                 }
                 print!("{}", out);
                 let _ = std::io::Write::flush(&mut std::io::stdout());
+                if display_live && !animated {
+                    text_key = crate::sharkvis::text_color_key(&shark_live);
+                    have_text_key = true;
+                }
                 needs_draw = false;
             }
 
@@ -691,6 +730,7 @@ impl App {
         }
 
         self.apply_logo_colors();
+        Self::publish_logo_colors(self.logo.as_ref());
     }
 
     fn apply_logo_colors(&mut self) {
@@ -712,6 +752,143 @@ impl App {
                 .unwrap_or("36");
             self.config.display.key_color = Some(format!("bold_{}", sgr));
         }
+    }
+
+    /// Publish the resolved logo's first/last distinct foreground colors for
+    /// sharkvis to follow (`$RUNTIME/sharkvis/logo_colors`, atomic tmp+rename;
+    /// removed when the logo carries no color).
+    fn publish_logo_colors(logo: Option<&ResolvedLogo>) {
+        let path = Self::logo_colors_path();
+        let Some(l) = logo else {
+            let _ = std::fs::remove_file(&path);
+            return;
+        };
+        let mut first: Option<(u8, u8, u8)> = None;
+        let mut last: Option<(u8, u8, u8)> = None;
+        for i in 0..l.lines.len() {
+            let mut srcs = vec![l.lines[i].as_str()];
+            if let Some(c) = l.colors.get(i) {
+                srcs.push(c.as_str());
+            }
+            for s in srcs {
+                let mut rest = s;
+                while let Some(pos) = rest.find('\x1b') {
+                    let esc = &rest[pos..];
+                    rest = &rest[pos + 1..];
+                    let bytes = esc.as_bytes();
+                    if bytes.len() < 2 || bytes[1] != b'[' {
+                        continue;
+                    }
+                    let mut j = 2;
+                    while j < bytes.len() && bytes[j] != b'm' && j < 42 {
+                        j += 1;
+                    }
+                    if j >= bytes.len() || bytes[j] != b'm' || j == 2 {
+                        continue;
+                    }
+                    let seq = &esc[2..j];
+                    if let Some(rgb) = Self::sgr_fg_rgb(seq) {
+                        if first.is_none() {
+                            first = Some(rgb);
+                            last = Some(rgb);
+                        } else if Some(rgb) != first {
+                            last = Some(rgb);
+                        }
+                    }
+                    rest = &esc[j + 1..];
+                }
+            }
+        }
+        let (Some((fr, fg, fb)), Some((lr, lg, lb))) = (first, last) else {
+            let _ = std::fs::remove_file(&path);
+            return;
+        };
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+        let body = format!("low=#{fr:02x}{fg:02x}{fb:02x} high=#{lr:02x}{lg:02x}{lb:02x}\n");
+        let tmp = format!("{path}.tmp");
+        if std::fs::write(&tmp, body.as_bytes()).is_err() {
+            return;
+        }
+        if std::fs::rename(&tmp, &path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+
+    fn logo_colors_path() -> String {
+        if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
+            let t = rt.trim_end_matches('/');
+            if !t.is_empty() {
+                return format!("{t}/sharkvis/logo_colors");
+            }
+        }
+        format!("/tmp/sharkvis-{}-logo-colors", unsafe { libc::getuid() })
+    }
+
+    /// First foreground color of an SGR parameter string: `38;5;N`,
+    /// `38;2;r;g;b`, or a basic 30-37/90-97 code. Returns `None` when the
+    /// sequence carries no usable foreground color.
+    fn sgr_fg_rgb(seq: &str) -> Option<(u8, u8, u8)> {
+        const TAB: [[u8; 3]; 16] = [
+            [0, 0, 0],
+            [170, 0, 0],
+            [0, 170, 0],
+            [170, 85, 0],
+            [0, 0, 170],
+            [170, 0, 170],
+            [0, 170, 170],
+            [170, 170, 170],
+            [85, 85, 85],
+            [255, 85, 85],
+            [85, 255, 85],
+            [255, 255, 85],
+            [85, 85, 255],
+            [255, 85, 255],
+            [85, 255, 255],
+            [255, 255, 255],
+        ];
+        let nums: Vec<i64> = seq
+            .split(';')
+            .map(|p| p.trim().parse::<i64>().unwrap_or(i64::MIN))
+            .collect();
+        let mut i = 0;
+        while i < nums.len() {
+            let v = nums[i];
+            if v == 38 && i + 1 < nums.len() {
+                if nums[i + 1] == 5 && i + 2 < nums.len() {
+                    let n = nums[i + 2].clamp(0, 255) as u8;
+                    let n = n as usize;
+                    if n < 16 {
+                        return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
+                    } else if n < 232 {
+                        let v = n - 16;
+                        let (cr, cg, cb) = (v / 36, (v / 6) % 6, v % 6);
+                        let ch = |c: usize| if c == 0 { 0 } else { (55 + 40 * c) as u8 };
+                        return Some((ch(cr), ch(cg), ch(cb)));
+                    } else {
+                        let g = (8 + 10 * (n - 232)) as u8;
+                        return Some((g, g, g));
+                    }
+                } else if nums[i + 1] == 2 && i + 4 < nums.len() {
+                    let c = [
+                        nums[i + 2].clamp(0, 255) as u8,
+                        nums[i + 3].clamp(0, 255) as u8,
+                        nums[i + 4].clamp(0, 255) as u8,
+                    ];
+                    return Some((c[0], c[1], c[2]));
+                }
+                return None;
+            }
+            if (30..=37).contains(&v) || (90..=97).contains(&v) {
+                let n = if v >= 90 { (v - 90 + 8) as usize } else { (v - 30) as usize };
+                return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
+            }
+            i += 1;
+        }
+        None
     }
 
     fn print_json(&self, entries: &[ModuleEntry]) {
@@ -1555,10 +1732,10 @@ mod tests {
         std::fs::write(&path, "color=#ff8800 energy=0.9 beat=1").unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_STATE", &path);
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        let cfg_path = std::env::temp_dir().join(format!("jefetch-textopt-{}.toml", std::process::id()));
+        let cfg_path = std::env::temp_dir().join(format!("jefetch-textopt-{}.jsonc", std::process::id()));
         std::fs::write(
             &cfg_path,
-            "[color]\ngradient_low = ff0000\ngradient_high = 0000ff\n",
+            r#"{"color": {"gradient_low": "ff0000", "gradient_high": "0000ff"}}"#,
         )
         .unwrap();
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", &cfg_path);
@@ -1763,5 +1940,21 @@ mod tests {
         assert_ne!(second, first);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(config_stamp(&s), None);
+    }
+
+    #[test]
+    fn sgr_fg_rgb_parses_first_foreground() {
+        assert_eq!(App::sgr_fg_rgb("38;5;196"), Some((255, 0, 0)));
+        assert_eq!(App::sgr_fg_rgb("38;5;8"), Some((85, 85, 85)));
+        assert_eq!(
+            App::sgr_fg_rgb("38;2;10;20;30"),
+            Some((10, 20, 30))
+        );
+        assert_eq!(App::sgr_fg_rgb("31"), Some((170, 0, 0)));
+        assert_eq!(App::sgr_fg_rgb("90"), Some((85, 85, 85)));
+        assert_eq!(App::sgr_fg_rgb("1;36"), Some((0, 170, 170)));
+        assert_eq!(App::sgr_fg_rgb("0"), None);
+        assert_eq!(App::sgr_fg_rgb("38"), None);
+        assert_eq!(App::sgr_fg_rgb(""), None);
     }
 }

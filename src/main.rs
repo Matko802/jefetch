@@ -16,6 +16,7 @@ Options:
       --list-config-paths     List search paths for config files
       --list-data-paths       List search paths for presets and logos
       --list-logos            List available logos
+      --dump-term-palette     Query the terminal palette (OSC 4) and print it
   -j, --json                  List JSON output
       --static                One shot static output
 "#;
@@ -88,6 +89,20 @@ fn main() {
             "--list-logos" => {
                 for name in jefetch::logo::list_names() {
                     println!("{}", name);
+                }
+                return;
+            }
+            "--dump-term-palette" => {
+                match jefetch::sharkvis::term_palette() {
+                    Some(pal) => {
+                        for (i, (r, g, b)) in pal.iter().enumerate() {
+                            println!("{:2}: #{:02x}{:02x}{:02x}", i, r, g, b);
+                        }
+                    }
+                    None => {
+                        eprintln!("terminal palette query failed");
+                        std::process::exit(1);
+                    }
                 }
                 return;
             }
