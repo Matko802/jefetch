@@ -11,9 +11,9 @@ Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](
 
 ## Features
 
-Uses Fastfetch logos musl lib integration with [sharkvis](https://github.com/Matko802/sharkvis)
+Uses Fastfetch logos musl lib integration with [sharkvis](https://github.com/Matko802/sharkvis) 
 ## AI disclosure
-Project 99% made by opencode free models
+Project 99% made by opencode free models 
 so maybe don't use this if you don't support ai
 
 ## Building
@@ -25,32 +25,23 @@ make deps
 make
 sudo make install
 ```
-
-## Arch Linux (AUR)
-
-`jefetch-git` builds on `x86_64`, `aarch64` and `armv7h`
-(Arch Linux ARM included):
+### Updating it
 
 ```sh
-yay -S jefetch-git
+cd jefetch && git pull && sudo make install
 ```
 
-or manually:
-
+## Arch
 ```sh
 git clone https://github.com/Matko802/jefetch.git
 cd jefetch
 makepkg -si
 ```
-## Updating it
 
-```sh
-cd jefetch && git pull && sudo make install
-```
 ## Usage
 
 <div align="center">
-  <a href="./wiki/Configuration.md"><b>📖 Configuration wiki</b></a>
+  <a href="./wiki/Configuration.md"><b>Wiki</b></a>
 </div>
 
 Its everything here
