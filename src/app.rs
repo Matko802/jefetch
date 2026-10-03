@@ -560,6 +560,7 @@ impl App {
                             yaw_phase = crate::anim::ease_to_root(yaw_phase, dt);
                             pitch_phase = crate::anim::ease_to_root(pitch_phase, dt);
                             roll_phase = crate::anim::ease_to_root(roll_phase, dt);
+                            spin_phase = crate::anim::ease_to_root(spin_phase, dt);
                         }
                     }
                     fx.audio = [
