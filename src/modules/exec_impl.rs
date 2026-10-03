@@ -1681,6 +1681,7 @@ mod tests {
             bass: 0.5,
             left: 0.5,
             right: 0.5,
+            grad_amt: 100,
             speed_mult: 1.0,
         };
         let rows = colors_rows(&ColorsOpts::default());
