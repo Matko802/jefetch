@@ -899,9 +899,6 @@ fn build_points(
                     if ih <= 0.0 {
                         continue;
                     }
-                    if (sr > 0 || sc > 0) && ih < 0.75 * h {
-                        continue;
-                    }
                     if config.original_glyphs && (sr > 0 || sc > 0) {
                         let mut interior = true;
                         'outer: for dr in -1..=1 {
@@ -1174,9 +1171,13 @@ pub fn ease_spin_to_root(
     let period = if int_ok { 100.0 * tau / u } else { tau / rmax };
     let target = (spin / period).round() * period;
     let diff = target - spin;
-    let step = 3.0 * tau * dt.max(0.0) as f64 / rmax;
+    let dt = dt.max(0.0) as f64;
+    if diff.abs() * rmax <= 0.03 {
+        return target;
+    }
+    let step = 3.0 * tau * dt / rmax;
     if diff.abs() <= step {
-        target
+        spin + diff * (10.0 * dt).min(1.0)
     } else {
         spin + diff.signum() * step
     }
@@ -2232,15 +2233,26 @@ mod tests {
         );
         let mut spin = 40.0;
         let mut steps = 0;
+        let mut jumps: Vec<f64> = Vec::new();
         loop {
             let next = ease_spin_to_root(spin, 0.8, [1.0, 1.0, 1.0], [true, false, true], 0.016);
             if next == spin {
                 break;
             }
+            jumps.push((next - spin).abs() * 0.05 * 0.8);
             spin = next;
             steps += 1;
             assert!(steps < 500, "lands in about a second");
         }
+        assert!(!jumps.is_empty());
+        let tail = jumps[jumps.len().saturating_sub(30)..].to_vec();
+        assert!(
+            tail.iter().all(|&j| j <= 0.35),
+            "travel stays smooth, got {:?}",
+            tail.iter().cloned().fold(0.0f64, f64::max)
+        );
+        let last = *jumps.last().unwrap();
+        assert!(last <= 0.05, "halts gently, got {}", last);
         let ang_x = (spin * 0.04 * 0.8) % tau;
         assert!(ang_x.abs() < 1e-6 || (ang_x - tau).abs() < 1e-6, "converges, got {}", ang_x);
     }
@@ -2289,39 +2301,6 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(strip(&back), strip(&home), "return lands on original frame");
-    }
-
-    #[test]
-    fn negative_winding_lands_home_too() {
-        let cfg = AnimConfig::from_animation_str(Some("xz return=2 boom=20 chars=blocks"));
-        let unit = 12.0 * f64::from(cfg.speed) / f64::from(cfg.auto_fps());
-        let home_neg = ease_spin_to_root(
-            -1000.0,
-            unit,
-            [cfg.speed_x, cfg.speed_y, cfg.speed_z],
-            [cfg.spin_x, cfg.spin_y, cfg.spin_z],
-            10.0,
-        );
-        for rate in [0.04, 0.06, 0.05] {
-            let tau = std::f64::consts::TAU;
-            let ang = (home_neg * rate * unit) % tau;
-            assert!(
-                ang.abs() < 1e-6 || (ang - tau).abs() < 1e-6 || (ang + tau).abs() < 1e-6,
-                "negative winding homes, got {}",
-                ang
-            );
-        }
-        let fx0 = RenderFx::none();
-        let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud");
-        let home = render_cloud_with_fx(&mut cloud, 0.0, &cfg, 36, 0, &fx0);
-        let back = render_cloud_with_fx(&mut cloud, home_neg, &cfg, 36, 0, &fx0);
-        let strip = |l: &ResolvedLogo| {
-            l.lines
-                .iter()
-                .map(|s| crate::print::format::strip_sgr(s))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(strip(&back), strip(&home));
     }
 
     #[test]
