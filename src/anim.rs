@@ -2289,6 +2289,39 @@ mod tests {
     }
 
     #[test]
+    fn negative_winding_lands_home_too() {
+        let cfg = AnimConfig::from_animation_str(Some("xz return=2 boom=20 chars=blocks"));
+        let unit = 12.0 * f64::from(cfg.speed) / f64::from(cfg.auto_fps());
+        let home_neg = ease_spin_to_root(
+            -1000.0,
+            unit,
+            [cfg.speed_x, cfg.speed_y, cfg.speed_z],
+            [cfg.spin_x, cfg.spin_y, cfg.spin_z],
+            10.0,
+        );
+        for rate in [0.04, 0.06, 0.05] {
+            let tau = std::f64::consts::TAU;
+            let ang = (home_neg * rate * unit) % tau;
+            assert!(
+                ang.abs() < 1e-6 || (ang - tau).abs() < 1e-6 || (ang + tau).abs() < 1e-6,
+                "negative winding homes, got {}",
+                ang
+            );
+        }
+        let fx0 = RenderFx::none();
+        let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud");
+        let home = render_cloud_with_fx(&mut cloud, 0.0, &cfg, 36, 0, &fx0);
+        let back = render_cloud_with_fx(&mut cloud, home_neg, &cfg, 36, 0, &fx0);
+        let strip = |l: &ResolvedLogo| {
+            l.lines
+                .iter()
+                .map(|s| crate::print::format::strip_sgr(s))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(strip(&back), strip(&home));
+    }
+
+    #[test]
     fn speed_presence_tracked() {
         assert!(!AnimConfig::from_animation_str(Some("spin y")).speed_set);
         assert!(!AnimConfig::from_animation_str(None).speed_set);
