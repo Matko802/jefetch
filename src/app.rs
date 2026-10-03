@@ -117,8 +117,19 @@ impl App {
             active.shading_explicit = true;
             active.chars_set = true;
         }
+        // Unset options follow the base animation so the logo keeps spinning
+        // (on the same axes) while sharkvis plays quietly or idles; explicit
+        // profile options still win (e.g. speed=0 freezes it deliberately).
         if !active.speed_set {
-            active.speed = 0.0;
+            active.speed = base.speed;
+            active.speed_x = base.speed_x;
+            active.speed_y = base.speed_y;
+            active.speed_z = base.speed_z;
+        }
+        if !active.spin_set {
+            active.spin_x = base.spin_x;
+            active.spin_y = base.spin_y;
+            active.spin_z = base.spin_z;
         }
         let mode = if active.sharkvis_set {
             active.sharkvis
@@ -530,7 +541,9 @@ impl App {
                     let sens = if cfg.speed_set { cfg.speed } else { 1.0 };
                     yaw_phase += f64::from(yaw_step) * f64::from(sens);
                     pitch_phase += f64::from(pitch_step) * f64::from(sens);
-                    if shark_live.energy > crate::anim::AUDIO_FLOOR {
+                    if shark_live.energy > crate::anim::AUDIO_FLOOR
+                        || shark_live.beat > 0.15
+                    {
                         roll_phase += f64::from(shark_live.energy)
                             * f64::from(crate::anim::AUDIO_ROLL)
                             * f64::from(sens);
@@ -1681,11 +1694,19 @@ mod tests {
         assert!(base.flat);
         assert!(!base.shading_explicit);
         assert!((active.speed - 0.0).abs() < 1e-4);
-        assert!(active.spin_y && !active.spin_x && !active.spin_z);
+        assert!(!active.spin_x && !active.spin_y && active.spin_z);
         assert!(!active.flat);
         assert!((active.boom.unwrap() - 0.3).abs() < 1e-4);
         assert!(active.original_glyphs);
         assert_eq!(mode, crate::sharkvis::SharkvisMode::Auto);
+    }
+
+    #[test]
+    fn anim_configs_inherits_unset_speed_and_axes() {
+        let app = animate_app(Some("spin y speed=1"), Some("return=2 boom=0.3"));
+        let (base, active, _) = app.anim_configs();
+        assert!((active.speed - 1.0).abs() < 1e-4);
+        assert!(!active.spin_x && active.spin_y && !active.spin_z);
     }
 
     #[test]

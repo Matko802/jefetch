@@ -23,6 +23,7 @@ pub struct AnimConfig {
     pub spin_x: bool,
     pub spin_y: bool,
     pub spin_z: bool,
+    pub spin_set: bool,
     pub speed: f32,
     pub speed_set: bool,
 
@@ -61,6 +62,7 @@ impl Default for AnimConfig {
             spin_x: false,
             spin_y: true,
             spin_z: false,
+            spin_set: false,
             speed: 2.0,
             speed_set: false,
             speed_x: 1.0,
@@ -206,6 +208,7 @@ impl AnimConfig {
                     cfg.spin_x = has_x;
                     cfg.spin_y = has_y;
                     cfg.spin_z = has_z;
+                    cfg.spin_set = true;
                 } else if low.contains("spin") {
 
                 }
