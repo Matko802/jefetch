@@ -1140,6 +1140,45 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
     }
 }
 
+pub fn ease_spin_to_root(
+    spin: f64,
+    speed: f32,
+    mults: [f32; 3],
+    enabled: [bool; 3],
+    dt: f32,
+) -> f64 {
+    let tau = std::f64::consts::TAU;
+    let s = speed.abs() as f64;
+    if s < 1e-6 || dt <= 0.0 {
+        return spin;
+    }
+    let rates = [0.04, 0.06, 0.05];
+    let mut int_ok = true;
+    let mut rmax = 0.0f64;
+    for k in 0..3 {
+        if !enabled[k] {
+            continue;
+        }
+        let m = mults[k] as f64;
+        if (m - m.round()).abs() > 1e-3 {
+            int_ok = false;
+        }
+        rmax = rmax.max(rates[k] * s * m.abs());
+    }
+    if rmax < 1e-9 {
+        return spin;
+    }
+    let period = if int_ok { 100.0 * tau / s } else { tau / rmax };
+    let target = (spin / period).round() * period;
+    let diff = target - spin;
+    let step = 3.0 * tau * dt.max(0.0) as f64 / rmax;
+    if diff.abs() <= step {
+        target
+    } else {
+        spin + diff.signum() * step
+    }
+}
+
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
     pub grad_amt: u32,
@@ -2162,6 +2201,47 @@ mod tests {
         assert!(moved < 1.0 && moved > 0.0, "eases toward root, got {}", moved);
         let moved = ease_to_root(tau + 2.0, 0.033);
         assert!(moved > tau && moved < tau + 2.0, "eases down, got {}", moved);
+    }
+
+    #[test]
+    fn ease_spin_to_root_zeroes_all_axes() {
+        let tau = std::f64::consts::TAU;
+        for speed in [0.5f32, 1.0, 2.0] {
+            let home = ease_spin_to_root(
+                123.456,
+                speed,
+                [1.0, 1.0, 1.0],
+                [true, true, true],
+                10.0,
+            );
+            for rate in [0.04, 0.06, 0.05] {
+                let ang = (home * rate * speed as f64) % tau;
+                assert!(
+                    ang.abs() < 1e-6 || (ang - tau).abs() < 1e-6 || (ang + tau).abs() < 1e-6,
+                    "axis homes at speed {}, got {}",
+                    speed,
+                    ang
+                );
+            }
+        }
+        assert_eq!(ease_spin_to_root(3.0, 0.0, [1.0, 1.0, 1.0], [true, true, true], 1.0), 3.0);
+        assert_eq!(
+            ease_spin_to_root(3.0, 1.0, [1.0, 1.0, 1.0], [false, false, false], 1.0),
+            3.0
+        );
+        let mut spin = 40.0;
+        let mut steps = 0;
+        loop {
+            let next = ease_spin_to_root(spin, 1.0, [1.0, 1.0, 1.0], [true, false, true], 0.016);
+            if next == spin {
+                break;
+            }
+            spin = next;
+            steps += 1;
+            assert!(steps < 500, "lands in about a second");
+        }
+        let ang_x = (spin * 0.04) % tau;
+        assert!(ang_x.abs() < 1e-6 || (ang_x - tau).abs() < 1e-6, "converges, got {}", ang_x);
     }
 
     #[test]
