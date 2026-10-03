@@ -517,7 +517,7 @@ impl App {
                     || shark_live.energy > crate::anim::AUDIO_FLOOR
                     || shark_live.beat > 0.15;
                 if audible {
-                    spin_phase -= f64::from(shark_live.speed_mult);
+                    spin_phase += f64::from(shark_live.speed_mult);
                 }
                 let mut fx = crate::anim::RenderFx::none();
                 if using_active {
