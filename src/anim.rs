@@ -1108,17 +1108,6 @@ pub const AUDIO_PITCH: f32 = 0.14;
 pub const AUDIO_ROLL: f32 = 0.09;
 pub const AUDIO_FLOOR: f32 = 0.01;
 
-pub fn audio_drive(energy: f32) -> f32 {
-    let t = ((energy - AUDIO_FLOOR) / 0.12).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-pub fn spin_step(speed_mult: f32, energy: f32, left: f32, right: f32) -> f64 {
-    f64::from(speed_mult)
-        * f64::from(audio_drive(energy))
-        * f64::from(1.0 + left.clamp(0.0, 1.0) + right.clamp(0.0, 1.0))
-}
-
 pub const RETURN_RATE: f64 = std::f64::consts::PI;
 
 pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
@@ -1130,6 +1119,9 @@ pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
     }
     let bal = (r - l) / sum;
     let mag = (sum * 0.5).clamp(0.0, 1.0);
+    if mag < AUDIO_FLOOR {
+        return (0.0, 0.0);
+    }
     (
         bal * mag * AUDIO_YAW,
         (1.0 - bal.abs()) * mag * AUDIO_PITCH,
@@ -1145,49 +1137,6 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
         target
     } else {
         phase + diff.signum() * step
-    }
-}
-
-pub const SPIN_RX: f64 = 0.04;
-pub const SPIN_RY: f64 = 0.06;
-pub const SPIN_RZ: f64 = 0.05;
-
-pub fn ease_spin_to_root(
-    spin: f64,
-    speed: f32,
-    mults: [f32; 3],
-    enabled: [bool; 3],
-    dt: f32,
-) -> f64 {
-    let tau = std::f64::consts::TAU;
-    let s = speed.abs() as f64;
-    if s < 1e-6 || dt <= 0.0 {
-        return spin;
-    }
-    let rates = [SPIN_RX, SPIN_RY, SPIN_RZ];
-    let mut int_ok = true;
-    let mut rmax = 0.0f64;
-    for k in 0..3 {
-        if !enabled[k] {
-            continue;
-        }
-        let m = mults[k] as f64;
-        if (m - m.round()).abs() > 1e-3 {
-            int_ok = false;
-        }
-        rmax = rmax.max(rates[k] * s * m.abs());
-    }
-    if rmax < 1e-9 {
-        return spin;
-    }
-    let period = if int_ok { 100.0 * tau / s } else { tau / rmax };
-    let target = (spin / period).round() * period;
-    let diff = target - spin;
-    let snap = RETURN_RATE * dt.max(0.0) as f64 / rmax;
-    if diff.abs() <= snap {
-        target
-    } else {
-        spin + diff * (3.0 * dt.max(0.0) as f64).min(1.0)
     }
 }
 
@@ -1362,21 +1311,21 @@ pub fn render_cloud_with_fx(
     let tau = std::f64::consts::TAU;
     let boost = fx.audio;
     let ax = if config.spin_x {
-        ((base * SPIN_RX * f64::from(config.speed) * f64::from(config.speed_x)
+        ((base * 0.04 * f64::from(config.speed) * f64::from(config.speed_x)
             + f64::from(boost[0]))
             % tau) as f32
     } else {
         0.0
     };
     let ay = if config.spin_y {
-        ((base * SPIN_RY * f64::from(config.speed) * f64::from(config.speed_y)
+        ((base * 0.06 * f64::from(config.speed) * f64::from(config.speed_y)
             + f64::from(boost[1]))
             % tau) as f32
     } else {
         0.0
     };
     let az = if config.spin_z {
-        ((base * SPIN_RZ * f64::from(config.speed) * f64::from(config.speed_z)
+        ((base * 0.05 * f64::from(config.speed) * f64::from(config.speed_z)
             + f64::from(boost[2]))
             % tau) as f32
     } else {
@@ -2213,66 +2162,6 @@ mod tests {
         assert!(moved < 1.0 && moved > 0.0, "eases toward root, got {}", moved);
         let moved = ease_to_root(tau + 2.0, 0.033);
         assert!(moved > tau && moved < tau + 2.0, "eases down, got {}", moved);
-    }
-
-    #[test]
-    fn ease_spin_to_root_zeroes_all_axes() {
-        let tau = std::f64::consts::TAU;
-        for speed in [0.5f32, 1.0, 2.0] {
-            let home = ease_spin_to_root(
-                123.456,
-                speed,
-                [1.0, 1.0, 1.0],
-                [true, true, true],
-                10.0,
-            );
-            for rate in [SPIN_RX, SPIN_RY, SPIN_RZ] {
-                let ang = (home * rate * speed as f64) % tau;
-                assert!(
-                    ang.abs() < 1e-6 || (ang - tau).abs() < 1e-6 || (ang + tau).abs() < 1e-6,
-                    "axis homes at speed {}, got {}",
-                    speed,
-                    ang
-                );
-            }
-        }
-        assert_eq!(ease_spin_to_root(3.0, 0.0, [1.0, 1.0, 1.0], [true, true, true], 1.0), 3.0);
-        assert_eq!(
-            ease_spin_to_root(3.0, 1.0, [1.0, 1.0, 1.0], [false, false, false], 1.0),
-            3.0
-        );
-        let mut spin = 40.0;
-        for _ in 0..10000 {
-            let next = ease_spin_to_root(spin, 1.0, [1.0, 1.0, 1.0], [true, false, true], 0.016);
-            if next == spin {
-                break;
-            }
-            spin = next;
-        }
-        let ang_x = (spin * SPIN_RX) % tau;
-        assert!(ang_x.abs() < 1e-6 || (ang_x - tau).abs() < 1e-6, "converges, got {}", ang_x);
-    }
-
-    #[test]
-    fn audio_drive_ramps_to_full() {
-        assert_eq!(audio_drive(0.0), 0.0);
-        assert_eq!(audio_drive(-1.0), 0.0);
-        assert!((audio_drive(1.0) - 1.0).abs() < 1e-6);
-        assert!((audio_drive(0.23) - 1.0).abs() < 1e-6);
-        let a = audio_drive(0.03);
-        let b = audio_drive(0.08);
-        assert!(a > 0.0 && a < b && b < 1.0, "smooth ramp, got {} {}", a, b);
-    }
-
-    #[test]
-    fn spin_step_pumps_with_channels() {
-        assert_eq!(spin_step(1.0, 0.0, 1.0, 1.0), 0.0);
-        assert!((spin_step(1.0, 1.0, 1.0, 1.0) - 3.0).abs() < 1e-6);
-        let stereo = spin_step(1.0, 1.0, 0.5, 0.5);
-        let mono = spin_step(1.0, 1.0, 0.5, 0.0);
-        assert!((stereo - 2.0).abs() < 1e-6);
-        assert!((mono - 1.5).abs() < 1e-6);
-        assert!(stereo > mono);
     }
 
     #[test]
