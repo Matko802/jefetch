@@ -1183,11 +1183,11 @@ pub fn ease_spin_to_root(
     let period = if int_ok { 100.0 * tau / s } else { tau / rmax };
     let target = (spin / period).round() * period;
     let diff = target - spin;
-    let step = RETURN_RATE * dt.max(0.0) as f64 / rmax;
-    if diff.abs() <= step {
+    let snap = RETURN_RATE * dt.max(0.0) as f64 / rmax;
+    if diff.abs() <= snap {
         target
     } else {
-        spin + diff.signum() * step
+        spin + diff * (3.0 * dt.max(0.0) as f64).min(1.0)
     }
 }
 
