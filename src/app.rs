@@ -515,7 +515,7 @@ impl App {
                 };
                 if using_active {
                     spin_phase += f64::from(shark_live.speed_mult)
-                        * f64::from(shark_live.energy.clamp(0.0, 1.0));
+                        * f64::from(crate::anim::audio_drive(shark_live.energy));
                 } else {
                     spin_phase += f64::from(shark_live.speed_mult);
                 }

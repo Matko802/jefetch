@@ -1108,6 +1108,11 @@ pub const AUDIO_PITCH: f32 = 0.14;
 pub const AUDIO_ROLL: f32 = 0.09;
 pub const AUDIO_FLOOR: f32 = 0.01;
 
+pub fn audio_drive(energy: f32) -> f32 {
+    let t = ((energy - AUDIO_FLOOR) / 0.12).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 pub const RETURN_RATE: f64 = std::f64::consts::PI;
 
 pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
@@ -2240,6 +2245,17 @@ mod tests {
         }
         let ang_x = (spin * SPIN_RX) % tau;
         assert!(ang_x.abs() < 1e-6 || (ang_x - tau).abs() < 1e-6, "converges, got {}", ang_x);
+    }
+
+    #[test]
+    fn audio_drive_ramps_to_full() {
+        assert_eq!(audio_drive(0.0), 0.0);
+        assert_eq!(audio_drive(-1.0), 0.0);
+        assert!((audio_drive(1.0) - 1.0).abs() < 1e-6);
+        assert!((audio_drive(0.23) - 1.0).abs() < 1e-6);
+        let a = audio_drive(0.03);
+        let b = audio_drive(0.08);
+        assert!(a > 0.0 && a < b && b < 1.0, "smooth ramp, got {} {}", a, b);
     }
 
     #[test]
