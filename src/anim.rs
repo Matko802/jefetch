@@ -1142,14 +1142,14 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
 
 pub fn ease_spin_to_root(
     spin: f64,
-    speed: f32,
+    unit: f64,
     mults: [f32; 3],
     enabled: [bool; 3],
     dt: f32,
 ) -> f64 {
     let tau = std::f64::consts::TAU;
-    let s = speed.abs() as f64;
-    if s < 1e-6 || dt <= 0.0 {
+    let u = unit.abs();
+    if u < 1e-9 || dt <= 0.0 {
         return spin;
     }
     let rates = [0.04, 0.06, 0.05];
@@ -1163,12 +1163,12 @@ pub fn ease_spin_to_root(
         if (m - m.round()).abs() > 1e-3 {
             int_ok = false;
         }
-        rmax = rmax.max(rates[k] * s * m.abs());
+        rmax = rmax.max(rates[k] * u * m.abs());
     }
     if rmax < 1e-9 {
         return spin;
     }
-    let period = if int_ok { 100.0 * tau / s } else { tau / rmax };
+    let period = if int_ok { 100.0 * tau / u } else { tau / rmax };
     let target = (spin / period).round() * period;
     let diff = target - spin;
     let step = 3.0 * tau * dt.max(0.0) as f64 / rmax;
@@ -2206,22 +2206,20 @@ mod tests {
     #[test]
     fn ease_spin_to_root_zeroes_all_axes() {
         let tau = std::f64::consts::TAU;
-        for speed in [0.5f32, 1.0, 2.0] {
-            let home = ease_spin_to_root(
-                123.456,
-                speed,
-                [1.0, 1.0, 1.0],
-                [true, true, true],
-                10.0,
-            );
-            for rate in [0.04, 0.06, 0.05] {
-                let ang = (home * rate * speed as f64) % tau;
-                assert!(
-                    ang.abs() < 1e-6 || (ang - tau).abs() < 1e-6 || (ang + tau).abs() < 1e-6,
-                    "axis homes at speed {}, got {}",
-                    speed,
-                    ang
-                );
+        for auto in [30.0f64, 60.0, 120.0] {
+            for speed in [0.5f32, 1.0, 2.0] {
+                let unit = 12.0 * speed as f64 / auto;
+                let home = ease_spin_to_root(123.456, unit, [1.0, 1.0, 1.0], [true, true, true], 10.0);
+                for rate in [0.04, 0.06, 0.05] {
+                    let ang = (home * rate * unit) % tau;
+                    assert!(
+                        ang.abs() < 1e-6 || (ang - tau).abs() < 1e-6 || (ang + tau).abs() < 1e-6,
+                        "axis homes at speed {} fps {}, got {}",
+                        speed,
+                        auto,
+                        ang
+                    );
+                }
             }
         }
         assert_eq!(ease_spin_to_root(3.0, 0.0, [1.0, 1.0, 1.0], [true, true, true], 1.0), 3.0);
@@ -2232,7 +2230,7 @@ mod tests {
         let mut spin = 40.0;
         let mut steps = 0;
         loop {
-            let next = ease_spin_to_root(spin, 1.0, [1.0, 1.0, 1.0], [true, false, true], 0.016);
+            let next = ease_spin_to_root(spin, 0.8, [1.0, 1.0, 1.0], [true, false, true], 0.016);
             if next == spin {
                 break;
             }
@@ -2240,8 +2238,54 @@ mod tests {
             steps += 1;
             assert!(steps < 500, "lands in about a second");
         }
-        let ang_x = (spin * 0.04) % tau;
+        let ang_x = (spin * 0.04 * 0.8) % tau;
         assert!(ang_x.abs() < 1e-6 || (ang_x - tau).abs() < 1e-6, "converges, got {}", ang_x);
+    }
+
+    #[test]
+    fn return_lands_on_original_frame() {
+        let cfg = AnimConfig::from_animation_str(Some("xz return=2 boom=20 chars=blocks"));
+        assert!(cfg.spin_x && !cfg.spin_y && cfg.spin_z);
+        let fx0 = RenderFx::none();
+        let mut cloud = build_cloud(&solid_test_logo(), &cfg).expect("cloud");
+        let home = render_cloud_with_fx(&mut cloud, 0.0, &cfg, 36, 0, &fx0);
+        let mut spin = 0.0f64;
+        let mut yaw = 0.0f64;
+        let mut pitch = 0.0f64;
+        let mut roll = 0.0f64;
+        let dt = 1.0f32 / 60.0;
+        for f in 0..600 {
+            let e = 0.25 + 0.2 * ((f as f32 * 0.11).sin() as f64);
+            let l = (e * 0.9) as f32;
+            let r = (e * 1.1).min(1.0) as f32;
+            spin += 1.0;
+            let (ys, ps) = stereo_spin(l, r);
+            yaw += ys as f64;
+            pitch += ps as f64;
+            roll += e * AUDIO_ROLL as f64;
+        }
+        for _ in 0..600 {
+            yaw = ease_to_root(yaw, dt);
+            pitch = ease_to_root(pitch, dt);
+            roll = ease_to_root(roll, dt);
+            spin = ease_spin_to_root(
+                spin,
+                12.0 * f64::from(cfg.speed) / f64::from(cfg.auto_fps()),
+                [cfg.speed_x, cfg.speed_y, cfg.speed_z],
+                [cfg.spin_x, cfg.spin_y, cfg.spin_z],
+                dt,
+            );
+        }
+        let mut fx = RenderFx::none();
+        fx.audio = [pitch as f32, yaw as f32, roll as f32];
+        let back = render_cloud_with_fx(&mut cloud, spin, &cfg, 36, 0, &fx);
+        let strip = |l: &ResolvedLogo| {
+            l.lines
+                .iter()
+                .map(|s| crate::print::format::strip_sgr(s))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(strip(&back), strip(&home), "return lands on original frame");
     }
 
     #[test]

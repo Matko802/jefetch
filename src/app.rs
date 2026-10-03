@@ -556,7 +556,7 @@ impl App {
                             roll_phase = crate::anim::ease_to_root(roll_phase, dt);
                             spin_phase = crate::anim::ease_spin_to_root(
                                 spin_phase,
-                                cfg.speed,
+                                12.0 * f64::from(cfg.speed) / f64::from(cfg.auto_fps()),
                                 [cfg.speed_x, cfg.speed_y, cfg.speed_z],
                                 [cfg.spin_x, cfg.spin_y, cfg.spin_z],
                                 dt,
