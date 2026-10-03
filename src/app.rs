@@ -821,6 +821,13 @@ impl App {
                 let _ = std::fs::create_dir_all(parent);
             }
         }
+        let ((fr, fg, fb), (lr, lg, lb)) = if (fr, fg, fb) == (lr, lg, lb) {
+            let lum = 0.299 * fr as f32 + 0.587 * fg as f32 + 0.114 * fb as f32;
+            let target = if lum > 127.5 { (0, 0, 0) } else { (255, 255, 255) };
+            ((fr, fg, fb), crate::sharkvis::lerp_rgb((fr, fg, fb), target, 0.45))
+        } else {
+            ((fr, fg, fb), (lr, lg, lb))
+        };
         let body = format!("low=#{fr:02x}{fg:02x}{fb:02x} high=#{lr:02x}{lg:02x}{lb:02x}\n");
         let tmp = format!("{path}.tmp");
         if std::fs::write(&tmp, body.as_bytes()).is_err() {
