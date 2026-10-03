@@ -513,7 +513,12 @@ impl App {
                 } else {
                     (&base_cfg, &mut base_cloud)
                 };
-                spin_phase += f64::from(shark_live.speed_mult);
+                if !using_active
+                    || shark_live.energy > crate::anim::AUDIO_FLOOR
+                    || shark_live.beat > 0.15
+                {
+                    spin_phase += f64::from(shark_live.speed_mult);
+                }
                 let mut fx = crate::anim::RenderFx::none();
                 if using_active {
                     if cfg.live_colors {
