@@ -1704,7 +1704,7 @@ mod tests {
     #[test]
     fn anim_configs_inherits_unset_speed_and_axes() {
         let app = animate_app(Some("spin y speed=1"), Some("return=2 boom=0.3"));
-        let (base, active, _) = app.anim_configs();
+        let (_, active, _) = app.anim_configs();
         assert!((active.speed - 1.0).abs() < 1e-4);
         assert!(!active.spin_x && active.spin_y && !active.spin_z);
     }
