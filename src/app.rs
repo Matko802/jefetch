@@ -519,9 +519,11 @@ impl App {
                     if cfg.live_colors {
                         if let Some(g) = shark_live.grad {
                             fx.grad = Some(g);
+                            fx.grad_amt = shark_live.grad_amt;
                             fx.term_pal = shark_live.term_pal;
                         } else if let Some(c) = shark_live.flat {
                             fx.grad = Some((c, c));
+                            fx.grad_amt = shark_live.grad_amt;
                             fx.term_pal = shark_live.term_pal;
                         }
                     }
@@ -905,6 +907,9 @@ impl App {
             if (30..=37).contains(&v) || (90..=97).contains(&v) {
                 let n = if v >= 90 { (v - 90 + 8) as usize } else { (v - 30) as usize };
                 return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
+            }
+            if v == 39 {
+                return Some((255, 255, 255));
             }
             i += 1;
         }

@@ -1066,7 +1066,7 @@ pub struct LogoCloud {
     buf_w: usize,
     buf_h: usize,
     tint_rows: Vec<String>,
-    tint_key: Option<(Option<((u8, u8, u8), (u8, u8, u8))>, usize, usize, usize)>,
+    tint_key: Option<(Option<((u8, u8, u8), (u8, u8, u8))>, u32, usize, usize, usize)>,
 }
 
 pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud> {
@@ -1142,6 +1142,7 @@ pub fn ease_to_root(phase: f64, dt: f32) -> f64 {
 
 pub struct RenderFx {
     pub grad: Option<((u8, u8, u8), (u8, u8, u8))>,
+    pub grad_amt: u32,
     pub term_pal: Option<[crate::sharkvis::Rgb; 16]>,
     pub shading: Option<Vec<String>>,
     pub scale: f32,
@@ -1158,6 +1159,7 @@ impl RenderFx {
     pub fn none() -> RenderFx {
         RenderFx {
             grad: None,
+            grad_amt: 100,
             term_pal: None,
             shading: None,
             scale: 1.0,
@@ -1193,6 +1195,7 @@ pub fn render_frame_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
+        grad_amt: 100,
         term_pal: None,
         shading: None,
         scale: 1.0,
@@ -1237,6 +1240,7 @@ pub fn render_cloud_with_tint(
 ) -> ResolvedLogo {
     let fx = RenderFx {
         grad: tint.map(|c| (c, c)),
+        grad_amt: 100,
         term_pal: None,
         shading: None,
         scale: 1.0,
@@ -1426,17 +1430,24 @@ pub fn render_cloud_with_fx(
 
     // Gradient spans the actual ink so both endpoint colors land on the
     // logo itself instead of the full frame height.
-    let tint_key_now = Some((fx.grad, h, ink_top, ink_bot));
+    let tint_key_now = Some((fx.grad, fx.grad_amt, h, ink_top, ink_bot));
     if *tint_key != tint_key_now {
         tint_rows.clear();
         if let Some(((lr, lg, lb), (hr, hg, hb))) = fx.grad {
             for y in 0..h {
-                let t = if ink_bot > ink_top {
+                let mut t = if ink_bot > ink_top {
                     let yc = y.clamp(ink_top, ink_bot);
                     (ink_bot - yc) as f32 / (ink_bot - ink_top) as f32
                 } else {
                     0.5
                 };
+                let n = fx.grad_amt.clamp(1, 256);
+                if n <= 1 {
+                    t = 0.0;
+                } else {
+                    let n = n as f32;
+                    t = ((t * n).floor().min(n - 1.0)) / (n - 1.0);
+                }
                 let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
                 tint_rows.push(crate::sharkvis::live_esc(
                     fx.term_pal.as_ref(),
@@ -2193,6 +2204,7 @@ mod tests {
     fn fx_grad() -> RenderFx {
         RenderFx {
             grad: Some(((255, 0, 0), (0, 0, 255))),
+            grad_amt: 100,
             term_pal: None,
             shading: None,
             scale: 1.0,
@@ -2330,6 +2342,7 @@ mod tests {
             4,
             &RenderFx {
                 grad: None,
+                grad_amt: 100,
                 term_pal: None,
                 shading: None,
                 scale: 1.2,
@@ -2378,6 +2391,7 @@ mod tests {
             4,
             &RenderFx {
                 grad: None,
+                grad_amt: 100,
                 term_pal: None,
                 shading: Some(vec!["@".to_string()]),
                 scale: 1.0,

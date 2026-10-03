@@ -51,6 +51,7 @@ pub struct LiveFrame {
     pub bass: f32,
     pub left: f32,
     pub right: f32,
+    pub grad_amt: u32,
     pub speed_mult: f32,
 }
 
@@ -67,6 +68,7 @@ impl LiveFrame {
             bass: 0.0,
             left: 0.0,
             right: 0.0,
+            grad_amt: 100,
             speed_mult: 1.0,
         }
     }
@@ -274,6 +276,7 @@ pub struct LiveState {
     pub bass: Option<f32>,
     pub left: Option<f32>,
     pub right: Option<f32>,
+    pub grad_amt: Option<u32>,
     pub started: Option<u64>,
 }
 
@@ -507,6 +510,11 @@ pub fn parse_state_text(text: &str) -> LiveState {
             "started" | "session" | "session_started" => {
                 if let Ok(ms) = v.parse::<u64>() {
                     st.started = Some(ms);
+                }
+            }
+            "gradient" | "grad_amt" | "grad_levels" => {
+                if let Ok(n) = v.parse::<i64>() {
+                    st.grad_amt = Some(n.clamp(1, 256) as u32);
                 }
             }
             _ => {}
@@ -1264,6 +1272,7 @@ impl Sync {
         let mut bass: Option<f32> = None;
         let mut left: Option<f32> = None;
         let mut right: Option<f32> = None;
+        let mut grad_amt: Option<u32> = None;
         let live = read_live_state_sig(self.state_mem.as_ref());
         let have_state = live.is_some();
         if let Some((live, sig)) = live {
@@ -1274,6 +1283,7 @@ impl Sync {
             bass = live.bass;
             left = live.left;
             right = live.right;
+            grad_amt = live.grad_amt;
             if let (Some(lo), Some(hi)) = (live.glow, live.ghigh) {
                 live_grad = Some((lo, hi));
             }
@@ -1327,6 +1337,7 @@ impl Sync {
             bass: bass.unwrap_or(energy).clamp(0.0, 1.0),
             left: left.unwrap_or(energy).clamp(0.0, 1.0),
             right: right.unwrap_or(energy).clamp(0.0, 1.0),
+            grad_amt: grad_amt.unwrap_or(self.last.grad_amt).clamp(1, 256),
             speed_mult: beat_speed_mult(beat, beat_depth),
         };
         self.last = frame;
@@ -1367,11 +1378,18 @@ pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> 
         return Some(c);
     }
     if let Some((lo, hi)) = frame.grad {
-        let t = if total > 1 {
+        let mut t = if total > 1 {
             (total - 1 - idx.min(total - 1)) as f32 / (total - 1) as f32
         } else {
             0.5
         };
+        let n = frame.grad_amt.clamp(1, 256);
+        if n <= 1 {
+            t = 0.0;
+        } else {
+            let n = n as f32;
+            t = ((t * n).floor().min(n - 1.0)) / (n - 1.0);
+        }
         return Some(lerp_rgb(lo, hi, t));
     }
     None
@@ -2259,5 +2277,42 @@ mod tests {
         f.flat = None;
         f.grad = Some(((1, 2, 3), (4, 5, 6)));
         assert_eq!(text_color_key(&f), Some(((1, 2, 3), (4, 5, 6))));
+    }
+
+    #[test]
+    fn gradient_count_parses_and_quantizes() {
+        let st = parse_state_text("energy=0.5 gradient=2");
+        assert_eq!(st.grad_amt, Some(2));
+        let st = parse_state_text("energy=0.5 gradient=999");
+        assert_eq!(st.grad_amt, Some(256));
+        let st = parse_state_text("energy=0.5 gradient=nope");
+        assert_eq!(st.grad_amt, None);
+        let mk = |amt: u32| LiveFrame {
+            active: true,
+            grad: Some(((0, 0, 0), (255, 255, 255))),
+            flat: None,
+            term_pal: None,
+            glyphs: None,
+            energy: 0.0,
+            beat: 0.0,
+            bass: 0.0,
+            left: 0.0,
+            right: 0.0,
+            grad_amt: amt,
+            speed_mult: 1.0,
+        };
+        let one = mk(1);
+        assert_eq!(grad_for_row(&one, 0, 8), Some((0, 0, 0)));
+        assert_eq!(grad_for_row(&one, 7, 8), Some((0, 0, 0)));
+        let two = mk(2);
+        assert_eq!(grad_for_row(&two, 0, 8), Some((255, 255, 255)));
+        assert_eq!(grad_for_row(&two, 7, 8), Some((0, 0, 0)));
+        let mid = grad_for_row(&two, 3, 8).unwrap();
+        assert!(mid == (0, 0, 0) || mid == (255, 255, 255));
+        let many = mk(256);
+        assert_ne!(
+            grad_for_row(&many, 0, 8),
+            grad_for_row(&many, 7, 8)
+        );
     }
 }
