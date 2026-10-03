@@ -513,10 +513,10 @@ impl App {
                 } else {
                     (&base_cfg, &mut base_cloud)
                 };
-                if !using_active
-                    || shark_live.energy > crate::anim::AUDIO_FLOOR
-                    || shark_live.beat > 0.15
-                {
+                if using_active {
+                    spin_phase += f64::from(shark_live.speed_mult)
+                        * f64::from(shark_live.energy.clamp(0.0, 1.0));
+                } else {
                     spin_phase += f64::from(shark_live.speed_mult);
                 }
                 let mut fx = crate::anim::RenderFx::none();
@@ -551,18 +551,24 @@ impl App {
                     if shark_live.energy > crate::anim::AUDIO_FLOOR
                         || shark_live.beat > 0.15
                     {
-                        roll_phase += f64::from(shark_live.energy)
-                            * f64::from(crate::anim::AUDIO_ROLL)
-                            * f64::from(sens);
                         last_sound = fx_now;
                     } else if let Some(secs) = cfg.return_secs {
                         if fx_now.duration_since(last_sound).as_secs_f32() >= secs {
                             yaw_phase = crate::anim::ease_to_root(yaw_phase, dt);
                             pitch_phase = crate::anim::ease_to_root(pitch_phase, dt);
                             roll_phase = crate::anim::ease_to_root(roll_phase, dt);
-                            spin_phase = crate::anim::ease_to_root(spin_phase, dt);
+                            spin_phase = crate::anim::ease_spin_to_root(
+                                spin_phase,
+                                cfg.speed,
+                                [cfg.speed_x, cfg.speed_y, cfg.speed_z],
+                                [cfg.spin_x, cfg.spin_y, cfg.spin_z],
+                                dt,
+                            );
                         }
                     }
+                    roll_phase += f64::from(shark_live.energy)
+                        * f64::from(crate::anim::AUDIO_ROLL)
+                        * f64::from(sens);
                     fx.audio = [
                         pitch_phase as f32,
                         yaw_phase as f32,
