@@ -108,7 +108,7 @@ jefetch --structure "os:kernel:uptime:break:colors"
 | `width` / `height` | Image logos only: target size in terminal columns / rows (default fits 48 columns, aspect kept). Set one side and the other follows the aspect; set both to stretch |
 | `animation` | Needs an explicit `speed` or the logo won't move; `off` turns it off |
 | `style` / `chars` | `"flat"` or `"3d"`; `"ascii"` keeps the logo's own glyphs, anything else is shade blocks like fetch. These beat `animation` |
-| `sharkvis` | Its own profile for when sharkvis is running (own speed and axes). Base `animation` is ignored meanwhile |
+| `sharkvis` | Its own profile for when sharkvis is running (own speed and axes; unset speed stays 0 so silence holds still). `chars=ascii` glyphs still carry over unless the profile sets `chars` |
 
 `jefetch --logo arch` swaps the logo for one run. Point `--logo` at an
 image file (`jefetch --logo ~/pic.png`) for a one-run image logo.
@@ -185,12 +185,15 @@ Without it the logo stays where the music left it.
 | `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
+| `color=terminal` | Glide the logo through your terminal's real 16 colors (asked via OSC 4, needs an interactive terminal; falls back to daemon colors, then plain) |
 | `textcolor=sharkvis` | Text follows the live gradient too, overriding normal colors (shown when idle) |
+| `textcolor=terminal` | Text follows the terminal-color flow too |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |
 | `grow=N` | Pulse strength, `0`–`0.3` (default `0.12`, `0` turns it off) |
 | `return=N` | Seconds of silence before easing back to root position; unset means it never returns |
+| `speed=N` | Volume sensitivity of the motion, unset means `1x`; `speed=2` answers twice as hard. Setting any speed also spins the logo on its own |
 
 ## CLI Overrides
 
