@@ -1235,36 +1235,26 @@ impl Sync {
     }
 
     pub fn poll(&mut self, mode: SharkvisMode, beat_depth: f32, live_colors: bool) -> LiveFrame {
+        if mode == SharkvisMode::Off {
+            self.monitor = None;
+            self.last = LiveFrame::inactive();
+            return self.last.clone();
+        }
         let now = Instant::now();
         if self.running_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             self.running = is_running();
             self.running_at = Some(now);
         }
-        // Config visuals stay fresh even with sharkvis off so the fallback
-        // below (and instant resume) always has current values.
+        if !mode.enabled(self.running) {
+            self.monitor = None;
+            self.last = LiveFrame::inactive();
+            return self.last.clone();
+        }
         if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             let (grad, glyphs) = visual_from_paths(&config_paths());
             self.gradients = grad;
             self.glyphs = glyphs;
             self.visual_at = Some(now);
-        }
-        if mode == SharkvisMode::Off || !mode.enabled(self.running) {
-            // No motion data, but keep text colors stable via the fallback:
-            // config-file gradients first, then last live colors, so
-            // live-driven text never drops to terminal default while
-            // anything is known. Mirrored into `last` so sub-30ms frames
-            // (via `last()`) carry the same colors.
-            let mut out = LiveFrame::inactive();
-            if let Some(g) = self.gradients {
-                out.grad = Some(g);
-            } else if let Some(g) = self.last.grad {
-                out.grad = Some(g);
-            } else {
-                out.flat = self.last.flat;
-            }
-            self.monitor = None;
-            self.last = out.clone();
-            return out;
         }
 
         let mut energy: Option<f32> = None;
@@ -1358,11 +1348,10 @@ pub fn is_live_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
-/// Effective text color carried by a frame, live or fallback (config-file
-/// gradient kept on inactive frames). `None` when nothing is known and the
-/// caller should use the terminal default. Unlike `grad_for_row` it does
-/// not require the frame to be active.
 pub fn text_color_key(frame: &LiveFrame) -> Option<(Rgb, Rgb)> {
+    if !frame.active {
+        return None;
+    }
     if let Some(c) = frame.flat {
         Some((c, c))
     } else {
@@ -1371,6 +1360,9 @@ pub fn text_color_key(frame: &LiveFrame) -> Option<(Rgb, Rgb)> {
 }
 
 pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> {
+    if !frame.active {
+        return None;
+    }
     if let Some(c) = frame.flat {
         return Some(c);
     }
@@ -1966,9 +1958,8 @@ mod tests {
             assert!(!f.active, "{:?} must stay inactive without the process", mode);
             assert!((f.speed_mult - 1.0).abs() < 1e-5);
             assert_eq!(
-                f.grad,
-                Some(((0x00, 0x11, 0x22), (0x33, 0x44, 0x55))),
-                "{mode:?} keeps config fallback instead of dropping to default"
+                f.grad, None,
+                "{mode:?} carries no colors while inactive"
             );
         }
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
@@ -2237,7 +2228,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_frame_keeps_config_fallback() {
+    fn inactive_frame_carries_no_colors() {
         let _guard = test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-fb-{}", std::process::id()));
@@ -2251,25 +2242,22 @@ mod tests {
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(!f.active, "no process running");
-        assert_eq!(
-            f.grad,
-            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc))),
-            "config gradient carried on inactive frame"
-        );
-        assert_eq!(
-            text_color_key(&f),
-            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc)))
-        );
+        assert_eq!(f.grad, None, "inactive frame carries no gradient");
+        assert_eq!(text_color_key(&f), None);
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&cfg_path);
     }
 
     #[test]
-    fn text_color_key_empty_without_colors() {
+    fn text_color_key_tracks_live_gradient() {
         assert_eq!(text_color_key(&LiveFrame::inactive()), None);
         let mut f = LiveFrame::inactive();
+        f.active = true;
         f.flat = Some((9, 9, 9));
         assert_eq!(text_color_key(&f), Some(((9, 9, 9), (9, 9, 9))));
+        f.flat = None;
+        f.grad = Some(((1, 2, 3), (4, 5, 6)));
+        assert_eq!(text_color_key(&f), Some(((1, 2, 3), (4, 5, 6))));
     }
 }
