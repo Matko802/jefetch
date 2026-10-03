@@ -1113,6 +1113,12 @@ pub fn audio_drive(energy: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+pub fn spin_step(speed_mult: f32, energy: f32, left: f32, right: f32) -> f64 {
+    f64::from(speed_mult)
+        * f64::from(audio_drive(energy))
+        * f64::from(1.0 + left.clamp(0.0, 1.0) + right.clamp(0.0, 1.0))
+}
+
 pub const RETURN_RATE: f64 = std::f64::consts::PI;
 
 pub fn stereo_spin(left: f32, right: f32) -> (f32, f32) {
@@ -2256,6 +2262,17 @@ mod tests {
         let a = audio_drive(0.03);
         let b = audio_drive(0.08);
         assert!(a > 0.0 && a < b && b < 1.0, "smooth ramp, got {} {}", a, b);
+    }
+
+    #[test]
+    fn spin_step_pumps_with_channels() {
+        assert_eq!(spin_step(1.0, 0.0, 1.0, 1.0), 0.0);
+        assert!((spin_step(1.0, 1.0, 1.0, 1.0) - 3.0).abs() < 1e-6);
+        let stereo = spin_step(1.0, 1.0, 0.5, 0.5);
+        let mono = spin_step(1.0, 1.0, 0.5, 0.0);
+        assert!((stereo - 2.0).abs() < 1e-6);
+        assert!((mono - 1.5).abs() < 1e-6);
+        assert!(stereo > mono);
     }
 
     #[test]

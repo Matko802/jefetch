@@ -514,8 +514,12 @@ impl App {
                     (&base_cfg, &mut base_cloud)
                 };
                 if using_active {
-                    spin_phase += f64::from(shark_live.speed_mult)
-                        * f64::from(crate::anim::audio_drive(shark_live.energy));
+                    spin_phase += crate::anim::spin_step(
+                        shark_live.speed_mult,
+                        shark_live.energy,
+                        shark_live.left,
+                        shark_live.right,
+                    );
                 } else {
                     spin_phase += f64::from(shark_live.speed_mult);
                 }
