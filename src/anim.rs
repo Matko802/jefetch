@@ -1106,7 +1106,7 @@ pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud
 pub const AUDIO_YAW: f32 = 0.20;
 pub const AUDIO_PITCH: f32 = 0.14;
 pub const AUDIO_ROLL: f32 = 0.09;
-pub const AUDIO_FLOOR: f32 = 0.04;
+pub const AUDIO_FLOOR: f32 = 0.01;
 
 pub const RETURN_RATE: f64 = std::f64::consts::PI;
 
