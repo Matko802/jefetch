@@ -11,9 +11,10 @@ Inspired by [fastfetch](https://github.com/fastfetch-cli/fastfetch) and [fetch](
 
 ## Features
 
-- Uses Fastfetch logos
-- Uses Musl lib instead of glibc
-- integrated with [sharkvis](https://github.com/Matko802/sharkvis)
+Uses Fastfetch logos musl lib integration with [sharkvis](https://github.com/Matko802/sharkvis)
+## AI disclosure
+Project 99% made by opencode free models
+so maybe don't use this if you don't support ai
 
 ## Building
 
