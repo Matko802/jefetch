@@ -76,6 +76,8 @@ Two special cases:
   of a line per package manager. Same via format:
   `{ "type": "packages", "format": "{all}" }`, and per-manager bits work
   too: `"{nix-system} (nix), {nix-user} (user)"`.
+- `separator`: bare draws a dash rule; give it text to repeat instead:
+  `{ "type": "separator", "separator": "----------" }`.
 - `colors`: same options as fastfetch — `"symbol"` (`background` default,
   `block`, `circle`, `diamond`, `triangle`, `square`, `star`),
   `"brightness"` (`default`, `normal`, `light`), `"paddingLeft"`, and

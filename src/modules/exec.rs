@@ -7,7 +7,7 @@ pub fn run(inst: &ModuleInstance, cfg: &Config) -> Option<ModuleOutput> {
 
     match name.as_str() {
         "break" => return Some(super::ModuleOutput::blank()),
-        "separator" => return Some(render_separator(cfg)),
+        "separator" => return Some(render_separator(inst, cfg)),
         _ => {}
     }
 
@@ -196,16 +196,28 @@ impl<'a> Resolver for ValueResolver<'a> {
 #[allow(unused_variables)]
 fn render_empty(_: &str) {}
 
-fn render_separator(cfg: &Config) -> ModuleOutput {
+fn render_separator(inst: &ModuleInstance, _cfg: &Config) -> ModuleOutput {
+    use crate::config::json::JsonValue;
 
     let u = crate::detection::user::detect();
     let title_len = 1
         + crate::print::format::visible_len(&u.user_name_part)
         + crate::print::format::visible_len(&u.host_name_part);
-    let unit: Vec<char> = if cfg.display.separator.is_empty() {
-        vec!['-']
-    } else {
-        cfg.display.separator.chars().collect()
+    let custom = inst
+        .raw
+        .as_ref()
+        .and_then(|raw| match raw {
+            JsonValue::Obj(m) => m
+                .iter()
+                .find(|(k, _)| k == "separator" || k == "text")
+                .and_then(|(_, v)| v.as_str())
+                .map(|s| s.to_string()),
+            _ => None,
+        })
+        .filter(|s| !s.is_empty());
+    let unit: Vec<char> = match custom {
+        Some(s) => s.chars().collect(),
+        None => vec!['-'],
     };
     let mut line = String::new();
     while crate::print::format::visible_len(&line) < title_len {
@@ -217,4 +229,37 @@ fn render_separator(cfg: &Config) -> ModuleOutput {
         }
     }
     ModuleOutput::supported("", vec![line])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sep_inst(text: Option<&str>) -> ModuleInstance {
+        use crate::config::json::JsonValue;
+        ModuleInstance {
+            module: "separator".to_string(),
+            entry: crate::config::configfile::ModuleEntry::Name("separator".to_string()),
+            args: Default::default(),
+            raw: text.map(|t| {
+                JsonValue::Obj(vec![(
+                    "separator".to_string(),
+                    JsonValue::Str(t.to_string()),
+                )])
+            }),
+        }
+    }
+
+    #[test]
+    fn separator_uses_custom_text() {
+        let cfg = Config::default();
+        let out = render_separator(&sep_inst(Some("----------")), &cfg);
+        let line = out.values.join("");
+        assert!(!line.is_empty());
+        assert!(line.chars().all(|c| c == '-'));
+        let bare = render_separator(&sep_inst(None), &cfg);
+        let plain = bare.values.join("");
+        assert!(!plain.is_empty());
+        assert!(plain.chars().all(|c| c == '-'));
+    }
 }
