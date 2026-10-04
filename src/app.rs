@@ -517,7 +517,7 @@ impl App {
                     || shark_live.energy > crate::anim::AUDIO_FLOOR
                     || shark_live.beat > 0.15;
                 if audible {
-                    spin_phase -= f64::from(shark_live.speed_mult);
+                    spin_phase += f64::from(shark_live.speed_mult);
                 }
                 let mut fx = crate::anim::RenderFx::none();
                 if using_active {
@@ -1683,6 +1683,69 @@ mod tests {
         app.config.logo.animation = animation.map(|s| s.to_string());
         app.config.logo.sharkvis = sharkvis.map(|s| s.to_string());
         app
+    }
+
+    #[test]
+    fn animated_keeps_static_holes() {
+        let mut app = animate_app(
+            Some("speed=1 z chars=blocks"),
+            Some("xz return=2 boom=20 chars=blocks textcolor=sharkvis"),
+        );
+        app.config.logo.source = Some("python".to_string());
+        app.config.logo.logo_type = Some("builtin".to_string());
+        app.pick_logo();
+        let logo = app.logo.clone().expect("python logo");
+        let (_, active, _) = app.anim_configs();
+        let mut cloud =
+            crate::anim::build_cloud(&logo, &active).expect("cloud");
+        let fx = crate::anim::RenderFx::none();
+        let out = crate::anim::render_cloud_with_fx(&mut cloud, 0.0, &active, 36, 0, &fx);
+        let grid = |lines: &[String]| {
+            lines
+                .iter()
+                .map(|l| {
+                    strip_ansi(l)
+                        .chars()
+                        .map(|c| !c.is_whitespace())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let interior_holes = |g: &[Vec<bool>]| {
+            let mut top = g.len();
+            let mut bot = 0usize;
+            for (y, row) in g.iter().enumerate() {
+                if row.iter().any(|&b| b) {
+                    top = top.min(y);
+                    bot = bot.max(y);
+                }
+            }
+            let mut holes = 0;
+            for y in top..=bot.min(g.len().saturating_sub(1)) {
+                let row = &g[y];
+                let mut l = row.len();
+                let mut r = 0usize;
+                for (x, &b) in row.iter().enumerate() {
+                    if b {
+                        l = l.min(x);
+                        r = r.max(x);
+                    }
+                }
+                for x in l..=r.min(row.len().saturating_sub(1)) {
+                    if !row[x] {
+                        holes += 1;
+                    }
+                }
+            }
+            holes
+        };
+        let ag = grid(&out.lines);
+        let sg = grid(&logo.lines);
+        assert_eq!(
+            interior_holes(&ag),
+            interior_holes(&sg),
+            "animated must keep static holes"
+        );
     }
 
     #[test]
