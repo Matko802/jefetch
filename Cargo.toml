@@ -1,6 +1,6 @@
 [package]
 name = "jefetch"
-version = "3.0.0"
+version = "3.0.1"
 edition = "2021"
 description = "A fastfetch clone written in pure Rust, statically linked against musl"
 license = "MIT"

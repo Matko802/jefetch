@@ -15,7 +15,7 @@
         { pkgs }:
         pkgs.rustPlatform.buildRustPackage {
           pname = "jefetch";
-          version = "3.0.0";
+          version = "3.0.1";
           src = pkgs.lib.cleanSource ./.;
 
           # Rely on Cargo.lock rather than vendoring dependencies.

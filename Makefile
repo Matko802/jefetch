@@ -1,4 +1,4 @@
-VERSION ?= 3.0.0
+VERSION ?= 3.0.1
 PREFIX ?= /usr/local
 
 musl_for_host = case "$$(uname -m)" in x86_64) echo x86_64-unknown-linux-musl;; aarch64|arm64) echo aarch64-unknown-linux-musl;; armv7*|armv6*) echo armv7-unknown-linux-musleabihf;; esac
