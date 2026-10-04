@@ -587,9 +587,6 @@ impl App {
                     let boom = cfg.boom.unwrap_or(0.0);
                     fx.scale =
                         1.0 + cfg.grow * shark_live.beat + boom * shark_live.energy;
-                    if fx.scale < 1.02 {
-                        fx.scale = 1.0;
-                    }
                 }
                 let paint_key = (
                     using_active,
