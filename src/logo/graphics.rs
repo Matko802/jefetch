@@ -146,6 +146,11 @@ pub fn sixel_response_ok(buf: &[u8]) -> bool {
 }
 
 pub fn detect() -> Option<GraphicsProto> {
+    static CACHE: std::sync::OnceLock<Option<GraphicsProto>> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(detect_uncached)
+}
+
+fn detect_uncached() -> Option<GraphicsProto> {
     if let Ok(tp) = std::env::var("TERM_PROGRAM") {
         if tp == "iTerm.app" || tp == "WezTerm" {
             return Some(GraphicsProto::Iterm2);
@@ -688,17 +693,17 @@ mod tests {
         std::env::remove_var("KITTY_WINDOW_ID");
         std::env::set_var("TERM", "xterm-256color");
         std::env::set_var("TERM_PROGRAM", "iTerm.app");
-        assert_eq!(detect(), Some(GraphicsProto::Iterm2));
+        assert_eq!(detect_uncached(), Some(GraphicsProto::Iterm2));
         std::env::set_var("TERM_PROGRAM", "WezTerm");
-        assert_eq!(detect(), Some(GraphicsProto::Iterm2));
+        assert_eq!(detect_uncached(), Some(GraphicsProto::Iterm2));
         std::env::set_var("TERM_PROGRAM", "ghostty");
-        assert_eq!(detect(), Some(GraphicsProto::Kitty));
+        assert_eq!(detect_uncached(), Some(GraphicsProto::Kitty));
         std::env::remove_var("TERM_PROGRAM");
         std::env::set_var("KITTY_WINDOW_ID", "3");
-        assert_eq!(detect(), Some(GraphicsProto::Kitty));
+        assert_eq!(detect_uncached(), Some(GraphicsProto::Kitty));
         std::env::remove_var("KITTY_WINDOW_ID");
         std::env::set_var("TERM", "xterm-kitty");
-        assert_eq!(detect(), Some(GraphicsProto::Kitty));
+        assert_eq!(detect_uncached(), Some(GraphicsProto::Kitty));
         if let Some(v) = prev_tp {
             std::env::set_var("TERM_PROGRAM", v);
         } else {

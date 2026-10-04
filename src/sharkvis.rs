@@ -1793,6 +1793,12 @@ mod tests {
     }
 
     #[test]
+    fn config_rejects_unterminated_comment() {
+        assert!(crate::config::parse(r#"{"a": 1 /* oops"#).is_err());
+        assert!(crate::config::parse(r#"{"a": 1 /* ok */}"#).is_ok());
+    }
+
+    #[test]
     fn state_text_parses() {
         let st = parse_state_text("color=#ff8800 energy=0.42 beat=1");
         assert_eq!(st.color, Some((255, 136, 0)));

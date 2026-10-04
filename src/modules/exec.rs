@@ -196,15 +196,25 @@ impl<'a> Resolver for ValueResolver<'a> {
 #[allow(unused_variables)]
 fn render_empty(_: &str) {}
 
-fn render_separator(_cfg: &Config) -> ModuleOutput {
+fn render_separator(cfg: &Config) -> ModuleOutput {
 
     let u = crate::detection::user::detect();
     let title_len = 1
         + crate::print::format::visible_len(&u.user_name_part)
         + crate::print::format::visible_len(&u.host_name_part);
+    let unit: Vec<char> = if cfg.display.separator.is_empty() {
+        vec!['-']
+    } else {
+        cfg.display.separator.chars().collect()
+    };
     let mut line = String::new();
     while crate::print::format::visible_len(&line) < title_len {
-        line.push('-');
+        for c in &unit {
+            if crate::print::format::visible_len(&line) >= title_len {
+                break;
+            }
+            line.push(*c);
+        }
     }
     ModuleOutput::supported("", vec![line])
 }

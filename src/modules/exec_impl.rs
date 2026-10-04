@@ -56,20 +56,47 @@ fn render_custom(_inst: &ModuleInstance) -> Option<ModuleOutput> {
 fn render_command(inst: &ModuleInstance) -> Option<ModuleOutput> {
     use crate::config::json::JsonValue;
     let raw = inst.raw.as_ref()?;
-    let text = match raw {
-        JsonValue::Obj(m) => m
-            .iter()
-            .find(|(k, _)| k == "text")
-            .and_then(|(_, v)| v.as_str())
-            .map(|s| s.to_string()),
-        _ => None,
-    }?;
-
-    let out = std::process::Command::new("/bin/sh")
+    let obj = match raw {
+        JsonValue::Obj(m) => m,
+        _ => return None,
+    };
+    let text = obj
+        .iter()
+        .find(|(k, _)| k == "text")
+        .and_then(|(_, v)| v.as_str())
+        .map(|s| s.to_string())?;
+    let timeout_ms: u64 = obj
+        .iter()
+        .find(|(k, _)| k == "timeout")
+        .and_then(|(_, v)| v.as_u64())
+        .unwrap_or(2000)
+        .clamp(100, 30000);
+    let mut child = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(&text)
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if start.elapsed() > std::time::Duration::from_millis(timeout_ms) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(_) => return None,
+        }
+    }
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let value = stdout.trim().to_string();
     if value.is_empty() {
@@ -256,14 +283,12 @@ impl ColorsOpts {
 }
 
 fn render_datetime(cfg: &Config) -> Option<ModuleOutput> {
-    use std::os::unix::io::AsRawFd;
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
         .as_secs() as i64;
     let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
 
-    let _fd = std::io::stdout().as_raw_fd();
     let tm = unsafe {
         let p = libc::localtime_r(&t, tm.as_mut_ptr());
         if p.is_null() {
@@ -384,10 +409,11 @@ fn render_kernel(cfg: &Config) -> Option<ModuleOutput> {
 
 fn render_uptime(cfg: &Config) -> Option<ModuleOutput> {
     let u = crate::detection::uptime::detect();
-    if u.uptime_secs == 0 {
-        return None;
-    }
-    let text = common::format_uptime(u.uptime_secs);
+    let text = if u.uptime_secs == 0 {
+        "less than a minute".to_string()
+    } else {
+        common::format_uptime(u.uptime_secs)
+    };
     Some(render_single("Uptime", text, cfg))
 }
 
@@ -757,8 +783,17 @@ fn render_disk(inst: &ModuleInstance, _cfg: &Config) -> Option<ModuleOutput> {
     let folders: Vec<String> = if let Some(raw) = &inst.raw {
         if let JsonValue::Obj(m) = raw {
             m.iter()
-                .filter(|(k, _)| k == "folders")
-                .filter_map(|(_, v)| v.as_str().map(|s| s.to_string()))
+                .filter(|(k, _)| k == "folders" || k == "folder")
+                .flat_map(|(_, v)| match v {
+                    JsonValue::Arr(items) => items
+                        .iter()
+                        .filter_map(|i| i.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>(),
+                    _ => v
+                        .as_str()
+                        .map(|s| vec![s.to_string()])
+                        .unwrap_or_default(),
+                })
                 .collect()
         } else {
             Vec::new()
@@ -1247,7 +1282,16 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
         }
         "host" => {
             let name = crate::detection::board::product_name();
-            if name.is_empty() {
+            let l = name.to_ascii_lowercase();
+            let generic = name.is_empty()
+                || l == "system product name"
+                || l == "to be filled by o.e.m."
+                || l == "default string"
+                || l == "system name"
+                || l == "invalid"
+                || l.contains("to be filled")
+                || l.contains("default string");
+            if generic {
                 return None;
             }
             Some(jobj(vec![("name", J::Str(name))]))
@@ -1257,10 +1301,10 @@ pub fn json_result(name: &str, inst: &ModuleInstance, _cfg: &Config) -> Option<J
             if c.physical_cores == 0 {
                 return None;
             }
-            let base = if c.freq_cur_mhz != 0 {
-                c.freq_cur_mhz
-            } else {
+            let base = if c.freq_max_mhz != 0 {
                 c.freq_max_mhz
+            } else {
+                c.freq_cur_mhz
             };
             let core_types = if let (Some(pe), Some(ee)) = (c.pe_cores, c.ee_cores) {
                 J::Arr(vec![

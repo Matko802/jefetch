@@ -116,10 +116,7 @@ fn prefix_len_v6(mask: *const libc::sockaddr) -> u8 {
 }
 
 fn format_addr4(s_addr: u32) -> String {
-    let b = match cfg!(target_endian = "little") {
-        true => s_addr.to_le_bytes(),
-        false => s_addr.to_be_bytes(),
-    };
+    let b = s_addr.to_ne_bytes();
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
@@ -157,9 +154,6 @@ fn format_addr6(addr: &libc::in6_addr) -> String {
         out.push_str(&head);
         out.push_str("::");
         out.push_str(&tail);
-    } else if groups.iter().any(|&g| g == 0) {
-
-        out = format_hex(&groups);
     } else {
         out = format_hex(&groups);
     }

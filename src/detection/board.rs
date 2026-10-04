@@ -31,12 +31,8 @@ pub fn device_tree_model() -> String {
         "/sys/firmware/devicetree/base/model",
     ] {
         if let Ok(b) = std::fs::read(p) {
-            let s: String = b
-                .into_iter()
-                .take_while(|&c| c != 0)
-                .map(|c| c as char)
-                .collect();
-            let s = s.trim().to_string();
+            let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
+            let s = String::from_utf8_lossy(&b[..end]).trim().to_string();
             if !s.is_empty() {
                 return s;
             }

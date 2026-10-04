@@ -40,7 +40,9 @@ impl<'a> ModuleRender<'a> {
                 );
                 out.push(rendered);
             } else {
-                let blank = " ".repeat(key_visible + 1 + padding);
+                let blank = " ".repeat(
+                    key_visible + crate::print::format::visible_len(&self.display.separator) + padding,
+                );
                 let rendered = format!("{}{}", blank, value);
                 out.push(rendered);
             }

@@ -20,7 +20,12 @@ pub fn detect(timeout_ms: u128) -> Option<String> {
 
 fn http_get(host: &str, port: u16) -> Option<String> {
 
-    let stream = TcpStream::connect((host, port)).ok()?;
+    use std::net::ToSocketAddrs;
+    let addr = (host, port)
+        .to_socket_addrs()
+        .ok()?
+        .next()?;
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(4))).ok()?;
     stream.set_write_timeout(Some(Duration::from_secs(4))).ok()?;
     use std::io::{Read, Write};
@@ -33,11 +38,19 @@ fn http_get(host: &str, port: u16) -> Option<String> {
     let mut buf = Vec::new();
     s.read_to_end(&mut buf).ok()?;
     let body = String::from_utf8_lossy(&buf);
-    body.lines()
+    body
+        .lines()
         .map(|l| l.trim())
-        .find(|l| {
-            l.chars().all(|c| c.is_ascii_digit() || c == '.')
-                && l.split('.').count() == 4
-        })
+        .find(|l| is_ipv4(l))
         .map(|l| l.to_string())
+}
+
+fn is_ipv4(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    parts.iter().all(|p| {
+        !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u8>().is_ok()
+    })
 }

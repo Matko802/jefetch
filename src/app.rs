@@ -361,9 +361,6 @@ impl App {
                 raw_term.c_cc[libc::VMIN as usize] = 0;
                 raw_term.c_cc[libc::VTIME as usize] = 0;
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, &raw_term); }
-                unsafe {
-                    LIVE_SAVED_TERM = Some(orig_term);
-                }
                 install_live_signal_handlers();
             } else {
                 tty_fd = -1;
@@ -378,6 +375,17 @@ impl App {
             .checked_sub(std::time::Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
         let mut needs_draw = true;
+        let mut last_paint: Option<(
+            bool,
+            u64,
+            [u32; 3],
+            Option<((u8, u8, u8), (u8, u8, u8))>,
+            u32,
+            Option<Vec<String>>,
+            Option<[(u8, u8, u8); 16]>,
+            usize,
+            usize,
+        )> = None;
         // Last painted live-text colors (static view): repaint only when the
         // effective text colors change, so steady gradients don't burn CPU
         // and a lost live source freezes on the last colors instead of
@@ -397,37 +405,43 @@ impl App {
             }
         };
         loop {
-
+            let frame_start = std::time::Instant::now();
             if last_config_check.elapsed() >= std::time::Duration::from_millis(250) {
                 last_config_check = std::time::Instant::now();
                 if let Some(path) = &watch_path {
                     let stamp = config_stamp(path);
                     if stamp != last_stamp {
-                        last_stamp = stamp;
-                        if let Some(cfg) = load_config_file(path) {
-                            self.config = cfg;
-                            self.config.display.text_live = profile_text_live(&self.config.logo);
-                            self.apply_logo_overrides();
-                            self.pick_logo();
-                            base_logo = self.logo.clone();
-                            entries = self.build_entries();
-                            let cfgs = self.anim_configs();
-                            base_cfg = cfgs.0;
-                            active_cfg = cfgs.1;
-                            mode = cfgs.2;
-                            display_live = display_wants_sharkvis(&self.config, &entries);
-                            base_cloud = base_logo
-                                .as_ref()
-                                .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
-                            active_cloud = base_logo
-                                .as_ref()
-                                .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
-                            using_active = false;
-                            animated = self.should_animate() && base_logo.is_some();
-                            refresh_gen = refresh_gen.wrapping_add(1);
-                            refresh_busy = None;
-                            last_refresh = std::time::Instant::now()
-                                - std::time::Duration::from_secs(2);
+                        match load_config_file(path) {
+                            Some(cfg) => {
+                                last_stamp = stamp;
+                                self.config = cfg;
+                                self.config.display.text_live =
+                                    profile_text_live(&self.config.logo);
+                                self.apply_logo_overrides();
+                                self.pick_logo();
+                                base_logo = self.logo.clone();
+                                entries = self.build_entries();
+                                let cfgs = self.anim_configs();
+                                base_cfg = cfgs.0;
+                                active_cfg = cfgs.1;
+                                mode = cfgs.2;
+                                display_live = display_wants_sharkvis(&self.config, &entries);
+                                base_cloud = base_logo
+                                    .as_ref()
+                                    .and_then(|l| crate::anim::build_cloud(l, &base_cfg));
+                                active_cloud = base_logo
+                                    .as_ref()
+                                    .and_then(|l| crate::anim::build_cloud(l, &active_cfg));
+                                using_active = false;
+                                animated = self.should_animate() && base_logo.is_some();
+                                refresh_gen = refresh_gen.wrapping_add(1);
+                                refresh_busy = None;
+                                last_refresh = std::time::Instant::now()
+                                    - std::time::Duration::from_secs(2);
+                            }
+                            None => {
+                                eprintln!("jefetch: could not reload {}", path);
+                            }
                         }
                     }
                 }
@@ -516,8 +530,15 @@ impl App {
                 let audible = !using_active
                     || shark_live.energy > crate::anim::AUDIO_FLOOR
                     || shark_live.beat > 0.15;
+                let fx_now = std::time::Instant::now();
+                let dt = fx_now
+                    .duration_since(last_fx)
+                    .as_secs_f32()
+                    .clamp(0.001, 0.5);
+                last_fx = fx_now;
+                let dt60 = dt * 60.0;
                 if audible {
-                    spin_phase += f64::from(shark_live.speed_mult);
+                    spin_phase += f64::from(shark_live.speed_mult) * f64::from(dt60);
                 }
                 let mut fx = crate::anim::RenderFx::none();
                 if using_active {
@@ -537,17 +558,12 @@ impl App {
                     }
                     let (yaw_step, pitch_step) =
                         crate::anim::stereo_spin(shark_live.left, shark_live.right);
-                    let fx_now = std::time::Instant::now();
-                    let dt = fx_now
-                        .duration_since(last_fx)
-                        .as_secs_f32()
-                        .clamp(0.001, 0.5);
-                    last_fx = fx_now;
-                    yaw_phase += f64::from(yaw_step);
-                    pitch_phase += f64::from(pitch_step);
+                    yaw_phase += f64::from(yaw_step) * f64::from(dt60);
+                    pitch_phase += f64::from(pitch_step) * f64::from(dt60);
                     if audible {
                         roll_phase += f64::from(shark_live.energy)
-                            * f64::from(crate::anim::AUDIO_ROLL);
+                            * f64::from(crate::anim::AUDIO_ROLL)
+                            * f64::from(dt60);
                         last_sound = fx_now;
                     } else if let Some(secs) = cfg.return_secs {
                         if fx_now.duration_since(last_sound).as_secs_f32() >= secs {
@@ -575,68 +591,87 @@ impl App {
                         fx.scale = 1.0;
                     }
                 }
-                let anim_logo = match cloud.as_mut() {
-                    Some(c) => crate::anim::render_cloud_with_fx(
-                        c,
-                        spin_phase,
-                        cfg,
-                        render_height,
-                        info_count,
-                        &fx,
-                    ),
-                    None => base_logo.clone().unwrap_or(ResolvedLogo {
-                        lines: Vec::new(),
-                        colors: Vec::new(),
-                        width: 0,
-                        padding_right: 0,
-                    }),
-                };
-                out.clear();
-                out.push_str("\x1b[H");
-                let n = anim_logo.lines.len();
-                let mut line = String::new();
-                let mut clipped = String::new();
-                for row in 0..n {
+                let paint_key = (
+                    using_active,
+                    spin_phase.to_bits(),
+                    [
+                        fx.audio[0].to_bits(),
+                        fx.audio[1].to_bits(),
+                        fx.audio[2].to_bits(),
+                    ],
+                    fx.grad,
+                    fx.scale.to_bits(),
+                    fx.shading.clone(),
+                    fx.term_pal,
+                    render_height,
+                    info_count,
+                );
+                if last_paint.as_ref() != Some(&paint_key) || needs_draw {
+                    last_paint = Some(paint_key);
+                    needs_draw = false;
+                    let anim_logo = match cloud.as_mut() {
+                        Some(c) => crate::anim::render_cloud_with_fx(
+                            c,
+                            spin_phase,
+                            cfg,
+                            render_height,
+                            info_count,
+                            &fx,
+                        ),
+                        None => base_logo.clone().unwrap_or(ResolvedLogo {
+                            lines: Vec::new(),
+                            colors: Vec::new(),
+                            width: 0,
+                            padding_right: 0,
+                        }),
+                    };
+                    out.clear();
+                    out.push_str("\x1b[H");
+                    let n = anim_logo.lines.len();
+                    let mut line = String::new();
+                    let mut clipped = String::new();
+                    for row in 0..n {
 
-                    let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
-                    line.clear();
-                    line.push_str(logo_canvas);
+                        let logo_canvas = anim_logo.lines.get(row).map(|s| s.as_str()).unwrap_or("");
+                        line.clear();
+                        line.push_str(logo_canvas);
 
-                    let info_row = row as isize - 1;
-                    if info_row >= 0 && (info_row as usize) < info_count {
-                        line.push_str(&" ".repeat(GAP));
-                        let raw =
-                            base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or("");
-                        if display_live {
-                            line.push_str(
-                                &crate::sharkvis::swap_display_placeholders_row(
-                                    raw,
-                                    &shark_live,
-                                    info_row as usize,
-                                    info_count,
-                                ),
-                            );
-                        } else {
-                            line.push_str(raw);
+                        let info_row = row as isize - 1;
+                        if info_row >= 0 && (info_row as usize) < info_count {
+                            line.push_str(&" ".repeat(GAP));
+                            let raw =
+                                base_lines.get(info_row as usize).map(|s| s.as_str()).unwrap_or("");
+                            if display_live {
+                                line.push_str(
+                                    &crate::sharkvis::swap_display_placeholders_row(
+                                        raw,
+                                        &shark_live,
+                                        info_row as usize,
+                                        info_count,
+                                    ),
+                                );
+                            } else {
+                                line.push_str(raw);
+                            }
+                        }
+                        crate::print::format::truncate_visible_into(
+                            line.trim_end(),
+                            cols,
+                            &mut clipped,
+                        );
+                        out.push_str(&clipped);
+                        out.push_str("\x1b[K");
+                        if row + 1 < n {
+                            out.push('\n');
                         }
                     }
-                    crate::print::format::truncate_visible_into(
-                        line.trim_end(),
-                        cols,
-                        &mut clipped,
-                    );
-                    out.push_str(&clipped);
-                    out.push_str("\x1b[K");
-                    if row + 1 < n {
-                        out.push('\n');
+                    out.push_str("\x1b[J");
+                    if !crate::common::colors_enabled() {
+                        out = crate::print::format::strip_sgr(&out);
                     }
+                    print!("{}", out);
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
                 }
-                out.push_str("\x1b[J");
-                if !crate::common::colors_enabled() {
-                    out = crate::print::format::strip_sgr(&out);
-                }
-                print!("{}", out);
-                let _ = std::io::Write::flush(&mut std::io::stdout());
             } else if needs_draw {
 
                 out.clear();
@@ -704,9 +739,23 @@ impl App {
             }
 
             let mut quit = false;
-            let slices = (base_cfg.frame_interval().as_millis() / 10).clamp(1, 200) as usize;
-            for _ in 0..slices {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+            let interval = if using_active {
+                active_cfg.frame_interval()
+            } else {
+                base_cfg.frame_interval()
+            };
+            loop {
+                let remaining = interval
+                    .checked_sub(frame_start.elapsed())
+                    .unwrap_or_default();
+                if remaining.is_zero() {
+                    break;
+                }
+                std::thread::sleep(remaining.min(std::time::Duration::from_millis(10)));
+                if got_term_signal() {
+                    quit = true;
+                    break;
+                }
                 match poll_key_action(tty_fd, is_tty, &mut pending) {
                     KeyAction::Quit => {
                         quit = true;
@@ -1589,41 +1638,26 @@ pub fn stdout_is_tty() -> bool {
     unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 }
 }
 
-static mut LIVE_SAVED_TERM: Option<libc::termios> = None;
+static GOT_TERM_SIGNAL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
-extern "C" fn live_signal_restore(sig: libc::c_int) {
-    unsafe {
-        let seq = b"\x1b[?25h\x1b[0m\n";
-        let _ = libc::write(
-            libc::STDOUT_FILENO,
-            seq.as_ptr() as *const libc::c_void,
-            seq.len(),
-        );
-        let saved: Option<libc::termios> = std::ptr::addr_of!(LIVE_SAVED_TERM).read();
-        if let Some(t) = saved {
-            libc::tcsetattr(libc::STDOUT_FILENO, libc::TCSANOW, &t);
-        }
-        libc::signal(sig, libc::SIG_DFL);
-        libc::raise(sig);
-    }
+pub fn got_term_signal() -> bool {
+    GOT_TERM_SIGNAL.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+extern "C" fn live_signal_flag(_sig: libc::c_int) {
+    GOT_TERM_SIGNAL.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 fn install_live_signal_handlers() {
-    for sig in [
-        libc::SIGTERM,
-        libc::SIGINT,
-        libc::SIGHUP,
-        libc::SIGBUS,
-        libc::SIGFPE,
-        libc::SIGILL,
-        libc::SIGSEGV,
-        libc::SIGABRT,
-    ] {
+    for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         unsafe {
-            libc::signal(
-                sig,
-                live_signal_restore as extern "C" fn(libc::c_int) as libc::sighandler_t,
-            );
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = live_signal_flag as extern "C" fn(libc::c_int)
+                as libc::sighandler_t;
+            sa.sa_flags = libc::SA_RESTART;
+            libc::sigemptyset(&mut sa.sa_mask);
+            libc::sigaction(sig, &sa, std::ptr::null_mut());
         }
     }
 }
@@ -1659,7 +1693,10 @@ pub fn strip_ansi(s: &str) -> String {
             continue;
         }
         let len = utf8_len(b[i]);
-        out.push_str(&s[i..i + len]);
+        match s.get(i..i + len) {
+            Some(chunk) => out.push_str(chunk),
+            None => break,
+        }
         i += len;
     }
     out

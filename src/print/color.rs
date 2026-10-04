@@ -115,6 +115,9 @@ pub fn named_color_sgr(name: &str) -> Option<String> {
     if base_escape == 0 {
 
         if let Some(num) = base.parse::<u16>().ok() {
+            if num > 255 {
+                return None;
+            }
             codes.push(num as u8);
             return Some(sgr_from_codes(&codes));
         }
@@ -174,6 +177,9 @@ fn sgr_from_codes(codes: &[u8]) -> String {
 }
 
 fn ansi_from_fg(num: u16) -> ApplyResult {
+    if num > 255 {
+        return ApplyResult::None;
+    }
     ApplyResult::Ansi {
         start: format!("\x1b[{}m", num),
         end: RESET.to_string(),

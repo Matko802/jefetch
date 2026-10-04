@@ -12,6 +12,28 @@ pub enum JsonValue {
     Obj(Vec<(String, JsonValue)>),
 }
 
+fn write_escaped_str(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32))
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn write_escaped(out: &mut String, s: &str) {
+    write_escaped_str(out, s);
+}
+
 impl JsonValue {
     pub fn kind(&self) -> &'static str {
         match self {
@@ -70,7 +92,7 @@ impl JsonValue {
     pub fn as_u64(&self) -> Option<u64> {
         match self {
             JsonValue::Uint(v) => Some(*v),
-            JsonValue::Int(v) => Some(*v as u64),
+            JsonValue::Int(v) => u64::try_from(*v).ok(),
             _ => None,
         }
     }
@@ -78,7 +100,7 @@ impl JsonValue {
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             JsonValue::Int(v) => Some(*v),
-            JsonValue::Uint(v) => Some(*v as i64),
+            JsonValue::Uint(v) => i64::try_from(*v).ok(),
             _ => None,
         }
     }
@@ -170,23 +192,7 @@ impl JsonValue {
             JsonValue::Int(v) => out.push_str(&v.to_string()),
             JsonValue::Uint(v) => out.push_str(&v.to_string()),
             JsonValue::Float(v) => out.push_str(&v.to_string()),
-            JsonValue::Str(s) => {
-                out.push('"');
-                for c in s.chars() {
-                    match c {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        c if (c as u32) < 0x20 => {
-                            out.push_str(&format!("\\u{:04x}", c as u32))
-                        }
-                        c => out.push(c),
-                    }
-                }
-                out.push('"');
-            }
+            JsonValue::Str(s) => write_escaped_str(out, s),
             JsonValue::Arr(a) => {
                 out.push('[');
                 for (i, v) in a.iter().enumerate() {
@@ -203,9 +209,7 @@ impl JsonValue {
                     if i > 0 {
                         out.push(',');
                     }
-                    out.push('"');
-                    out.push_str(k);
-                    out.push('"');
+                    write_escaped(out, k);
                     out.push(':');
                     v.write(out);
                 }

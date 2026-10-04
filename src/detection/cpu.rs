@@ -120,7 +120,15 @@ pub fn numa_nodes() -> u64 {
     let Ok(e) = std::fs::read_dir("/sys/devices/system/node") else {
         return 1;
     };
-    e.flatten().count() as u64
+    let n = e
+        .flatten()
+        .filter(|en| {
+            en.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("node") && n[4..].bytes().all(|b| b.is_ascii_digit()))
+        })
+        .count() as u64;
+    n.max(1)
 }
 
 pub fn detect() -> CpuInfo {
@@ -320,15 +328,28 @@ fn count_physical_cores_sysfs() -> Option<usize> {
 
 fn max_freq_sysfs(file: &str) -> u64 {
     let mut best = 0u64;
-    for cpu in 0..count_cpus_sysfs().max(1) {
-        let p = format!("/sys/devices/system/cpu/cpu{}/cpufreq/{}", cpu, file);
+    let entries: Vec<_> = std::fs::read_dir("/sys/devices/system/cpu")
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| {
+                    e.file_name().to_str().is_some_and(|n| {
+                        n.starts_with("cpu") && n[3..].bytes().all(|b| b.is_ascii_digit())
+                    })
+                })
+                .take(4096)
+                .collect()
+        })
+        .unwrap_or_default();
+    for e in entries {
+        let p = format!(
+            "/sys/devices/system/cpu/{}/cpufreq/{}",
+            e.file_name().to_string_lossy(),
+            file
+        );
         if let Ok(s) = std::fs::read_to_string(&p) {
             if let Ok(khz) = s.trim().parse::<u64>() {
                 best = best.max(khz / 1000);
             }
-        }
-        if cpu > 4096 {
-            break;
         }
     }
     best

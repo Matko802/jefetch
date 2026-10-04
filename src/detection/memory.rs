@@ -13,6 +13,7 @@ pub struct MemoryInfo {
 
 pub fn detect() -> MemoryInfo {
     let mut info = MemoryInfo::default();
+    let mut have_available = false;
     for line in crate::detection::read_file_lines("/proc/meminfo") {
         let mut parts = line.split_whitespace();
         let key = parts.next().unwrap_or("").trim_end_matches(':');
@@ -22,13 +23,23 @@ pub fn detect() -> MemoryInfo {
         match key {
             "MemTotal" => info.mem_total = val_bytes,
             "MemFree" => info.mem_free = val_bytes,
-            "MemAvailable" => info.mem_available = val_bytes,
+            "MemAvailable" => {
+                info.mem_available = val_bytes;
+                have_available = true;
+            }
             "Buffers" => info.mem_buffers = val_bytes,
             "Cached" => info.mem_cached = val_bytes,
             "SwapTotal" => info.swap_total = val_bytes,
             "SwapFree" => info.swap_free_val = val_bytes,
             _ => {}
         }
+    }
+    if !have_available {
+        info.mem_available = info
+            .mem_total
+            .saturating_sub(info.mem_free)
+            .saturating_sub(info.mem_buffers)
+            .saturating_sub(info.mem_cached);
     }
     info.mem_used = fastfetch_used(info.mem_total, info.mem_available);
     info.swap_used = info.swap_total.saturating_sub(info.swap_free_val);

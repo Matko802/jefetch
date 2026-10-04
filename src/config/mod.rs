@@ -13,9 +13,13 @@ pub fn parse(input: &str) -> JsonResult<JsonValue> {
         bytes: input.as_bytes(),
         pos: 0,
     };
-    p.skip_ws_comments();
+    if !p.skip_ws_comments() {
+        return Err("unterminated block comment".to_string());
+    }
     let value = p.parse_value()?;
-    p.skip_ws_comments();
+    if !p.skip_ws_comments() {
+        return Err("unterminated block comment".to_string());
+    }
     if p.pos != p.bytes.len() {
         return Err(format!("unexpected trailing data at byte {}", p.pos));
     }
@@ -54,7 +58,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn skip_ws_comments(&mut self) {
+    fn skip_ws_comments(&mut self) -> bool {
         loop {
             self.skip_ws();
             match self.peek2() {
@@ -74,12 +78,17 @@ impl<'a> Parser<'a> {
                                 self.pos += 2;
                                 break;
                             }
-                            None => break,
+                            None => {
+                                if self.peek().is_none() {
+                                    return false;
+                                }
+                                self.pos += 1;
+                            }
                             _ => self.pos += 1,
                         }
                     }
                 }
-                _ => return,
+                _ => return true,
             }
         }
     }
@@ -97,7 +106,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_value(&mut self) -> JsonResult<JsonValue> {
-        self.skip_ws_comments();
+        if !self.skip_ws_comments() {
+            return Err("unterminated block comment".to_string());
+        }
         match self.peek() {
             Some(b'{') => self.parse_object(),
             Some(b'[') => self.parse_array(),
@@ -142,7 +153,9 @@ impl<'a> Parser<'a> {
         self.expect(b'{')?;
         let mut members = Vec::new();
         loop {
-            self.skip_ws_comments();
+            if !self.skip_ws_comments() {
+                return Err("unterminated block comment".to_string());
+            }
             match self.peek() {
                 Some(b'}') => {
                     self.pos += 1;
@@ -150,11 +163,15 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'"') => {
                     let key = self.parse_string()?;
-                    self.skip_ws_comments();
+                    if !self.skip_ws_comments() {
+                return Err("unterminated block comment".to_string());
+            }
                     self.expect(b':')?;
                     let val = self.parse_value()?;
                     members.push((key, val));
-                    self.skip_ws_comments();
+                    if !self.skip_ws_comments() {
+                return Err("unterminated block comment".to_string());
+            }
                     match self.peek() {
                         Some(b',') => {
                             self.pos += 1;
@@ -186,7 +203,9 @@ impl<'a> Parser<'a> {
         self.expect(b'[')?;
         let mut items = Vec::new();
         loop {
-            self.skip_ws_comments();
+            if !self.skip_ws_comments() {
+                return Err("unterminated block comment".to_string());
+            }
             match self.peek() {
                 Some(b']') => {
                     self.pos += 1;
@@ -195,7 +214,9 @@ impl<'a> Parser<'a> {
                 _ => {
                     let val = self.parse_value()?;
                     items.push(val);
-                    self.skip_ws_comments();
+                    if !self.skip_ws_comments() {
+                return Err("unterminated block comment".to_string());
+            }
                     match self.peek() {
                         Some(b',') => {
                             self.pos += 1;

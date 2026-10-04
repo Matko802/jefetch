@@ -11,11 +11,12 @@ pub fn detect() -> Option<DnsInfo> {
     let mut info = DnsInfo::default();
     for line in text.lines() {
         let line = line.trim();
+        let line = line.split(['#', ';']).next().unwrap_or("").trim();
         let Some((key, val)) = line.split_once(char::is_whitespace) else {
             continue;
         };
         let key = key.trim();
-        let val = val.trim();
+        let val = val.split('%').next().unwrap_or("").trim();
         match key {
             "nameserver" => {
                 if !val.is_empty() {

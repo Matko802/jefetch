@@ -80,7 +80,7 @@ fn find_shell_via_proc() -> Option<String> {
         let base_exe = exe_path.rsplit('/').next().unwrap_or(&exe_path).trim_start_matches('-').to_ascii_lowercase();
 
         let is_shell = KNOWN_SHELLS.iter().any(|s| base == *s || base_exe == *s);
-        let is_skip = SKIP.iter().any(|s| base == *s || base_exe == *s) || base == "sh" || comm == "sh";
+        let is_skip = SKIP.iter().any(|s| base == *s || base_exe == *s);
         if is_shell && !is_skip {
 
             if !exe_path.is_empty() && !exe_path.contains(" (deleted)") {
@@ -89,7 +89,7 @@ fn find_shell_via_proc() -> Option<String> {
             return Some(comm);
         }
 
-        if is_skip || base == "sh" {
+        if is_skip {
 
             if let Ok(status) = std::fs::read_to_string(format!("/proc/{}/status", pid)) {
                 for line in status.lines() {

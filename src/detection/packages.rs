@@ -35,22 +35,32 @@ pub fn detect() -> PackagesInfo {
 pub fn detect_uncached() -> PackagesInfo {
     let mut info = PackagesInfo::default();
 
-    let mut nix_system = 0;
-    let mut nix_user = 0;
-    let mut nix_default = 0;
-    if std::path::Path::new("/nix/var/nix/profiles/system").exists() {
-        nix_system = count_nix_profile("/run/current-system");
-        nix_default = count_nix_profile("/nix/var/nix/profiles/default");
-        for candidate in nix_user_candidates() {
-            let n = count_nix_profile(&candidate);
-            if n > 0 {
-                nix_user = n;
-                break;
+    let flat_system = std::thread::scope(|s| {
+        let sys = s.spawn(count_flatpak_system);
+        let usr = s.spawn(count_flatpak_user);
+        let nix = s.spawn(|| {
+            let mut out = (0, 0, 0);
+            if std::path::Path::new("/nix/var/nix/profiles/system").exists() {
+                let system = count_nix_profile("/run/current-system");
+                let default = count_nix_profile("/nix/var/nix/profiles/default");
+                let mut user = 0;
+                for candidate in nix_user_candidates() {
+                    let n = count_nix_profile(&candidate);
+                    if n > 0 {
+                        user = n;
+                        break;
+                    }
+                }
+                out = (system, user, default);
             }
-        }
-    }
-    let flat_system = count_flatpak_system();
-    let flat_user = count_flatpak_user();
+            out
+        });
+        let flat_system = sys.join().unwrap_or(0);
+        let flat_user = usr.join().unwrap_or(0);
+        let (nix_system, nix_user, nix_default) = nix.join().unwrap_or((0, 0, 0));
+        (flat_system, flat_user, nix_system, nix_user, nix_default)
+    });
+    let (flat_system, flat_user, nix_system, nix_user, nix_default) = flat_system;
 
     if flat_system > 0 {
         info.amounts.push(("flatpak-system".to_string(), flat_system));

@@ -146,7 +146,12 @@ fn label_for(mount_from: &str) -> String {
             let Ok(target) = std::fs::read_link(e.path()) else {
                 continue;
             };
-            if target.to_string_lossy().trim_start_matches("../..") == mount_from
+            let t = target.to_string_lossy();
+            let resolved = match t.strip_prefix("../../") {
+                Some(rest) => format!("/dev/{}", rest),
+                None => t.into_owned(),
+            };
+            if resolved == mount_from
                 || std::fs::canonicalize(e.path())
                     .map(|c| c.to_string_lossy() == mount_from)
                     .unwrap_or(false)

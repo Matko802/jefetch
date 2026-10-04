@@ -52,21 +52,28 @@ fn detect_uncached() -> GtkThemeInfo {
     };
     parse_settings_file(&mut info);
 
-    if let Some(v) = gsettings_lookup("gtk-theme") {
-        info.gtk_theme = v;
-    }
-    if let Some(v) = gsettings_lookup("icon-theme") {
-        info.icon_theme = v;
-    }
-    if let Some(v) = gsettings_lookup("cursor-theme") {
-        info.cursor_theme = v;
-    }
-    if let Some(v) = gsettings_lookup("font-name") {
-        info.font = v;
-    }
-    if let Some(v) = gsettings_lookup("color-scheme") {
-        info.color_scheme = v;
-    }
+    std::thread::scope(|s| {
+        let gtk = s.spawn(|| gsettings_lookup("gtk-theme"));
+        let icon = s.spawn(|| gsettings_lookup("icon-theme"));
+        let cursor = s.spawn(|| gsettings_lookup("cursor-theme"));
+        let font = s.spawn(|| gsettings_lookup("font-name"));
+        let scheme = s.spawn(|| gsettings_lookup("color-scheme"));
+        if let Some(v) = gtk.join().ok().flatten() {
+            info.gtk_theme = v;
+        }
+        if let Some(v) = icon.join().ok().flatten() {
+            info.icon_theme = v;
+        }
+        if let Some(v) = cursor.join().ok().flatten() {
+            info.cursor_theme = v;
+        }
+        if let Some(v) = font.join().ok().flatten() {
+            info.font = v;
+        }
+        if let Some(v) = scheme.join().ok().flatten() {
+            info.color_scheme = v;
+        }
+    });
     info
 }
 
@@ -109,7 +116,7 @@ fn parse_settings_file(info: &mut GtkThemeInfo) {
 fn gsettings_lookup(key: &str) -> Option<String> {
     let schema = "org.gnome.desktop.interface";
     let v = crate::detection::run_capture_timeout("gsettings", &["get", schema, key], 500)?;
-    let v = v.trim().trim_matches('\'').to_string();
+    let v = v.trim().trim_matches(|c| c == '\'' || c == '"').to_string();
     if v.is_empty() {
         None
     } else {

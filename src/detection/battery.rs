@@ -34,6 +34,13 @@ pub fn detect() -> Vec<BatteryInfo> {
             continue;
         }
         let f = |p: &str| t(p).parse::<f64>().ok().unwrap_or(0.0);
+        let mut energy_now = f("energy_now") / 3_600_000.0;
+        let mut energy_full = f("energy_full") / 3_600_000.0;
+        if energy_full <= 0.0 {
+            let voltage_v = t("voltage_now").parse::<f64>().ok().unwrap_or(0.0) / 1_000_000.0;
+            energy_now = f("charge_now") / 1_000_000.0 * voltage_v;
+            energy_full = f("charge_full") / 1_000_000.0 * voltage_v;
+        }
         out.push(BatteryInfo {
             name,
             manufacturer: t("manufacturer"),
@@ -41,8 +48,8 @@ pub fn detect() -> Vec<BatteryInfo> {
             technology: t("technology"),
             capacity_percent: cap,
             status: t("status"),
-            energy_now: f("energy_now") / 3_600_000.0,
-            energy_full: f("energy_full") / 3_600_000.0,
+            energy_now,
+            energy_full,
             temp_c: f("temp") / 10.0,
             voltage_mv: t("voltage_now").parse::<u64>().ok().unwrap_or(0) / 1000,
         });
