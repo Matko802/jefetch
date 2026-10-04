@@ -1178,7 +1178,7 @@ pub fn ease_spin_to_root(
     if diff.abs() * rmax <= 0.03 {
         return target;
     }
-    let step = 3.0 * tau * dt / rmax;
+    let step = RETURN_RATE * dt / rmax;
     if diff.abs() <= step {
         spin + diff * (10.0 * dt).min(1.0)
     } else {
