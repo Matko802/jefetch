@@ -1,4 +1,4 @@
-pub const RAW: &str = "0.1.1";
+pub const RAW: &str = env!("CARGO_PKG_VERSION");
 pub const COMPILED_ON: &str = "2026-09-01";
 pub const BUILD_TYPE: &str = "Release";
 pub const TARGET: &str = match option_env!("JEFETCH_TARGET") {
