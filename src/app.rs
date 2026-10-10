@@ -377,6 +377,7 @@ impl App {
         let mut needs_draw = true;
         let mut last_paint: Option<(
             bool,
+            Option<String>,
             u64,
             [u32; 3],
             Option<((u8, u8, u8), (u8, u8, u8))>,
@@ -590,6 +591,7 @@ impl App {
                 }
                 let paint_key = (
                     using_active,
+                    crate::sharkvis::text_color_key(&shark_live),
                     spin_phase.to_bits(),
                     [
                         fx.audio[0].to_bits(),
