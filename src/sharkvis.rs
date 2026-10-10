@@ -1669,9 +1669,20 @@ fn osc4_query(pal: &mut [Rgb; 16]) -> bool {
         bl += k as usize;
         osc4_parse(&buf[..bl], pal, &mut have);
     }
-    let mut tmp = [0u8; 1];
-    unsafe {
-        libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, 1);
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags != -1 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != -1 {
+        let mut tmp = [0u8; 512];
+        for _ in 0..8 {
+            let k = unsafe {
+                libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, tmp.len() as libc::size_t)
+            };
+            if k <= 0 {
+                break;
+            }
+        }
+        unsafe {
+            libc::fcntl(fd, libc::F_SETFL, flags);
+        }
     }
     unsafe {
         libc::tcsetattr(fd, libc::TCSANOW, &orig);
