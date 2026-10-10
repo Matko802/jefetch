@@ -980,6 +980,7 @@ impl App {
     /// First foreground color of an SGR parameter string: `38;5;N`,
     /// `38;2;r;g;b`, or a basic 30-37/90-97 code. Returns `None` when the
     /// sequence carries no usable foreground color.
+    #[cfg(test)]
     fn sgr_fg_rgb(seq: &str) -> Option<(u8, u8, u8)> {
         Self::sgr_fg_rgb_with_pal(seq, None)
     }
