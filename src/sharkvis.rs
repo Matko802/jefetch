@@ -1354,7 +1354,11 @@ impl Sync {
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
         let rgb_fresh = if live_colors {
-            live_grad.or(self.gradients)
+            live_grad.or(if live_grad_idx.is_some() {
+                None
+            } else {
+                self.gradients
+            })
         } else {
             None
         };
@@ -2408,6 +2412,39 @@ mod tests {
         let st = parse_state_text("energy=0.5 color_low=#0000ff color_high=#ff0000");
         assert_eq!(st.glow, Some((0, 0, 255)));
         assert!(st.glow_idx.is_none());
+    }
+
+    #[test]
+    fn sync_live_index_beats_config_rgb() {
+        let _guard = super::test_env_lock();
+        let cfg_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-idxcfg-{}", std::process::id()));
+        std::fs::write(
+            &cfg_path,
+            r#"{"color": {"gradient_low": "ffff00", "gradient_high": "88ff00"}}"#,
+        )
+        .unwrap();
+        let state_path =
+            std::env::temp_dir().join(format!("jefetch-sharkvis-idxlive-{}", std::process::id()));
+        std::fs::write(&state_path, "energy=0.5 beat=0 color_low=34 color_high=36").unwrap();
+        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
+        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
+        assert!(f.active);
+        assert_eq!(f.grad, None, "static config must not shadow live logo colors");
+        assert_eq!(
+            f.grad_idx,
+            Some(("34".to_string(), "36".to_string())),
+            "text follows the same indexes sharkvis renders"
+        );
+        assert_eq!(text_color_key(&f), Some("i:34>36".to_string()));
+        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
+        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
+        let _ = std::fs::remove_file(&cfg_path);
+        let _ = std::fs::remove_file(&state_path);
     }
 
     #[test]
