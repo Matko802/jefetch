@@ -372,27 +372,6 @@ impl Drop for TtyGuard {
     }
 }
 
-fn drain_pending(fd: i32, max_reads: usize) {
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags == -1 {
-        return;
-    }
-    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
-        return;
-    }
-    let mut tmp = [0u8; 512];
-    for _ in 0..max_reads {
-        let n =
-            unsafe { libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, tmp.len() as libc::size_t) };
-        if n <= 0 {
-            break;
-        }
-    }
-    unsafe {
-        libc::fcntl(fd, libc::F_SETFL, flags);
-    }
-}
-
 fn kitty_tty_exchange(fd: i32, req: &[u8], family_key: &str, size_key: &str) -> Option<(String, String)> {
     let mut written = 0;
     while written < req.len() {
@@ -408,32 +387,19 @@ fn kitty_tty_exchange(fd: i32, req: &[u8], family_key: &str, size_key: &str) -> 
         }
         written += n as usize;
     }
-    let start = std::time::Instant::now();
-    let deadline = std::time::Duration::from_millis(900);
     let mut buf = Vec::new();
     let mut tmp = [0u8; 512];
-    let mut empty_streak = 0u32;
-    loop {
-        if kitty_tty_parse(&buf, family_key, size_key).is_some() {
-            break;
-        }
-        if start.elapsed() >= deadline {
-            break;
-        }
-        if buf.is_empty() && empty_streak >= 3 {
-            break;
-        }
+    for _ in 0..4 {
         let n = unsafe { libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, tmp.len() as libc::size_t) };
         if n <= 0 {
-            empty_streak += 1;
-            continue;
+            break;
         }
-        empty_streak = 0;
         buf.extend_from_slice(&tmp[..n as usize]);
+        if buf.windows(2).filter(|w| w == b"\x1b\\").count() >= 2 {
+            break;
+        }
     }
-    let out = kitty_tty_parse(&buf, family_key, size_key);
-    drain_pending(fd, 8);
-    out
+    kitty_tty_parse(&buf, family_key, size_key)
 }
 
 fn kitty_tty_parse(buf: &[u8], family_key: &str, size_key: &str) -> Option<(String, String)> {
@@ -547,34 +513,5 @@ mod tests {
         assert_eq!(family, "DepartureMonoNF");
         assert_eq!(size, "10.0");
         assert!(kitty_tty_parse(b"garbage", "kitty-query-font_family", "kitty-query-font_size").is_none());
-    }
-
-    #[test]
-    fn tty_response_split_across_reads() {
-        let fam = hex_encode("kitty-query-font_family");
-        let siz = hex_encode("kitty-query-font_size");
-        let buf = format!(
-            "\x1bP1+r{}={}\x1b\\\x1bP1+r{}={}\x1b\\",
-            fam,
-            hex_encode("DepartureMonoNF"),
-            siz,
-            hex_encode("10.0")
-        );
-        let bytes = buf.as_bytes();
-        let cut = bytes.len() / 2;
-        assert!(kitty_tty_parse(
-            &bytes[..cut],
-            "kitty-query-font_family",
-            "kitty-query-font_size"
-        )
-        .is_none(), "partial response must not parse yet");
-        let (family, size) = kitty_tty_parse(
-            bytes,
-            "kitty-query-font_family",
-            "kitty-query-font_size",
-        )
-        .expect("complete response parses");
-        assert_eq!(family, "DepartureMonoNF");
-        assert_eq!(size, "10.0");
     }
 }

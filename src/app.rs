@@ -830,8 +830,6 @@ impl App {
             let _ = std::fs::remove_file(&path);
             return;
         };
-        let pal = crate::sharkvis::term_palette();
-        let pal_ref = pal.as_ref();
         let mut first: Option<(u8, u8, u8)> = None;
         let mut last: Option<(u8, u8, u8)> = None;
         for i in 0..l.lines.len() {
@@ -856,7 +854,7 @@ impl App {
                         continue;
                     }
                     let seq = &esc[2..j];
-                    if let Some(rgb) = Self::sgr_fg_rgb_with_pal(seq, pal_ref) {
+                    if let Some(rgb) = Self::sgr_fg_rgb(seq) {
                         if first.is_none() {
                             first = Some(rgb);
                             last = Some(rgb);
@@ -895,44 +893,37 @@ impl App {
     }
 
     fn logo_colors_path() -> String {
-        crate::sharkvis::logo_colors_path()
-    }
-
-    pub(crate) const FALLBACK_TAB: [[u8; 3]; 16] = [
-        [0, 0, 0],
-        [170, 0, 0],
-        [0, 170, 0],
-        [170, 85, 0],
-        [0, 0, 170],
-        [170, 0, 170],
-        [0, 170, 170],
-        [170, 170, 170],
-        [85, 85, 85],
-        [255, 85, 85],
-        [85, 255, 85],
-        [255, 255, 85],
-        [85, 85, 255],
-        [255, 85, 255],
-        [85, 255, 255],
-        [255, 255, 255],
-    ];
-
-    fn tab_rgb(idx: usize, pal: Option<&[(u8, u8, u8); 16]>) -> (u8, u8, u8) {
-        if let Some(p) = pal {
-            if idx < 16 {
-                return p[idx];
+        if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
+            let t = rt.trim_end_matches('/');
+            if !t.is_empty() {
+                return format!("{t}/sharkvis/logo_colors");
             }
         }
-        let c = Self::FALLBACK_TAB[idx.min(15)];
-        (c[0], c[1], c[2])
+        format!("/tmp/sharkvis-{}-logo-colors", unsafe { libc::getuid() })
     }
 
-    /// First foreground color of an SGR parameter string resolved through the
-    /// terminal palette when available, hardcoded VGA table otherwise.
-    fn sgr_fg_rgb_with_pal(
-        seq: &str,
-        pal: Option<&[(u8, u8, u8); 16]>,
-    ) -> Option<(u8, u8, u8)> {
+    /// First foreground color of an SGR parameter string: `38;5;N`,
+    /// `38;2;r;g;b`, or a basic 30-37/90-97 code. Returns `None` when the
+    /// sequence carries no usable foreground color.
+    fn sgr_fg_rgb(seq: &str) -> Option<(u8, u8, u8)> {
+        const TAB: [[u8; 3]; 16] = [
+            [0, 0, 0],
+            [170, 0, 0],
+            [0, 170, 0],
+            [170, 85, 0],
+            [0, 0, 170],
+            [170, 0, 170],
+            [0, 170, 170],
+            [170, 170, 170],
+            [85, 85, 85],
+            [255, 85, 85],
+            [85, 255, 85],
+            [255, 255, 85],
+            [85, 85, 255],
+            [255, 85, 255],
+            [85, 255, 255],
+            [255, 255, 255],
+        ];
         let nums: Vec<i64> = seq
             .split(';')
             .map(|p| p.trim().parse::<i64>().unwrap_or(i64::MIN))
@@ -945,7 +936,7 @@ impl App {
                     let n = nums[i + 2].clamp(0, 255) as u8;
                     let n = n as usize;
                     if n < 16 {
-                        return Some(Self::tab_rgb(n, pal));
+                        return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
                     } else if n < 232 {
                         let v = n - 16;
                         let (cr, cg, cb) = (v / 36, (v / 6) % 6, v % 6);
@@ -967,7 +958,7 @@ impl App {
             }
             if (30..=37).contains(&v) || (90..=97).contains(&v) {
                 let n = if v >= 90 { (v - 90 + 8) as usize } else { (v - 30) as usize };
-                return Some(Self::tab_rgb(n, pal));
+                return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
             }
             if v == 39 {
                 return Some((255, 255, 255));
@@ -975,14 +966,6 @@ impl App {
             i += 1;
         }
         None
-    }
-
-    /// First foreground color of an SGR parameter string: `38;5;N`,
-    /// `38;2;r;g;b`, or a basic 30-37/90-97 code. Returns `None` when the
-    /// sequence carries no usable foreground color.
-    #[cfg(test)]
-    fn sgr_fg_rgb(seq: &str) -> Option<(u8, u8, u8)> {
-        Self::sgr_fg_rgb_with_pal(seq, None)
     }
 
     fn print_json(&self, entries: &[ModuleEntry]) {
@@ -2109,37 +2092,5 @@ mod tests {
         assert_eq!(App::sgr_fg_rgb("0"), None);
         assert_eq!(App::sgr_fg_rgb("38"), None);
         assert_eq!(App::sgr_fg_rgb(""), None);
-    }
-
-    #[test]
-    fn sgr_fg_rgb_uses_terminal_palette() {
-        let mut pal = [(0u8, 0u8, 0u8); 16];
-        pal[1] = (1, 2, 3);
-        pal[6] = (4, 5, 6);
-        pal[8] = (7, 8, 9);
-        assert_eq!(
-            App::sgr_fg_rgb_with_pal("31", Some(&pal)),
-            Some((1, 2, 3))
-        );
-        assert_eq!(
-            App::sgr_fg_rgb_with_pal("1;36", Some(&pal)),
-            Some((4, 5, 6))
-        );
-        assert_eq!(
-            App::sgr_fg_rgb_with_pal("90", Some(&pal)),
-            Some((7, 8, 9))
-        );
-        assert_eq!(
-            App::sgr_fg_rgb_with_pal("38;5;1", Some(&pal)),
-            Some((1, 2, 3))
-        );
-        assert_eq!(
-            App::sgr_fg_rgb_with_pal("38;5;196", Some(&pal)),
-            Some((255, 0, 0))
-        );
-        assert_eq!(
-            App::sgr_fg_rgb_with_pal("38;2;10;20;30", Some(&pal)),
-            Some((10, 20, 30))
-        );
     }
 }

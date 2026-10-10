@@ -1215,8 +1215,6 @@ pub struct Sync {
     gradients: Option<(Rgb, Rgb)>,
     glyphs: Option<Vec<String>>,
     visual_at: Option<Instant>,
-    logo_grad: Option<(Rgb, Rgb)>,
-    logo_at: Option<Instant>,
     monitor: Option<BeatMonitor>,
     last: LiveFrame,
     last_ok: Option<Instant>,
@@ -1234,8 +1232,6 @@ impl Sync {
             gradients: None,
             glyphs: None,
             visual_at: None,
-            logo_grad: None,
-            logo_at: None,
             monitor: None,
             last: LiveFrame::inactive(),
             last_ok: None,
@@ -1267,10 +1263,6 @@ impl Sync {
             self.gradients = grad;
             self.glyphs = glyphs;
             self.visual_at = Some(now);
-        }
-        if self.logo_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
-            self.logo_grad = logo_gradient();
-            self.logo_at = Some(now);
         }
 
         let mut energy: Option<f32> = None;
@@ -1325,20 +1317,12 @@ impl Sync {
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
         let grad = if live_colors {
-            live_grad
-                .or(self.gradients)
-                .or(self.logo_grad)
-                .or(self.last.grad)
+            live_grad.or(self.gradients).or(self.last.grad)
         } else {
             None
         };
         let flat = if live_colors && grad.is_none() {
-            color.or(self.last.flat).or(self.logo_grad.map(|(lo, _)| lo))
-        } else {
-            None
-        };
-        let term_pal = if live_colors && (grad.is_some() || flat.is_some()) {
-            term_palette()
+            color.or(self.last.flat)
         } else {
             None
         };
@@ -1346,7 +1330,7 @@ impl Sync {
             active: true,
             grad,
             flat,
-            term_pal,
+            term_pal: None,
             glyphs: self.glyphs.clone(),
             energy,
             beat,
@@ -1669,20 +1653,9 @@ fn osc4_query(pal: &mut [Rgb; 16]) -> bool {
         bl += k as usize;
         osc4_parse(&buf[..bl], pal, &mut have);
     }
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags != -1 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != -1 {
-        let mut tmp = [0u8; 512];
-        for _ in 0..8 {
-            let k = unsafe {
-                libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, tmp.len() as libc::size_t)
-            };
-            if k <= 0 {
-                break;
-            }
-        }
-        unsafe {
-            libc::fcntl(fd, libc::F_SETFL, flags);
-        }
+    let mut tmp = [0u8; 1];
+    unsafe {
+        libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, 1);
     }
     unsafe {
         libc::tcsetattr(fd, libc::TCSANOW, &orig);
@@ -1724,69 +1697,6 @@ pub fn term_palette() -> Option<[Rgb; 16]> {
         return None;
     }
     Some(c.pal)
-}
-
-pub fn logo_colors_path() -> String {
-    if let Ok(p) = std::env::var("JEFETCH_SHARKVIS_LOGO_COLORS") {
-        if !p.trim().is_empty() {
-            return p;
-        }
-    }
-    if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
-        let t = rt.trim_end_matches('/');
-        if !t.is_empty() {
-            return format!("{t}/sharkvis/logo_colors");
-        }
-    }
-    format!("/tmp/sharkvis-{}-logo-colors", unsafe { libc::getuid() })
-}
-
-fn parse_logo_colors_text(text: &str) -> Option<(Rgb, Rgb)> {
-    let mut low: Option<Rgb> = None;
-    let mut high: Option<Rgb> = None;
-    let normalized: String = text
-        .chars()
-        .map(|c| if c == ';' || c == '\n' || c == '\r' { ' ' } else { c })
-        .collect();
-    for tok in normalized.split_whitespace() {
-        let (k, v) = match tok.find(['=', ':']) {
-            Some(p) => (
-                tok[..p].trim().to_ascii_lowercase(),
-                tok[p + 1..].trim().to_string(),
-            ),
-            None => continue,
-        };
-        if v.is_empty() {
-            continue;
-        }
-        match k.as_str() {
-            "low" | "gradient_low" | "color_low" | "glow" => {
-                if let Some(c) = parse_color(&v) {
-                    low = Some(c);
-                }
-            }
-            "high" | "gradient_high" | "color_high" | "ghigh" => {
-                if let Some(c) = parse_color(&v) {
-                    high = Some(c);
-                }
-            }
-            _ => {}
-        }
-    }
-    match (low, high) {
-        (Some(l), Some(h)) => Some((l, h)),
-        (Some(l), None) => Some((l, l)),
-        (None, Some(h)) => Some((h, h)),
-        (None, None) => None,
-    }
-}
-
-pub fn logo_gradient() -> Option<(Rgb, Rgb)> {
-    let text = std::fs::read_to_string(logo_colors_path()).ok()?;
-    if text.trim().is_empty() {
-        return None;
-    }
-    parse_logo_colors_text(&text)
 }
 
 fn term_at(pal: &[Rgb; 16], pos: f64) -> Rgb {
@@ -2035,10 +1945,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::On, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
@@ -2052,7 +1958,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2133,10 +2038,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
@@ -2147,7 +2048,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2205,10 +2105,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
@@ -2216,7 +2112,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&cfg_path);
         let _ = std::fs::remove_file(&state_path);
     }
@@ -2229,10 +2124,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
@@ -2247,7 +2138,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -2263,10 +2153,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, false);
         assert!(f.active, "motion still follows sharkvis");
@@ -2279,7 +2165,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&cfg_path);
         let _ = std::fs::remove_file(&state_path);
     }
@@ -2293,10 +2178,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert_eq!(f.grad, Some(((0, 0, 0), (17, 17, 17))));
@@ -2311,7 +2192,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&cfg_path);
     }
 
@@ -2331,10 +2211,6 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_STATE", state_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            "/nonexistent-jefetch-logo-colors",
-        );
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
@@ -2349,7 +2225,6 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
         let _ = std::fs::remove_file(&cfg_path);
         let _ = std::fs::remove_file(&state_path);
     }
@@ -2408,51 +2283,6 @@ mod tests {
         f.flat = None;
         f.grad = Some(((1, 2, 3), (4, 5, 6)));
         assert_eq!(text_color_key(&f), Some(((1, 2, 3), (4, 5, 6))));
-    }
-
-    #[test]
-    fn logo_colors_text_parses() {
-        assert_eq!(
-            parse_logo_colors_text("low=#112233 high=#aabbcc"),
-            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc)))
-        );
-        assert_eq!(
-            parse_logo_colors_text("low=#112233"),
-            Some(((0x11, 0x22, 0x33), (0x11, 0x22, 0x33)))
-        );
-        assert_eq!(parse_logo_colors_text("nothing here"), None);
-        assert_eq!(parse_logo_colors_text(""), None);
-    }
-
-    #[test]
-    fn sync_falls_back_to_logo_colors() {
-        let _guard = super::test_env_lock();
-        let logo_path = std::env::temp_dir().join(format!(
-            "jefetch-sharkvis-logo-{}",
-            std::process::id()
-        ));
-        std::fs::write(&logo_path, "low=#112233 high=#aabbcc\n").unwrap();
-        std::env::set_var(
-            "JEFETCH_SHARKVIS_LOGO_COLORS",
-            logo_path.to_string_lossy().as_ref(),
-        );
-        std::env::set_var("JEFETCH_SHARKVIS_CONFIG", "/nonexistent-jefetch-config");
-        std::env::set_var("JEFETCH_SHARKVIS_STATE", "/nonexistent-jefetch-state");
-        std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "1");
-        std::env::set_var("TERM", "xterm-256color");
-        let mut s = Sync::new();
-        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
-        assert!(f.active);
-        assert_eq!(
-            f.grad,
-            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc))),
-            "logo colors match published file"
-        );
-        std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
-        std::env::remove_var("JEFETCH_SHARKVIS_STATE");
-        std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
-        std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
-        let _ = std::fs::remove_file(&logo_path);
     }
 
     #[test]
