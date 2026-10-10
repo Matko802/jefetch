@@ -390,7 +390,7 @@ impl App {
         // effective text colors change, so steady gradients don't burn CPU
         // and a lost live source freezes on the last colors instead of
         // flashing terminal-default.
-        let mut text_key: Option<((u8, u8, u8), (u8, u8, u8))> = None;
+        let mut text_key: Option<String> = None;
         let mut have_text_key = false;
         let mut pending: std::collections::VecDeque<u8> = std::collections::VecDeque::new();
         let (info_tx, info_rx) = std::sync::mpsc::channel::<(u64, Vec<String>)>();
@@ -821,17 +821,19 @@ impl App {
         }
     }
 
-    /// Publish the resolved logo's first/last distinct foreground colors for
+    /// Publish the logo's first/last distinct foreground color specs for
     /// sharkvis to follow (`$RUNTIME/sharkvis/logo_colors`, atomic tmp+rename;
-    /// removed when the logo carries no color).
+    /// removed when the logo carries no color). Specs are the same terminal
+    /// color indexes the logo itself uses (`34`, `38;5;196`, `#rrggbb`),
+    /// so sharkvis renders exactly the logo colors with no palette queries.
     fn publish_logo_colors(logo: Option<&ResolvedLogo>) {
         let path = Self::logo_colors_path();
         let Some(l) = logo else {
             let _ = std::fs::remove_file(&path);
             return;
         };
-        let mut first: Option<(u8, u8, u8)> = None;
-        let mut last: Option<(u8, u8, u8)> = None;
+        let mut first: Option<String> = None;
+        let mut last: Option<String> = None;
         for i in 0..l.lines.len() {
             let mut srcs = vec![l.lines[i].as_str()];
             if let Some(c) = l.colors.get(i) {
@@ -854,19 +856,19 @@ impl App {
                         continue;
                     }
                     let seq = &esc[2..j];
-                    if let Some(rgb) = Self::sgr_fg_rgb(seq) {
+                    if let Some(spec) = Self::sgr_fg_spec(seq) {
                         if first.is_none() {
-                            first = Some(rgb);
-                            last = Some(rgb);
-                        } else if Some(rgb) != first {
-                            last = Some(rgb);
+                            first = Some(spec.clone());
+                            last = Some(spec);
+                        } else if last.as_ref() != Some(&spec) && first.as_ref() != Some(&spec) {
+                            last = Some(spec);
                         }
                     }
                     rest = &esc[j + 1..];
                 }
             }
         }
-        let (Some((fr, fg, fb)), Some((lr, lg, lb))) = (first, last) else {
+        let (Some(lo), Some(hi)) = (first, last) else {
             let _ = std::fs::remove_file(&path);
             return;
         };
@@ -875,14 +877,7 @@ impl App {
                 let _ = std::fs::create_dir_all(parent);
             }
         }
-        let ((fr, fg, fb), (lr, lg, lb)) = if (fr, fg, fb) == (lr, lg, lb) {
-            let lum = 0.299 * fr as f32 + 0.587 * fg as f32 + 0.114 * fb as f32;
-            let target = if lum > 127.5 { (0, 0, 0) } else { (255, 255, 255) };
-            ((fr, fg, fb), crate::sharkvis::lerp_rgb((fr, fg, fb), target, 0.45))
-        } else {
-            ((fr, fg, fb), (lr, lg, lb))
-        };
-        let body = format!("low=#{fr:02x}{fg:02x}{fb:02x} high=#{lr:02x}{lg:02x}{lb:02x}\n");
+        let body = format!("low={lo} high={hi}\n");
         let tmp = format!("{path}.tmp");
         if std::fs::write(&tmp, body.as_bytes()).is_err() {
             return;
@@ -893,6 +888,11 @@ impl App {
     }
 
     fn logo_colors_path() -> String {
+        if let Ok(p) = std::env::var("JEFETCH_SHARKVIS_LOGO_COLORS") {
+            if !p.trim().is_empty() {
+                return p;
+            }
+        }
         if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
             let t = rt.trim_end_matches('/');
             if !t.is_empty() {
@@ -902,28 +902,11 @@ impl App {
         format!("/tmp/sharkvis-{}-logo-colors", unsafe { libc::getuid() })
     }
 
-    /// First foreground color of an SGR parameter string: `38;5;N`,
-    /// `38;2;r;g;b`, or a basic 30-37/90-97 code. Returns `None` when the
-    /// sequence carries no usable foreground color.
-    fn sgr_fg_rgb(seq: &str) -> Option<(u8, u8, u8)> {
-        const TAB: [[u8; 3]; 16] = [
-            [0, 0, 0],
-            [170, 0, 0],
-            [0, 170, 0],
-            [170, 85, 0],
-            [0, 0, 170],
-            [170, 0, 170],
-            [0, 170, 170],
-            [170, 170, 170],
-            [85, 85, 85],
-            [255, 85, 85],
-            [85, 255, 85],
-            [255, 255, 85],
-            [85, 85, 255],
-            [255, 85, 255],
-            [85, 255, 255],
-            [255, 255, 255],
-        ];
+    /// First foreground color spec of an SGR parameter string, in the same
+    /// form the logo uses it: `38;5;N`, `38;2;r;g;b` (as `#rrggbb`), or a
+    /// basic 30-37/90-97 index. Returns `None` when the sequence carries no
+    /// usable foreground color.
+    fn sgr_fg_spec(seq: &str) -> Option<String> {
         let nums: Vec<i64> = seq
             .split(';')
             .map(|p| p.trim().parse::<i64>().unwrap_or(i64::MIN))
@@ -933,35 +916,20 @@ impl App {
             let v = nums[i];
             if v == 38 && i + 1 < nums.len() {
                 if nums[i + 1] == 5 && i + 2 < nums.len() {
-                    let n = nums[i + 2].clamp(0, 255) as u8;
-                    let n = n as usize;
-                    if n < 16 {
-                        return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
-                    } else if n < 232 {
-                        let v = n - 16;
-                        let (cr, cg, cb) = (v / 36, (v / 6) % 6, v % 6);
-                        let ch = |c: usize| if c == 0 { 0 } else { (55 + 40 * c) as u8 };
-                        return Some((ch(cr), ch(cg), ch(cb)));
-                    } else {
-                        let g = (8 + 10 * (n - 232)) as u8;
-                        return Some((g, g, g));
-                    }
+                    let n = nums[i + 2].clamp(0, 255);
+                    return Some(format!("38;5;{n}"));
                 } else if nums[i + 1] == 2 && i + 4 < nums.len() {
                     let c = [
                         nums[i + 2].clamp(0, 255) as u8,
                         nums[i + 3].clamp(0, 255) as u8,
                         nums[i + 4].clamp(0, 255) as u8,
                     ];
-                    return Some((c[0], c[1], c[2]));
+                    return Some(format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]));
                 }
                 return None;
             }
             if (30..=37).contains(&v) || (90..=97).contains(&v) {
-                let n = if v >= 90 { (v - 90 + 8) as usize } else { (v - 30) as usize };
-                return Some((TAB[n][0], TAB[n][1], TAB[n][2]));
-            }
-            if v == 39 {
-                return Some((255, 255, 255));
+                return Some(format!("{v}"));
             }
             i += 1;
         }
@@ -1719,15 +1687,37 @@ mod tests {
         app
     }
 
+    fn with_isolated_logo_colors(f: impl FnOnce(&std::path::PathBuf)) {
+        let _g = crate::sharkvis::test_env_lock();
+        let path = std::env::temp_dir().join(format!(
+            "jefetch-logo-colors-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let prev = std::env::var_os("JEFETCH_SHARKVIS_LOGO_COLORS");
+        std::env::set_var("JEFETCH_SHARKVIS_LOGO_COLORS", &path);
+        f(&path);
+        if let Some(v) = prev {
+            std::env::set_var("JEFETCH_SHARKVIS_LOGO_COLORS", v);
+        } else {
+            std::env::remove_var("JEFETCH_SHARKVIS_LOGO_COLORS");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn animated_keeps_static_holes() {
-        let mut app = animate_app(
-            Some("speed=1 z chars=blocks"),
-            Some("xz return=2 boom=20 chars=blocks textcolor=sharkvis"),
-        );
-        app.config.logo.source = Some("python".to_string());
-        app.config.logo.logo_type = Some("builtin".to_string());
-        app.pick_logo();
+        with_isolated_logo_colors(|_| {
+            let mut app = animate_app(
+                Some("speed=1 z chars=blocks"),
+                Some("xz return=2 boom=20 chars=blocks textcolor=sharkvis"),
+            );
+            app.config.logo.source = Some("python".to_string());
+            app.config.logo.logo_type = Some("builtin".to_string());
+            app.pick_logo();
         let logo = app.logo.clone().expect("python logo");
         let (_, active, _) = app.anim_configs();
         let mut cloud =
@@ -1780,6 +1770,7 @@ mod tests {
             interior_holes(&sg),
             "animated must keep static holes"
         );
+        });
     }
 
     #[test]
@@ -2050,16 +2041,30 @@ mod tests {
 
     #[test]
     fn cli_logo_file_override_picks_image() {
-        let p = solid_bmp_tmp("cli", 4, 4, 0, 0, 255);
-        let mut app = App::new(CliOptions {
-            logo_name: Some(p.clone()),
-            ..CliOptions::default()
+        with_isolated_logo_colors(|_| {
+            let p = solid_bmp_tmp("cli", 4, 4, 0, 0, 255);
+            let mut app = App::new(CliOptions {
+                logo_name: Some(p.clone()),
+                ..CliOptions::default()
+            });
+            app.apply_logo_overrides();
+            assert_eq!(app.config.logo.logo_type.as_deref(), Some("image"));
+            app.pick_logo();
+            let _ = std::fs::remove_file(&p);
+            assert!(app.logo.map(|l| !l.lines.is_empty()).unwrap_or(false));
         });
-        app.apply_logo_overrides();
-        assert_eq!(app.config.logo.logo_type.as_deref(), Some("image"));
-        app.pick_logo();
-        let _ = std::fs::remove_file(&p);
-        assert!(app.logo.map(|l| !l.lines.is_empty()).unwrap_or(false));
+    }
+
+    #[test]
+    fn publish_logo_colors_writes_index_specs() {
+        with_isolated_logo_colors(|path| {
+            let mut app = App::new(CliOptions::default());
+            app.config.logo.source = Some("python".to_string());
+            app.config.logo.logo_type = Some("builtin".to_string());
+            app.pick_logo();
+            let body = std::fs::read_to_string(path).expect("logo colors published");
+            assert_eq!(body, "low=38;5;32 high=38;5;221\n", "got {:?}", body);
+        });
     }
 
     #[test]
@@ -2079,18 +2084,19 @@ mod tests {
     }
 
     #[test]
-    fn sgr_fg_rgb_parses_first_foreground() {
-        assert_eq!(App::sgr_fg_rgb("38;5;196"), Some((255, 0, 0)));
-        assert_eq!(App::sgr_fg_rgb("38;5;8"), Some((85, 85, 85)));
+    fn sgr_fg_spec_parses_first_foreground() {
+        assert_eq!(App::sgr_fg_spec("38;5;196"), Some("38;5;196".to_string()));
+        assert_eq!(App::sgr_fg_spec("38;5;8"), Some("38;5;8".to_string()));
         assert_eq!(
-            App::sgr_fg_rgb("38;2;10;20;30"),
-            Some((10, 20, 30))
+            App::sgr_fg_spec("38;2;10;20;30"),
+            Some("#0a141e".to_string())
         );
-        assert_eq!(App::sgr_fg_rgb("31"), Some((170, 0, 0)));
-        assert_eq!(App::sgr_fg_rgb("90"), Some((85, 85, 85)));
-        assert_eq!(App::sgr_fg_rgb("1;36"), Some((0, 170, 170)));
-        assert_eq!(App::sgr_fg_rgb("0"), None);
-        assert_eq!(App::sgr_fg_rgb("38"), None);
-        assert_eq!(App::sgr_fg_rgb(""), None);
+        assert_eq!(App::sgr_fg_spec("31"), Some("31".to_string()));
+        assert_eq!(App::sgr_fg_spec("90"), Some("90".to_string()));
+        assert_eq!(App::sgr_fg_spec("1;36"), Some("36".to_string()));
+        assert_eq!(App::sgr_fg_spec("39"), None);
+        assert_eq!(App::sgr_fg_spec("0"), None);
+        assert_eq!(App::sgr_fg_spec("38"), None);
+        assert_eq!(App::sgr_fg_spec(""), None);
     }
 }

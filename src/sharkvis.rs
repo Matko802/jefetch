@@ -43,6 +43,7 @@ pub const MAX_GROW: f32 = 0.3;
 pub struct LiveFrame {
     pub active: bool,
     pub grad: Option<(Rgb, Rgb)>,
+    pub grad_idx: Option<(String, String)>,
     pub flat: Option<Rgb>,
     pub term_pal: Option<[Rgb; 16]>,
     pub glyphs: Option<Vec<String>>,
@@ -60,6 +61,7 @@ impl LiveFrame {
         LiveFrame {
             active: false,
             grad: None,
+            grad_idx: None,
             flat: None,
             term_pal: None,
             glyphs: None,
@@ -220,6 +222,29 @@ fn parse_sharkvis_config(text: &str) -> Option<(Rgb, Rgb)> {
     }
 }
 
+pub fn parse_index_spec(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if let Ok(v) = t.parse::<i64>() {
+        if (30..=37).contains(&v) || (90..=97).contains(&v) {
+            return Some(format!("{v}"));
+        }
+        return None;
+    }
+    let mut parts = t.split(';').map(str::trim);
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("38"), Some("5"), Some(n), None) => {
+            if n.parse::<u32>().is_ok_and(|x| x <= 255) {
+                return Some(format!("38;5;{n}"));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 pub fn parse_color(s: &str) -> Option<Rgb> {
     let t = s.trim();
     if t.is_empty() {
@@ -266,13 +291,15 @@ fn named_color(name: &str) -> Option<Rgb> {
     })
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LiveState {
     pub color: Option<Rgb>,
     pub energy: Option<f32>,
     pub beat: Option<f32>,
     pub glow: Option<Rgb>,
     pub ghigh: Option<Rgb>,
+    pub glow_idx: Option<String>,
+    pub ghigh_idx: Option<String>,
     pub bass: Option<f32>,
     pub left: Option<f32>,
     pub right: Option<f32>,
@@ -296,6 +323,8 @@ fn state_is_live(st: &LiveState) -> bool {
         || st.beat.is_some()
         || st.glow.is_some()
         || st.ghigh.is_some()
+        || st.glow_idx.is_some()
+        || st.ghigh_idx.is_some()
         || st.bass.is_some()
         || st.left.is_some()
         || st.right.is_some()
@@ -475,11 +504,15 @@ pub fn parse_state_text(text: &str) -> LiveState {
             "color_low" | "colour_low" | "glow" => {
                 if let Some(c) = parse_color(&v) {
                     st.glow = Some(c);
+                } else if let Some(s) = parse_index_spec(&v) {
+                    st.glow_idx = Some(s);
                 }
             }
             "color_high" | "colour_high" | "ghigh" => {
                 if let Some(c) = parse_color(&v) {
                     st.ghigh = Some(c);
+                } else if let Some(s) = parse_index_spec(&v) {
+                    st.ghigh_idx = Some(s);
                 }
             }
             "energy" | "level" | "volume" | "rms" => {
@@ -1269,6 +1302,7 @@ impl Sync {
         let mut beat: Option<f32> = None;
         let mut color: Option<Rgb> = None;
         let mut live_grad: Option<(Rgb, Rgb)> = None;
+        let mut live_grad_idx: Option<(String, String)> = None;
         let mut bass: Option<f32> = None;
         let mut left: Option<f32> = None;
         let mut right: Option<f32> = None;
@@ -1286,6 +1320,9 @@ impl Sync {
             grad_amt = live.grad_amt;
             if let (Some(lo), Some(hi)) = (live.glow, live.ghigh) {
                 live_grad = Some((lo, hi));
+            }
+            if let (Some(lo), Some(hi)) = (live.glow_idx, live.ghigh_idx) {
+                live_grad_idx = Some((lo, hi));
             }
         }
         if have_state {
@@ -1316,12 +1353,26 @@ impl Sync {
 
         let energy = energy.unwrap_or(0.0).clamp(0.0, 1.0);
         let beat = beat.unwrap_or(0.0).clamp(0.0, 1.0);
-        let grad = if live_colors {
-            live_grad.or(self.gradients).or(self.last.grad)
+        let rgb_fresh = if live_colors {
+            live_grad.or(self.gradients)
         } else {
             None
         };
-        let flat = if live_colors && grad.is_none() {
+        let grad = if live_colors {
+            rgb_fresh.or(if live_grad_idx.is_some() {
+                None
+            } else {
+                self.last.grad
+            })
+        } else {
+            None
+        };
+        let grad_idx = if live_colors && grad.is_none() {
+            live_grad_idx.or(self.last.grad_idx.clone())
+        } else {
+            None
+        };
+        let flat = if live_colors && grad.is_none() && grad_idx.is_none() {
             color.or(self.last.flat)
         } else {
             None
@@ -1329,6 +1380,7 @@ impl Sync {
         let frame = LiveFrame {
             active: true,
             grad,
+            grad_idx,
             flat,
             term_pal: None,
             glyphs: self.glyphs.clone(),
@@ -1359,14 +1411,21 @@ pub fn is_live_color_name(s: &str) -> bool {
     s.trim().eq_ignore_ascii_case("sharkvis")
 }
 
-pub fn text_color_key(frame: &LiveFrame) -> Option<(Rgb, Rgb)> {
+pub fn text_color_key(frame: &LiveFrame) -> Option<String> {
     if !frame.active {
         return None;
     }
     if let Some(c) = frame.flat {
-        Some((c, c))
+        Some(format!("f:{},{},{}", c.0, c.1, c.2))
+    } else if let Some((lo, hi)) = frame.grad {
+        Some(format!(
+            "g:{},{},{}:{},{},{}",
+            lo.0, lo.1, lo.2, hi.0, hi.1, hi.2
+        ))
+    } else if let Some((lo, hi)) = frame.grad_idx.as_ref() {
+        Some(format!("i:{lo}>{hi}"))
     } else {
-        frame.grad
+        None
     }
 }
 
@@ -1395,8 +1454,37 @@ pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> 
     None
 }
 
+fn grad_t(frame: &LiveFrame, idx: usize, total: usize) -> Option<f32> {
+    if !frame.active {
+        return None;
+    }
+    let mut t = if total > 1 {
+        (total - 1 - idx.min(total - 1)) as f32 / (total - 1) as f32
+    } else {
+        0.5
+    };
+    let n = frame.grad_amt.clamp(1, 256);
+    if n <= 1 {
+        t = 0.0;
+    } else {
+        let n = n as f32;
+        t = ((t * n).floor().min(n - 1.0)) / (n - 1.0);
+    }
+    Some(t)
+}
+
+pub fn grad_idx_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<String> {
+    if !frame.active {
+        return None;
+    }
+    let (lo, hi) = frame.grad_idx.as_ref()?;
+    let t = grad_t(frame, idx, total)?;
+    Some(if t < 0.5 { lo.clone() } else { hi.clone() })
+}
+
 pub fn has_display_color(frame: &LiveFrame) -> bool {
-    frame.active && (frame.flat.is_some() || frame.grad.is_some())
+    frame.active
+        && (frame.flat.is_some() || frame.grad.is_some() || frame.grad_idx.is_some())
 }
 
 pub fn rgb_ansi_start(rgb: Rgb) -> String {
@@ -1427,6 +1515,15 @@ pub fn swap_display_placeholders_row(
     idx: usize,
     total: usize,
 ) -> String {
+    if frame.active {
+        if let Some(spec) = grad_idx_for_row(frame, idx, total) {
+            let ph = crate::print::color::SHARKVIS_PLACEHOLDER_START;
+            if s.contains(ph) {
+                return s.replace(ph, &format!("\x1b[{spec}m"));
+            }
+            return s.to_string();
+        }
+    }
     swap_display_placeholders_pal(
         s,
         grad_for_row(frame, idx, total),
@@ -2279,10 +2376,52 @@ mod tests {
         let mut f = LiveFrame::inactive();
         f.active = true;
         f.flat = Some((9, 9, 9));
-        assert_eq!(text_color_key(&f), Some(((9, 9, 9), (9, 9, 9))));
+        assert_eq!(text_color_key(&f), Some("f:9,9,9".to_string()));
         f.flat = None;
         f.grad = Some(((1, 2, 3), (4, 5, 6)));
-        assert_eq!(text_color_key(&f), Some(((1, 2, 3), (4, 5, 6))));
+        assert_eq!(text_color_key(&f), Some("g:1,2,3:4,5,6".to_string()));
+        f.grad = None;
+        f.grad_idx = Some(("34".to_string(), "36".to_string()));
+        assert_eq!(text_color_key(&f), Some("i:34>36".to_string()));
+    }
+
+    #[test]
+    fn index_specs_parse() {
+        assert_eq!(parse_index_spec("34"), Some("34".to_string()));
+        assert_eq!(parse_index_spec("90"), Some("90".to_string()));
+        assert_eq!(parse_index_spec("1;36"), None);
+        assert_eq!(
+            parse_index_spec("38;5;196"),
+            Some("38;5;196".to_string())
+        );
+        assert_eq!(parse_index_spec("#ff0000"), None);
+        assert_eq!(parse_index_spec("red"), None);
+        assert_eq!(parse_index_spec(""), None);
+    }
+
+    #[test]
+    fn state_text_parses_index_bounds() {
+        let st = parse_state_text("energy=0.5 color_low=34 color_high=36");
+        assert_eq!(st.glow_idx, Some("34".to_string()));
+        assert_eq!(st.ghigh_idx, Some("36".to_string()));
+        assert!(st.glow.is_none() && st.ghigh.is_none());
+        let st = parse_state_text("energy=0.5 color_low=#0000ff color_high=#ff0000");
+        assert_eq!(st.glow, Some((0, 0, 255)));
+        assert!(st.glow_idx.is_none());
+    }
+
+    #[test]
+    fn index_row_picks_ends() {
+        let mut f = LiveFrame::inactive();
+        f.active = true;
+        f.grad_idx = Some(("34".to_string(), "36".to_string()));
+        f.grad_amt = 2;
+        assert_eq!(grad_idx_for_row(&f, 0, 8), Some("36".to_string()));
+        assert_eq!(grad_idx_for_row(&f, 7, 8), Some("34".to_string()));
+        assert!(has_display_color(&f));
+        let line = format!("x{}y", crate::print::color::SHARKVIS_PLACEHOLDER_START);
+        let out = swap_display_placeholders_row(&line, &f, 7, 8);
+        assert_eq!(out, "x\x1b[34my");
     }
 
     #[test]
@@ -2296,6 +2435,7 @@ mod tests {
         let mk = |amt: u32| LiveFrame {
             active: true,
             grad: Some(((0, 0, 0), (255, 255, 255))),
+            grad_idx: None,
             flat: None,
             term_pal: None,
             glyphs: None,
