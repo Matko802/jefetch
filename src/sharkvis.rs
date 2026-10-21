@@ -1477,12 +1477,116 @@ fn grad_t(frame: &LiveFrame, idx: usize, total: usize) -> Option<f32> {
     Some(t)
 }
 
+fn xterm_base_color(i: usize) -> Rgb {
+    const BASE: [Rgb; 16] = [
+        (0, 0, 0),
+        (205, 0, 0),
+        (0, 205, 0),
+        (205, 205, 0),
+        (0, 0, 238),
+        (205, 0, 205),
+        (0, 205, 205),
+        (229, 229, 229),
+        (127, 127, 127),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (92, 92, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
+    ];
+    BASE[i]
+}
+
+pub fn pal_index_rgb(idx: u8) -> Option<Rgb> {
+    let i = idx as usize;
+    if i < 16 {
+        return Some(xterm_base_color(i));
+    }
+    if i < 232 {
+        let k = i - 16;
+        let lvl = |v: usize| if v == 0 { 0 } else { 55 + 40 * v };
+        return Some(((lvl(k / 36)) as u8, (lvl((k % 36) / 6)) as u8, (lvl(k % 6)) as u8));
+    }
+    if i <= 255 {
+        let g = 8 + 10 * (i - 232);
+        return Some((g as u8, g as u8, g as u8));
+    }
+    None
+}
+
+fn rgb_to_cube_idx(c: Rgb) -> u8 {
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let sh = |v: u8| -> u32 {
+        let mut best = 0u32;
+        let mut dist = u8::MAX as u32;
+        for (i, l) in LEVELS.iter().enumerate() {
+            let d = u32::from(v.abs_diff(*l));
+            if d < dist {
+                dist = d;
+                best = i as u32;
+            }
+        }
+        best
+    };
+    (16 + 36 * sh(c.0) + 6 * sh(c.1) + sh(c.2)) as u8
+}
+
+fn pal_spec_number(spec: &str) -> Option<u8> {
+    let mut it = spec.split(';');
+    match (it.next(), it.next(), it.next(), it.next()) {
+        (Some("38"), Some("5"), Some(n), None) => n.parse::<u8>().ok(),
+        _ => None,
+    }
+}
+
+fn base_spec_pos(spec: &str) -> Option<usize> {
+    match spec.trim().parse::<u32>() {
+        Ok(v) if (30..=37).contains(&v) => Some(v as usize - 30),
+        Ok(v) if (90..=97).contains(&v) => Some(v as usize - 82),
+        _ => None,
+    }
+}
+
+pub fn spec_rgb(pal: Option<&[Rgb; 16]>, spec: &str) -> Option<Rgb> {
+    if let Some(v) = pal_spec_number(spec) {
+        if v < 16 {
+            return Some(pal.map(|p| p[v as usize]).unwrap_or_else(|| xterm_base_color(v as usize)));
+        }
+        return pal_index_rgb(v);
+    }
+    if let Some(i) = base_spec_pos(spec) {
+        return Some(pal.map(|p| p[i]).unwrap_or_else(|| xterm_base_color(i)));
+    }
+    None
+}
+
+fn pal_ramp_spec(lo: &str, hi: &str, t: f32) -> Option<String> {
+    let (a, b) = (pal_spec_number(lo)?, pal_spec_number(hi)?);
+    if a == b {
+        return Some(format!("38;5;{a}"));
+    }
+    if t <= 0.0 {
+        return Some(lo.to_string());
+    }
+    if t >= 1.0 {
+        return Some(hi.to_string());
+    }
+    let (ca, cb) = (pal_index_rgb(a)?, pal_index_rgb(b)?);
+    let idx = rgb_to_cube_idx(lerp_rgb(ca, cb, t));
+    Some(format!("38;5;{idx}"))
+}
+
 pub fn grad_idx_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<String> {
     if !frame.active {
         return None;
     }
     let (lo, hi) = frame.grad_idx.as_ref()?;
     let t = grad_t(frame, idx, total)?;
+    if let Some(spec) = pal_ramp_spec(lo, hi, t) {
+        return Some(spec);
+    }
     Some(if t < 0.5 { lo.clone() } else { hi.clone() })
 }
 
@@ -2459,6 +2563,44 @@ mod tests {
         let line = format!("x{}y", crate::print::color::SHARKVIS_PLACEHOLDER_START);
         let out = swap_display_placeholders_row(&line, &f, 7, 8);
         assert_eq!(out, "x\x1b[34my");
+    }
+
+    #[test]
+    fn index_row_interpolates_256_pairs() {
+        let mut f = LiveFrame::inactive();
+        f.active = true;
+        f.grad_idx = Some(("38;5;32".to_string(), "38;5;221".to_string()));
+        assert_eq!(grad_idx_for_row(&f, 7, 8), Some("38;5;32".to_string()));
+        assert_eq!(grad_idx_for_row(&f, 0, 8), Some("38;5;221".to_string()));
+        f.grad_amt = 2;
+        assert_eq!(grad_idx_for_row(&f, 0, 8), Some("38;5;221".to_string()));
+        assert_eq!(grad_idx_for_row(&f, 7, 8), Some("38;5;32".to_string()));
+        f.grad_amt = 256;
+        let mid = grad_idx_for_row(&f, 3, 8).unwrap();
+        assert!(mid.starts_with("38;5;"), "got {mid}");
+        let mid_num: u8 = mid.rsplit(';').next().unwrap().parse().unwrap();
+        assert_ne!(mid_num, 32);
+        assert_ne!(mid_num, 221);
+        let near_lo = grad_idx_for_row(&f, 6, 8).unwrap();
+        assert_ne!(near_lo, mid);
+        let line = format!("x{}y", crate::print::color::SHARKVIS_PLACEHOLDER_START);
+        let out = swap_display_placeholders_row(&line, &f, 7, 8);
+        assert_eq!(out, "x\x1b[38;5;32my");
+        f.grad_idx = Some(("38;5;105".to_string(), "38;5;105".to_string()));
+        assert_eq!(grad_idx_for_row(&f, 0, 8), Some("38;5;105".to_string()));
+    }
+
+    #[test]
+    fn pal_index_rgb_matches_xterm_256() {
+        assert_eq!(pal_index_rgb(0), Some((0, 0, 0)));
+        assert_eq!(pal_index_rgb(4), Some((0, 0, 238)));
+        assert_eq!(pal_index_rgb(16), Some((0, 0, 0)));
+        assert_eq!(pal_index_rgb(21), Some((0, 0, 255)));
+        assert_eq!(pal_index_rgb(231), Some((255, 255, 255)));
+        assert_eq!(pal_index_rgb(232), Some((8, 8, 8)));
+        assert_eq!(pal_index_rgb(255), Some((238, 238, 238)));
+        assert_eq!(rgb_to_cube_idx(pal_index_rgb(221).unwrap()), 221);
+        assert_eq!(rgb_to_cube_idx(pal_index_rgb(32).unwrap()), 32);
     }
 
     #[test]

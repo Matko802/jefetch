@@ -552,6 +552,17 @@ impl App {
                             fx.grad = Some((c, c));
                             fx.grad_amt = shark_live.grad_amt;
                             fx.term_pal = shark_live.term_pal;
+                        } else if let Some((lo, hi)) = shark_live.grad_idx.as_ref() {
+                            let pal = shark_live.term_pal;
+                            let ends = (
+                                crate::sharkvis::spec_rgb(pal.as_ref(), lo),
+                                crate::sharkvis::spec_rgb(pal.as_ref(), hi),
+                            );
+                            if let (Some(a), Some(b)) = ends {
+                                fx.grad = Some((a, b));
+                                fx.grad_amt = shark_live.grad_amt;
+                                fx.term_pal = shark_live.term_pal;
+                            }
                         }
                     }
                     if !cfg.original_glyphs && !cfg.shading_explicit {

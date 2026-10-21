@@ -164,7 +164,11 @@ right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 
 Colors stay the logo's own unless you add `color=sharkvis`, which hands them
 over to sharkvis's `gradient_low` → `gradient_high` from
-`~/.config/sharkvis/config.jsonc`. Add `textcolor=sharkvis` and the text
+`~/.config/sharkvis/config.jsonc`. When the ends are 256-color indexes
+(`38;5;N`, sharkvis's `color_mode: "256"` or colors following the logo), the
+gradient ramps through the palette between them instead of stepping between
+the two ends, honoring sharkvis's `gradient` count. Add `textcolor=sharkvis`
+and the text
 (keys/title/separator) follows the same gradient while
 it plays, always overriding their normal colors (which only show when
 idle). Same deal with characters:
