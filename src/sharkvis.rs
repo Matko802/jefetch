@@ -1562,16 +1562,20 @@ pub fn spec_rgb(pal: Option<&[Rgb; 16]>, spec: &str) -> Option<Rgb> {
     None
 }
 
+fn pal_spec_index(spec: &str) -> Option<u8> {
+    pal_spec_number(spec).or_else(|| base_spec_pos(spec).map(|i| i as u8))
+}
+
 fn pal_ramp_spec(lo: &str, hi: &str, t: f32) -> Option<String> {
-    let (a, b) = (pal_spec_number(lo)?, pal_spec_number(hi)?);
+    let (a, b) = (pal_spec_index(lo)?, pal_spec_index(hi)?);
     if a == b {
-        return Some(format!("38;5;{a}"));
+        return Some(lo.trim().to_string());
     }
     if t <= 0.0 {
-        return Some(lo.to_string());
+        return Some(lo.trim().to_string());
     }
     if t >= 1.0 {
-        return Some(hi.to_string());
+        return Some(hi.trim().to_string());
     }
     let (ca, cb) = (pal_index_rgb(a)?, pal_index_rgb(b)?);
     let idx = rgb_to_cube_idx(lerp_rgb(ca, cb, t));
@@ -2601,6 +2605,47 @@ mod tests {
         assert_eq!(pal_index_rgb(255), Some((238, 238, 238)));
         assert_eq!(rgb_to_cube_idx(pal_index_rgb(221).unwrap()), 221);
         assert_eq!(rgb_to_cube_idx(pal_index_rgb(32).unwrap()), 32);
+    }
+
+    #[test]
+    fn pal_spec_index_accepts_base_and_extended() {
+        assert_eq!(pal_spec_index("34"), Some(4));
+        assert_eq!(pal_spec_index("36"), Some(6));
+        assert_eq!(pal_spec_index("90"), Some(8));
+        assert_eq!(pal_spec_index("97"), Some(15));
+        assert_eq!(pal_spec_index("38;5;196"), Some(196));
+        assert_eq!(pal_spec_index("38;5;999"), None);
+        assert_eq!(pal_spec_index("bogus"), None);
+    }
+
+    #[test]
+    fn base_pair_ramps_through_palette() {
+        let seen: std::collections::BTreeSet<String> = (0..=10)
+            .map(|i| i as f32 / 10.0)
+            .filter_map(|t| pal_ramp_spec("34", "36", t))
+            .collect();
+        assert!(seen.contains("34"));
+        assert!(seen.contains("36"));
+        assert!(
+            seen.len() > 2,
+            "34 to 36 should ramp through intermediate colors, got {seen:?}"
+        );
+        for s in &seen {
+            if *s != "34" && *s != "36" {
+                assert!(s.starts_with("38;5;"), "intermediate must be extended spec: {s}");
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_base_and_extended_pair_ramps() {
+        let seen: std::collections::BTreeSet<String> = (0..=10)
+            .map(|i| i as f32 / 10.0)
+            .filter_map(|t| pal_ramp_spec("38;5;196", "34", t))
+            .collect();
+        assert!(seen.len() > 2, "196 to 34 should ramp, got {seen:?}");
+        assert!(seen.contains("34"));
+        assert!(seen.contains("38;5;196"));
     }
 
     #[test]
