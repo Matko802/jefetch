@@ -168,7 +168,7 @@ over to sharkvis's `gradient_low` → `gradient_high` from
 (`38;5;N`, sharkvis's `color_mode: "256"` or colors following the logo), the
 gradient ramps through the palette between them instead of stepping between
 the two ends, honoring sharkvis's `gradient` count. Add `textcolor=sharkvis`
-and the text
+and the whole logo plus the text
 (keys/title/separator) follows the same gradient while
 it plays, always overriding their normal colors (which only show when
 idle). Same deal with characters:
@@ -192,8 +192,8 @@ Without it the logo stays where the music left it.
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
 | `color=terminal` | Glide the logo through your terminal's real 16 colors (asked via OSC 4, needs an interactive terminal; falls back to daemon colors, then plain) |
-| `textcolor=sharkvis` | Text follows the live gradient too, overriding normal colors (shown when idle) |
-| `textcolor=terminal` | Text follows the terminal-color flow too |
+| `textcolor=sharkvis` | Text follows the live gradient too and tints the whole logo, overriding normal colors (shown when idle) |
+| `textcolor=terminal` | Text follows the terminal-color flow too, with `live_term_colors` for the logo |
 | `chars=sharkvis` | Take the charset from sharkvis's `chars`, otherwise blocks |
 | `beat=N` | How deep each kick dips, `0`–`0.9` (default `0.6`) |
 | `boom=N` | How much it swells with volume, `0`–`1` |

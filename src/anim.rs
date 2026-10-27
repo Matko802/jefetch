@@ -141,10 +141,13 @@ impl AnimConfig {
                 }
             }
             if let Some(v) = extract_word(&low, raw, "textcolor", true) {
-                if v.trim().eq_ignore_ascii_case("sharkvis")
-                    || v.trim().eq_ignore_ascii_case("terminal")
-                {
+                let v = v.trim();
+                if v.eq_ignore_ascii_case("sharkvis") {
                     cfg.text_live_colors = true;
+                    cfg.live_colors = true;
+                } else if v.eq_ignore_ascii_case("terminal") {
+                    cfg.text_live_colors = true;
+                    cfg.live_term_colors = true;
                 }
             }
 
@@ -1733,15 +1736,23 @@ mod tests {
     fn text_live_colors_opt_in() {
         let cfg = AnimConfig::from_animation_str(Some("boom=10 textcolor=sharkvis"));
         assert!(cfg.text_live_colors);
-        assert!(!cfg.live_colors, "logo tint stays off");
+        assert!(cfg.live_colors, "textcolor=sharkvis tints the whole logo");
         assert!(!cfg.spin_x && !cfg.spin_z, "{:?}", cfg);
+        let cfg = AnimConfig::from_animation_str(Some("textcolor=terminal"));
+        assert!(cfg.text_live_colors);
+        assert!(cfg.live_term_colors);
         let cfg = AnimConfig::from_animation_str(Some("textcolor=red"));
         assert!(!cfg.text_live_colors);
+        assert!(!cfg.live_colors);
+        assert!(!cfg.live_term_colors);
         let cfg = AnimConfig::from_animation_str(Some("boom=10"));
         assert!(!cfg.text_live_colors);
         let cfg = AnimConfig::from_animation_str(Some("color=sharkvis"));
         assert!(cfg.live_colors);
         assert!(!cfg.text_live_colors, "logo opt-in stays logo-only");
+        let cfg = AnimConfig::from_animation_str(Some("color=terminal"));
+        assert!(cfg.live_term_colors);
+        assert!(!cfg.text_live_colors);
     }
 
     #[test]

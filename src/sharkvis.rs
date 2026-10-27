@@ -1566,7 +1566,7 @@ fn pal_spec_index(spec: &str) -> Option<u8> {
     pal_spec_number(spec).or_else(|| base_spec_pos(spec).map(|i| i as u8))
 }
 
-fn pal_ramp_spec(lo: &str, hi: &str, t: f32) -> Option<String> {
+fn pal_ramp_spec(pal: Option<&[Rgb; 16]>, lo: &str, hi: &str, t: f32) -> Option<String> {
     let (a, b) = (pal_spec_index(lo)?, pal_spec_index(hi)?);
     if a == b {
         return Some(lo.trim().to_string());
@@ -1577,7 +1577,7 @@ fn pal_ramp_spec(lo: &str, hi: &str, t: f32) -> Option<String> {
     if t >= 1.0 {
         return Some(hi.trim().to_string());
     }
-    let (ca, cb) = (pal_index_rgb(a)?, pal_index_rgb(b)?);
+    let (ca, cb) = (spec_rgb(pal, lo)?, spec_rgb(pal, hi)?);
     let idx = rgb_to_cube_idx(lerp_rgb(ca, cb, t));
     Some(format!("38;5;{idx}"))
 }
@@ -1588,7 +1588,7 @@ pub fn grad_idx_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<S
     }
     let (lo, hi) = frame.grad_idx.as_ref()?;
     let t = grad_t(frame, idx, total)?;
-    if let Some(spec) = pal_ramp_spec(lo, hi, t) {
+    if let Some(spec) = pal_ramp_spec(frame.term_pal.as_ref(), lo, hi, t) {
         return Some(spec);
     }
     Some(if t < 0.5 { lo.clone() } else { hi.clone() })
@@ -2622,7 +2622,7 @@ mod tests {
     fn base_pair_ramps_through_palette() {
         let seen: std::collections::BTreeSet<String> = (0..=10)
             .map(|i| i as f32 / 10.0)
-            .filter_map(|t| pal_ramp_spec("34", "36", t))
+            .filter_map(|t| pal_ramp_spec(None, "34", "36", t))
             .collect();
         assert!(seen.contains("34"));
         assert!(seen.contains("36"));
@@ -2641,11 +2641,32 @@ mod tests {
     fn mixed_base_and_extended_pair_ramps() {
         let seen: std::collections::BTreeSet<String> = (0..=10)
             .map(|i| i as f32 / 10.0)
-            .filter_map(|t| pal_ramp_spec("38;5;196", "34", t))
+            .filter_map(|t| pal_ramp_spec(None, "38;5;196", "34", t))
             .collect();
         assert!(seen.len() > 2, "196 to 34 should ramp, got {seen:?}");
         assert!(seen.contains("34"));
         assert!(seen.contains("38;5;196"));
+    }
+
+    #[test]
+    fn palette_ramp_uses_real_term_colors() {
+        let mut pal: [Rgb; 16] = [(0, 0, 0); 16];
+        for (i, slot) in pal.iter_mut().enumerate() {
+            *slot = (i as u8, 0, 255 - i as u8);
+        }
+        let seen: std::collections::BTreeSet<String> = (0..=10)
+            .map(|i| i as f32 / 10.0)
+            .filter_map(|t| pal_ramp_spec(Some(&pal), "34", "36", t))
+            .collect();
+        assert!(seen.contains("34"));
+        assert!(seen.contains("36"));
+        assert!(
+            seen.len() > 2,
+            "custom palette ends must still ramp, got {seen:?}"
+        );
+        let mid = pal_ramp_spec(Some(&pal), "34", "36", 0.5).unwrap();
+        let xterm_mid = pal_ramp_spec(None, "34", "36", 0.5).unwrap();
+        assert_ne!(mid, xterm_mid, "custom palette should change the midpoint");
     }
 
     #[test]
