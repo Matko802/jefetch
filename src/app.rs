@@ -542,29 +542,34 @@ impl App {
                     spin_phase += f64::from(shark_live.speed_mult) * f64::from(dt60);
                 }
                 let mut fx = crate::anim::RenderFx::none();
-                if using_active {
-                    if cfg.live_colors {
-                        if let Some(g) = shark_live.grad {
-                            fx.grad = Some(g);
+                let want_colors = if using_active {
+                    cfg.live_colors
+                } else {
+                    base_cfg.live_colors || active_cfg.live_colors
+                };
+                if want_colors {
+                    if let Some(g) = shark_live.grad {
+                        fx.grad = Some(g);
+                        fx.grad_amt = shark_live.grad_amt;
+                        fx.term_pal = shark_live.term_pal;
+                    } else if let Some(c) = shark_live.flat {
+                        fx.grad = Some((c, c));
+                        fx.grad_amt = shark_live.grad_amt;
+                        fx.term_pal = shark_live.term_pal;
+                    } else if let Some((lo, hi)) = shark_live.grad_idx.as_ref() {
+                        let pal = shark_live.term_pal;
+                        let ends = (
+                            crate::sharkvis::spec_rgb(pal.as_ref(), lo),
+                            crate::sharkvis::spec_rgb(pal.as_ref(), hi),
+                        );
+                        if let (Some(a), Some(b)) = ends {
+                            fx.grad = Some((a, b));
                             fx.grad_amt = shark_live.grad_amt;
                             fx.term_pal = shark_live.term_pal;
-                        } else if let Some(c) = shark_live.flat {
-                            fx.grad = Some((c, c));
-                            fx.grad_amt = shark_live.grad_amt;
-                            fx.term_pal = shark_live.term_pal;
-                        } else if let Some((lo, hi)) = shark_live.grad_idx.as_ref() {
-                            let pal = shark_live.term_pal;
-                            let ends = (
-                                crate::sharkvis::spec_rgb(pal.as_ref(), lo),
-                                crate::sharkvis::spec_rgb(pal.as_ref(), hi),
-                            );
-                            if let (Some(a), Some(b)) = ends {
-                                fx.grad = Some((a, b));
-                                fx.grad_amt = shark_live.grad_amt;
-                                fx.term_pal = shark_live.term_pal;
-                            }
                         }
                     }
+                }
+                if using_active {
                     if !cfg.original_glyphs && !cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
                     }

@@ -167,7 +167,10 @@ over to sharkvis's `gradient_low` → `gradient_high` from
 `~/.config/sharkvis/config.jsonc`. When the ends are 256-color indexes
 (`38;5;N`, sharkvis's `color_mode: "256"` or colors following the logo), the
 gradient ramps through the palette between them instead of stepping between
-the two ends, honoring sharkvis's `gradient` count. Add `textcolor=sharkvis`
+the two ends, honoring sharkvis's `gradient` count. With no live state to
+read (no sharkvis instance publishing, e.g. only `--raw` backends), the two
+configured ends still tint the logo and text — the gradient never falls back
+to the logo's own fixed colors. Add `textcolor=sharkvis`
 and the whole logo plus the text
 (keys/title/separator) follows the same gradient while
 it plays, always overriding their normal colors (which only show when
@@ -188,7 +191,8 @@ Without it the logo stays where the music left it.
 
 | Value | What it does |
 |-------|--------------|
-| `sharkvis` / `=auto` / `=on` | Switch on while `sharkvis` runs (off unless you ask) |
+| `sharkvis` / `=auto` | Switch the profile on while `sharkvis` runs, live colors included (off unless you ask) |
+| `sharkvis=on` | Keep the profile on even when nothing runs — colors come from the config ends, audio is monitored directly for the dance |
 | `sharkvis=off` / `no-sharkvis` | Never hook in |
 | `color=sharkvis` | Take logo colors from sharkvis, otherwise the logo keeps its own |
 | `color=terminal` | Glide the logo through your terminal's real 16 colors (asked via OSC 4, needs an interactive terminal; falls back to daemon colors, then plain) |

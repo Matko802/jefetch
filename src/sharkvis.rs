@@ -24,7 +24,8 @@ impl SharkvisMode {
     pub fn enabled(self, running: bool) -> bool {
         match self {
             SharkvisMode::Off => false,
-            SharkvisMode::Auto | SharkvisMode::On => running,
+            SharkvisMode::Auto => running,
+            SharkvisMode::On => true,
         }
     }
 }
@@ -1286,16 +1287,23 @@ impl Sync {
             self.running = is_running();
             self.running_at = Some(now);
         }
-        if !mode.enabled(self.running) {
-            self.monitor = None;
-            self.last = LiveFrame::inactive();
-            return self.last.clone();
-        }
         if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
             let (grad, glyphs) = visual_from_paths(&config_paths());
             self.gradients = grad;
             self.glyphs = glyphs;
             self.visual_at = Some(now);
+        }
+        if !mode.enabled(self.running) {
+            self.monitor = None;
+            let mut frame = LiveFrame::inactive();
+            if live_colors && mode != SharkvisMode::Off {
+                if let Some((lo, hi)) = self.gradients {
+                    frame.grad = Some((lo, hi));
+                    frame.grad_amt = self.last.grad_amt.clamp(1, 256);
+                }
+            }
+            self.last = frame;
+            return self.last.clone();
         }
 
         let mut energy: Option<f32> = None;
@@ -1434,7 +1442,7 @@ pub fn text_color_key(frame: &LiveFrame) -> Option<String> {
 }
 
 pub fn grad_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<Rgb> {
-    if !frame.active {
+    if !frame.active && frame.grad.is_none() {
         return None;
     }
     if let Some(c) = frame.flat {
@@ -1972,7 +1980,7 @@ mod tests {
         assert!(SharkvisMode::Auto.enabled(true));
         assert!(!SharkvisMode::Auto.enabled(false));
         assert!(SharkvisMode::On.enabled(true));
-        assert!(!SharkvisMode::On.enabled(false), "on still needs the process");
+        assert!(SharkvisMode::On.enabled(false), "on ignores the process");
         assert!(!SharkvisMode::Off.enabled(true));
     }
 
@@ -2185,16 +2193,20 @@ mod tests {
         std::env::set_var("JEFETCH_SHARKVIS_STATE", path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_CONFIG", cfg_path.to_string_lossy().as_ref());
         std::env::set_var("JEFETCH_SHARKVIS_RUNNING", "0");
-        for mode in [SharkvisMode::Auto, SharkvisMode::On] {
-            let mut s = Sync::new();
-            let f = s.poll(mode, DEFAULT_BEAT_DEPTH, false);
-            assert!(!f.active, "{:?} must stay inactive without the process", mode);
-            assert!((f.speed_mult - 1.0).abs() < 1e-5);
-            assert_eq!(
-                f.grad, None,
-                "{mode:?} carries no colors while inactive"
-            );
-        }
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, false);
+        assert!(!f.active, "auto must stay inactive without the process");
+        assert!((f.speed_mult - 1.0).abs() < 1e-5);
+        assert_eq!(f.grad, None, "auto carries no colors without an opt-in");
+
+        let mut s = Sync::new();
+        let f = s.poll(SharkvisMode::On, DEFAULT_BEAT_DEPTH, true);
+        assert!(f.active, "on engages without the process");
+        assert_eq!(
+            f.grad,
+            Some(((0x00, 0x11, 0x22), (0x33, 0x44, 0x55))),
+            "on falls back to the config gradient ends"
+        );
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
@@ -2461,7 +2473,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_frame_carries_no_colors() {
+    fn inactive_frame_carries_config_gradient() {
         let _guard = test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-fb-{}", std::process::id()));
@@ -2475,8 +2487,24 @@ mod tests {
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(!f.active, "no process running");
-        assert_eq!(f.grad, None, "inactive frame carries no gradient");
-        assert_eq!(text_color_key(&f), None);
+        assert_eq!(
+            f.grad,
+            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc))),
+            "an opt-in gets the config gradient even while off"
+        );
+        assert_eq!(
+            grad_for_row(&f, 0, 8),
+            Some((0xaa, 0xbb, 0xcc)),
+            "top row takes the high end"
+        );
+        assert_eq!(
+            grad_for_row(&f, 7, 8),
+            Some((0x11, 0x22, 0x33)),
+            "bottom row takes the low end"
+        );
+        assert_eq!(text_color_key(&f), None, "no repaint key without a process");
+        let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, false);
+        assert_eq!(f.grad, None, "no gradient without a color opt-in");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&cfg_path);
