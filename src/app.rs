@@ -30,6 +30,12 @@ pub struct App {
     logo_colors_last: Option<Option<String>>,
 }
 
+fn write_stdout(s: &str) -> bool {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    out.write_all(s.as_bytes()).and_then(|_| out.flush()).is_ok()
+}
+
 impl App {
     pub fn new(options: CliOptions) -> App {
         App {
@@ -320,7 +326,7 @@ impl App {
         if !crate::common::colors_enabled() {
             out = crate::print::format::strip_sgr(&out);
         }
-        print!("{}", out);
+        let _ = write_stdout(&out);
         0
     }
 
@@ -351,8 +357,7 @@ impl App {
         let mut last_sound = std::time::Instant::now();
         let watch_path = self.config_watch_path();
         let mut last_stamp = watch_path.as_deref().and_then(config_stamp);
-        print!("\x1b[0m\x1b[2J\x1b[3J\x1b[H\x1b[?25l");
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let _ = write_stdout("\x1b[0m\x1b[2J\x1b[3J\x1b[H\x1b[?25l");
         let mut orig_term = unsafe { std::mem::zeroed::<libc::termios>() };
         let mut tty_fd: i32 = -1;
         let tty_file = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").ok();
@@ -403,8 +408,7 @@ impl App {
         let mut refresh_busy: Option<u64> = None;
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
-            print!("\x1b[?25h\x1b[0m\n");
-            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let _ = write_stdout("\x1b[?25h\x1b[0m\n");
             if is_tty && tty_fd != -1 {
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, orig_term); }
             }
@@ -693,8 +697,10 @@ impl App {
                     if !crate::common::colors_enabled() {
                         out = crate::print::format::strip_sgr(&out);
                     }
-                    print!("{}", out);
-                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    if !write_stdout(&out) {
+                        restore(tty_fd, is_tty, &orig_term);
+                        return 0;
+                    }
                 }
             } else if needs_draw {
 
@@ -753,8 +759,10 @@ impl App {
                 if !crate::common::colors_enabled() {
                     out = crate::print::format::strip_sgr(&out);
                 }
-                print!("{}", out);
-                let _ = std::io::Write::flush(&mut std::io::stdout());
+                if !write_stdout(&out) {
+                    restore(tty_fd, is_tty, &orig_term);
+                    return 0;
+                }
                 if display_live && !animated {
                     text_key = crate::sharkvis::text_color_key(&shark_live);
                     have_text_key = true;
@@ -1013,7 +1021,7 @@ impl App {
                 ]));
             }
         }
-        print!("{}", JsonValue::Arr(items).to_json_pretty());
+        let _ = write_stdout(&JsonValue::Arr(items).to_json_pretty());
     }
 
     fn render_modules(&self, entries: &[ModuleEntry]) -> Vec<String> {
