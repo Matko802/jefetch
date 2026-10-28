@@ -26,6 +26,8 @@ pub struct App {
     pub options: CliOptions,
     pub config: Config,
     pub logo: Option<ResolvedLogo>,
+    logo_colors_own: Option<String>,
+    logo_colors_last: Option<Option<String>>,
 }
 
 impl App {
@@ -34,6 +36,8 @@ impl App {
             options,
             config: Config::default(),
             logo: None,
+            logo_colors_own: None,
+            logo_colors_last: None,
         }
     }
 
@@ -547,28 +551,33 @@ impl App {
                 } else {
                     base_cfg.live_colors || active_cfg.live_colors
                 };
+                let live_pal = if want_colors {
+                    shark_live.term_pal.or_else(crate::sharkvis::term_palette)
+                } else {
+                    None
+                };
                 if want_colors {
                     if let Some(g) = shark_live.grad {
                         fx.grad = Some(g);
                         fx.grad_amt = shark_live.grad_amt;
-                        fx.term_pal = shark_live.term_pal;
+                        fx.term_pal = live_pal;
                     } else if let Some(c) = shark_live.flat {
                         fx.grad = Some((c, c));
                         fx.grad_amt = shark_live.grad_amt;
-                        fx.term_pal = shark_live.term_pal;
+                        fx.term_pal = live_pal;
                     } else if let Some((lo, hi)) = shark_live.grad_idx.as_ref() {
-                        let pal = shark_live.term_pal;
                         let ends = (
-                            crate::sharkvis::spec_rgb(pal.as_ref(), lo),
-                            crate::sharkvis::spec_rgb(pal.as_ref(), hi),
+                            crate::sharkvis::spec_rgb(live_pal.as_ref(), lo),
+                            crate::sharkvis::spec_rgb(live_pal.as_ref(), hi),
                         );
                         if let (Some(a), Some(b)) = ends {
                             fx.grad = Some((a, b));
                             fx.grad_amt = shark_live.grad_amt;
-                            fx.term_pal = shark_live.term_pal;
+                            fx.term_pal = live_pal;
                         }
                     }
                 }
+                self.publish_logo_colors(fx.grad);
                 if using_active {
                     if !cfg.original_glyphs && !cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
@@ -815,15 +824,8 @@ impl App {
         }
 
         self.apply_logo_colors();
-        let gradient = {
-            let (base_cfg, active_cfg, _) = self.anim_configs();
-            if base_cfg.live_colors || active_cfg.live_colors {
-                crate::sharkvis::gradient_colors()
-            } else {
-                None
-            }
-        };
-        Self::publish_logo_colors(self.logo.as_ref(), gradient);
+        self.logo_colors_own = Self::logo_colors_body(self.logo.as_ref());
+        self.publish_logo_colors(None);
     }
 
     fn apply_logo_colors(&mut self) {
@@ -847,28 +849,37 @@ impl App {
         }
     }
 
-    /// Publish the logo's first/last distinct foreground color specs for
-    /// sharkvis to follow (`$RUNTIME/sharkvis/logo_colors`, atomic tmp+rename;
-    /// removed when the logo carries no color). Specs are the same terminal
-    /// color indexes the logo itself uses (`34`, `38;5;196`, `#rrggbb`),
-    /// so sharkvis renders exactly the logo colors with no palette queries.
+    /// Publish the exact pair the logo is rendering to
+    /// `$RUNTIME/sharkvis/logo_colors` (atomic tmp+rename), falling back to
+    /// the logo's own first/last foreground specs when no live pair is
+    /// active. Writes only when the body changes; removes the file when the
+    /// logo carries no color.
     fn publish_logo_colors(
-        logo: Option<&ResolvedLogo>,
-        gradient: Option<(crate::sharkvis::Rgb, crate::sharkvis::Rgb)>,
+        &mut self,
+        live: Option<(crate::sharkvis::Rgb, crate::sharkvis::Rgb)>,
     ) {
-        let path = Self::logo_colors_path();
-        if let Some((lo, hi)) = gradient {
-            let body = format!(
+        let body = match live {
+            Some((lo, hi)) => Some(format!(
                 "low=#{:02x}{:02x}{:02x} high=#{:02x}{:02x}{:02x}\n",
                 lo.0, lo.1, lo.2, hi.0, hi.1, hi.2
-            );
-            Self::write_logo_colors(&path, &body);
+            )),
+            None => self.logo_colors_own.clone(),
+        };
+        if self.logo_colors_last.as_ref() == Some(&body) {
             return;
         }
-        let Some(l) = logo else {
-            let _ = std::fs::remove_file(&path);
-            return;
-        };
+        let path = Self::logo_colors_path();
+        match &body {
+            Some(b) => Self::write_logo_colors(&path, b),
+            None => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        self.logo_colors_last = Some(body);
+    }
+
+    fn logo_colors_body(logo: Option<&ResolvedLogo>) -> Option<String> {
+        let l = logo?;
         let mut first: Option<String> = None;
         let mut last: Option<String> = None;
         for i in 0..l.lines.len() {
@@ -905,12 +916,8 @@ impl App {
                 }
             }
         }
-        let (Some(lo), Some(hi)) = (first, last) else {
-            let _ = std::fs::remove_file(&path);
-            return;
-        };
-        let body = format!("low={lo} high={hi}\n");
-        Self::write_logo_colors(&path, &body);
+        let (lo, hi) = (first?, last?);
+        Some(format!("low={lo} high={hi}\n"))
     }
 
     fn write_logo_colors(path: &str, body: &str) {
@@ -2109,32 +2116,45 @@ mod tests {
     }
 
     #[test]
-    fn publish_logo_colors_follows_sharkvis_gradient() {
+    fn publish_logo_colors_keeps_own_pair_when_idle() {
         with_isolated_logo_colors(|path| {
-            let cfg_path = std::env::temp_dir().join(format!(
-                "jefetch-logo-grad-{}.jsonc",
-                std::process::id()
-            ));
-            std::fs::write(
-                &cfg_path,
-                r#"{"color": {"gradient_low": "ff00ff", "gradient_high": "88ff00"}}"#,
-            )
-            .unwrap();
-            let prev = std::env::var_os("JEFETCH_SHARKVIS_CONFIG");
-            std::env::set_var("JEFETCH_SHARKVIS_CONFIG", &cfg_path);
             let mut app = App::new(CliOptions::default());
             app.config.logo.source = Some("python".to_string());
             app.config.logo.logo_type = Some("builtin".to_string());
             app.config.logo.animation = Some("color=sharkvis".to_string());
             app.pick_logo();
             let body = std::fs::read_to_string(path).expect("logo colors published");
-            assert_eq!(body, "low=#ff00ff high=#88ff00\n", "got {:?}", body);
-            if let Some(v) = prev {
-                std::env::set_var("JEFETCH_SHARKVIS_CONFIG", v);
-            } else {
-                std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
-            }
-            let _ = std::fs::remove_file(&cfg_path);
+            assert_eq!(
+                body, "low=38;5;32 high=38;5;221\n",
+                "no live frame keeps the logo's own pair, got {:?}",
+                body
+            );
+        });
+    }
+
+    #[test]
+    fn publish_logo_colors_tracks_live_pair_on_change() {
+        with_isolated_logo_colors(|path| {
+            let mut app = App::new(CliOptions::default());
+            app.config.logo.source = Some("python".to_string());
+            app.config.logo.logo_type = Some("builtin".to_string());
+            app.pick_logo();
+            let own = std::fs::read_to_string(path).expect("logo colors published");
+            let live = Some(((0x02, 0x5e, 0x93), (0xb5, 0x3f, 0x33)));
+            app.publish_logo_colors(live);
+            assert_eq!(
+                std::fs::read_to_string(path).unwrap(),
+                "low=#025e93 high=#b53f33\n"
+            );
+            std::fs::write(path, "sentinel").unwrap();
+            app.publish_logo_colors(live);
+            assert_eq!(
+                std::fs::read_to_string(path).unwrap(),
+                "sentinel",
+                "an unchanged pair must not be rewritten"
+            );
+            app.publish_logo_colors(None);
+            assert_eq!(std::fs::read_to_string(path).unwrap(), own);
         });
     }
 

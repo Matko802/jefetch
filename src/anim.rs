@@ -1072,7 +1072,14 @@ pub struct LogoCloud {
     buf_w: usize,
     buf_h: usize,
     tint_rows: Vec<String>,
-    tint_key: Option<(Option<((u8, u8, u8), (u8, u8, u8))>, u32, usize, usize, usize)>,
+    tint_key: Option<(
+        Option<((u8, u8, u8), (u8, u8, u8))>,
+        u32,
+        Option<[crate::sharkvis::Rgb; 16]>,
+        usize,
+        usize,
+        usize,
+    )>,
 }
 
 pub fn build_cloud(logo: &ResolvedLogo, config: &AnimConfig) -> Option<LogoCloud> {
@@ -1479,10 +1486,11 @@ pub fn render_cloud_with_fx(
 
     // Gradient spans the actual ink so both endpoint colors land on the
     // logo itself instead of the full frame height.
-    let tint_key_now = Some((fx.grad, fx.grad_amt, h, ink_top, ink_bot));
+    let tint_key_now = Some((fx.grad, fx.grad_amt, fx.term_pal, h, ink_top, ink_bot));
     if *tint_key != tint_key_now {
         tint_rows.clear();
         if let Some(((lr, lg, lb), (hr, hg, hb))) = fx.grad {
+            let flat = lr == hr && lg == hg && lb == hb;
             for y in 0..h {
                 let mut t = if ink_bot > ink_top {
                     let yc = y.clamp(ink_top, ink_bot);
@@ -1498,10 +1506,15 @@ pub fn render_cloud_with_fx(
                     t = ((t * n).floor().min(n - 1.0)) / (n - 1.0);
                 }
                 let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
-                tint_rows.push(crate::sharkvis::live_esc(
-                    fx.term_pal.as_ref(),
-                    (mix(lr, hr), mix(lg, hg), mix(lb, hb)),
-                ));
+                let c = (mix(lr, hr), mix(lg, hg), mix(lb, hb));
+                tint_rows.push(if flat || t <= 0.0 || t >= 1.0 {
+                    crate::sharkvis::rgb_ansi_start(c)
+                } else {
+                    crate::sharkvis::base_index_esc(crate::sharkvis::nearest_base_index(
+                        fx.term_pal.as_ref(),
+                        c,
+                    ))
+                });
             }
         }
         *tint_key = tint_key_now;
@@ -2454,6 +2467,55 @@ mod tests {
             rest = &rest[p + 1..];
         }
         assert!(top > 200, "gradient stays bright, got {}", top);
+    }
+
+    #[test]
+    fn gradient_uses_palette_between_exact_ends() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let out = render_frame_with_fx(&solid_test_logo(), 5.0, &cfg, 36, 4, &fx_grad());
+        let raw = out.lines.join("\n");
+        assert!(raw.contains("\x1b[38;2;255;0;0m"), "top end stays exact");
+        assert!(raw.contains("\x1b[38;2;0;0;255m"), "bottom end stays exact");
+        let mut base = 0;
+        for line in &out.lines {
+            let mut rest = line.as_str();
+            while let Some(p) = rest.find("\x1b[") {
+                let esc = &rest[p..];
+                let end = esc.find('m').map(|i| i + 1).unwrap_or(esc.len());
+                if let Ok(n) = esc[2..end - 1].parse::<u32>() {
+                    if (30..=37).contains(&n) || (90..=97).contains(&n) {
+                        base += 1;
+                    }
+                }
+                rest = &esc[end..];
+            }
+        }
+        assert!(base > 0, "middle rows snap to terminal palette");
+        let mut rest = raw.as_str();
+        while let Some(p) = rest.find("\x1b[38;2;") {
+            let esc = &rest[p..];
+            let end = esc.find('m').map(|i| i + 1).unwrap_or(esc.len());
+            let code = &esc[..end];
+            assert!(
+                code == "\x1b[38;2;255;0;0m" || code == "\x1b[38;2;0;0;255m",
+                "only the ends stay truecolor, got {code}"
+            );
+            rest = &esc[end..];
+        }
+    }
+
+    #[test]
+    fn flat_live_color_stays_one_truecolor() {
+        let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
+        let mut fx = fx_grad();
+        fx.grad = Some(((255, 136, 0), (255, 136, 0)));
+        let out = render_frame_with_fx(&solid_test_logo(), 5.0, &cfg, 36, 4, &fx);
+        let raw = out.lines.join("\n");
+        assert!(raw.contains("\x1b[38;2;255;136;0m"));
+        assert!(
+            !raw.contains("\x1b[33m") && !raw.contains("\x1b[93m"),
+            "a flat live color must not snap to the palette"
+        );
     }
 
     #[test]

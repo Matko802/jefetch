@@ -146,10 +146,6 @@ pub fn config_paths() -> Vec<String> {
     out
 }
 
-pub fn gradient_colors() -> Option<(Rgb, Rgb)> {
-    gradient_colors_from_paths(&config_paths())
-}
-
 pub fn glyph_ramp() -> Option<Vec<String>> {
     for p in config_paths() {
         if let Ok(text) = std::fs::read_to_string(&p) {
@@ -191,17 +187,6 @@ fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
     }
     ramp.truncate(64);
     Some(ramp)
-}
-
-fn gradient_colors_from_paths(paths: &[String]) -> Option<(Rgb, Rgb)> {
-    for p in paths {
-        if let Ok(text) = std::fs::read_to_string(p) {
-            if let Some(g) = parse_sharkvis_config(&text) {
-                return Some(g);
-            }
-        }
-    }
-    None
 }
 
 fn parse_sharkvis_config(text: &str) -> Option<(Rgb, Rgb)> {
@@ -1295,13 +1280,7 @@ impl Sync {
         }
         if !mode.enabled(self.running) {
             self.monitor = None;
-            let mut frame = LiveFrame::inactive();
-            if live_colors && mode != SharkvisMode::Off {
-                if let Some((lo, hi)) = self.gradients {
-                    frame.grad = Some((lo, hi));
-                    frame.grad_amt = self.last.grad_amt.clamp(1, 256);
-                }
-            }
+            let frame = LiveFrame::inactive();
             self.last = frame;
             return self.last.clone();
         }
@@ -1485,6 +1464,31 @@ fn grad_t(frame: &LiveFrame, idx: usize, total: usize) -> Option<f32> {
     Some(t)
 }
 
+pub fn nearest_base_index(pal: Option<&[Rgb; 16]>, c: Rgb) -> usize {
+    let mut best = 0usize;
+    let mut dist = u32::MAX;
+    for i in 0..16 {
+        let p = pal.map(|p| p[i]).unwrap_or_else(|| xterm_base_color(i));
+        let dr = i32::from(c.0) - i32::from(p.0);
+        let dg = i32::from(c.1) - i32::from(p.1);
+        let db = i32::from(c.2) - i32::from(p.2);
+        let d = (dr * dr + dg * dg + db * db) as u32;
+        if d < dist {
+            dist = d;
+            best = i;
+        }
+    }
+    best
+}
+
+pub fn base_index_esc(idx: usize) -> String {
+    if idx < 8 {
+        format!("\x1b[{}m", 30 + idx)
+    } else {
+        format!("\x1b[{}m", 90 + idx - 8)
+    }
+}
+
 fn xterm_base_color(i: usize) -> Rgb {
     const BASE: [Rgb; 16] = [
         (0, 0, 0),
@@ -1664,14 +1668,8 @@ pub fn swap_display_lines_frame(lines: &[String], frame: &LiveFrame) -> Vec<Stri
 /// (indexes 0-7 as 30-37, 8-15 as 90-97), truecolor otherwise.
 pub fn live_esc(pal: Option<&[Rgb; 16]>, c: Rgb) -> String {
     if let Some(p) = pal {
-        for (i, e) in p.iter().enumerate() {
-            if *e == c {
-                return if i < 8 {
-                    format!("\x1b[{}m", 30 + i)
-                } else {
-                    format!("\x1b[{}m", 90 + (i - 8))
-                };
-            }
+        if let Some(i) = p.iter().position(|e| *e == c) {
+            return base_index_esc(i);
         }
     }
     rgb_ansi_start(c)
@@ -2473,7 +2471,22 @@ mod tests {
     }
 
     #[test]
-    fn inactive_frame_carries_config_gradient() {
+    fn nearest_base_index_snaps_to_palette() {
+        assert_eq!(nearest_base_index(None, (0, 0, 0)), 0);
+        assert_eq!(nearest_base_index(None, (205, 0, 0)), 1);
+        assert_eq!(nearest_base_index(None, (200, 8, 8)), 1);
+        assert_eq!(nearest_base_index(None, (255, 255, 255)), 15);
+        assert_eq!(nearest_base_index(None, (92, 92, 255)), 12);
+        let mut pal = [(0, 0, 0); 16];
+        pal[3] = (10, 20, 30);
+        assert_eq!(nearest_base_index(Some(&pal), (11, 19, 31)), 3);
+        assert_eq!(base_index_esc(1), "\x1b[31m");
+        assert_eq!(base_index_esc(9), "\x1b[91m");
+        assert_eq!(base_index_esc(15), "\x1b[97m");
+    }
+
+    #[test]
+    fn inactive_frame_has_no_live_colors() {
         let _guard = test_env_lock();
         let cfg_path =
             std::env::temp_dir().join(format!("jefetch-sharkvis-fb-{}", std::process::id()));
@@ -2487,20 +2500,13 @@ mod tests {
         let mut s = Sync::new();
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(!f.active, "no process running");
-        assert_eq!(
-            f.grad,
-            Some(((0x11, 0x22, 0x33), (0xaa, 0xbb, 0xcc))),
-            "an opt-in gets the config gradient even while off"
-        );
+        assert_eq!(f.grad, None, "idle frames carry no config gradient");
+        assert_eq!(f.flat, None);
+        assert_eq!(f.grad_idx, None);
         assert_eq!(
             grad_for_row(&f, 0, 8),
-            Some((0xaa, 0xbb, 0xcc)),
-            "top row takes the high end"
-        );
-        assert_eq!(
-            grad_for_row(&f, 7, 8),
-            Some((0x11, 0x22, 0x33)),
-            "bottom row takes the low end"
+            None,
+            "the logo keeps its own palette"
         );
         assert_eq!(text_color_key(&f), None, "no repaint key without a process");
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, false);
