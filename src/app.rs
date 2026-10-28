@@ -408,6 +408,7 @@ impl App {
         let mut refresh_busy: Option<u64> = None;
 
         let restore = |tty_fd: i32, is_tty: bool, orig_term: &libc::termios| {
+            drain_input(tty_fd, is_tty);
             let _ = write_stdout("\x1b[?25h\x1b[0m\n");
             if is_tty && tty_fd != -1 {
                 unsafe { libc::tcsetattr(tty_fd, libc::TCSANOW, orig_term); }
@@ -1570,9 +1571,30 @@ pub fn classify_key(b: u8) -> KeyAction {
 
 fn esc_followup_action(tail: &[u8]) -> KeyAction {
     match tail.first() {
-        Some(b'[') | Some(b'O') => KeyAction::Ignore,
+        Some(b'[') | Some(b'O') | Some(b']') | Some(b'P') | Some(b'_') | Some(b'^')
+        | Some(b'X') | Some(b'\\') => KeyAction::Ignore,
         _ => KeyAction::Quit,
     }
+}
+
+fn drain_input(tty_fd: i32, is_tty: bool) {
+    if !is_tty || tty_fd == -1 {
+        return;
+    }
+    let flags = unsafe { libc::fcntl(tty_fd, libc::F_GETFL) };
+    if flags == -1 {
+        return;
+    }
+    unsafe { libc::fcntl(tty_fd, libc::F_SETFL, flags | libc::O_NONBLOCK); }
+    let mut buf = [0u8; 256];
+    loop {
+        let n =
+            unsafe { libc::read(tty_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        if n <= 0 {
+            break;
+        }
+    }
+    unsafe { libc::fcntl(tty_fd, libc::F_SETFL, flags); }
 }
 
 fn poll_key_action(
@@ -2001,6 +2023,11 @@ mod tests {
         assert_eq!(esc_followup_action(b"[A"), KeyAction::Ignore);
         assert_eq!(esc_followup_action(b"[B"), KeyAction::Ignore);
         assert_eq!(esc_followup_action(b"O"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"]4;0;rgb:1a1a/1a1a/1a1a"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"]11;rgb:0000/0000/0000"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"P1$r"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"_G"), KeyAction::Ignore);
+        assert_eq!(esc_followup_action(b"\\"), KeyAction::Ignore);
         assert_eq!(esc_followup_action(b"t"), KeyAction::Quit);
     }
 

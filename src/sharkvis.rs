@@ -1839,8 +1839,9 @@ fn osc4_query(pal: &mut [Rgb; 16]) -> bool {
     let mut bl = 0usize;
     let mut have = [false; 16];
     let mut empty = 0;
-    for _ in 0..6 {
-        if have.iter().all(|x| *x) || bl + 64 >= buf.len() {
+    let deadline = Instant::now() + std::time::Duration::from_millis(1000);
+    for _ in 0..64 {
+        if have.iter().all(|x| *x) || bl + 64 >= buf.len() || Instant::now() >= deadline {
             break;
         }
         let k = unsafe {
@@ -1868,9 +1869,10 @@ fn osc4_query(pal: &mut [Rgb; 16]) -> bool {
         bl += k as usize;
         osc4_parse(&buf[..bl], pal, &mut have);
     }
-    let mut tmp = [0u8; 1];
-    unsafe {
-        libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, 1);
+    if !have.iter().all(|x| *x) {
+        unsafe {
+            libc::tcflush(fd, libc::TCIFLUSH);
+        }
     }
     unsafe {
         libc::tcsetattr(fd, libc::TCSANOW, &orig);
