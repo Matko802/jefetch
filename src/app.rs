@@ -815,7 +815,15 @@ impl App {
         }
 
         self.apply_logo_colors();
-        Self::publish_logo_colors(self.logo.as_ref());
+        let gradient = {
+            let (base_cfg, active_cfg, _) = self.anim_configs();
+            if base_cfg.live_colors || active_cfg.live_colors {
+                crate::sharkvis::gradient_colors()
+            } else {
+                None
+            }
+        };
+        Self::publish_logo_colors(self.logo.as_ref(), gradient);
     }
 
     fn apply_logo_colors(&mut self) {
@@ -844,8 +852,19 @@ impl App {
     /// removed when the logo carries no color). Specs are the same terminal
     /// color indexes the logo itself uses (`34`, `38;5;196`, `#rrggbb`),
     /// so sharkvis renders exactly the logo colors with no palette queries.
-    fn publish_logo_colors(logo: Option<&ResolvedLogo>) {
+    fn publish_logo_colors(
+        logo: Option<&ResolvedLogo>,
+        gradient: Option<(crate::sharkvis::Rgb, crate::sharkvis::Rgb)>,
+    ) {
         let path = Self::logo_colors_path();
+        if let Some((lo, hi)) = gradient {
+            let body = format!(
+                "low=#{:02x}{:02x}{:02x} high=#{:02x}{:02x}{:02x}\n",
+                lo.0, lo.1, lo.2, hi.0, hi.1, hi.2
+            );
+            Self::write_logo_colors(&path, &body);
+            return;
+        }
         let Some(l) = logo else {
             let _ = std::fs::remove_file(&path);
             return;
@@ -890,17 +909,21 @@ impl App {
             let _ = std::fs::remove_file(&path);
             return;
         };
-        if let Some(parent) = std::path::Path::new(&path).parent() {
+        let body = format!("low={lo} high={hi}\n");
+        Self::write_logo_colors(&path, &body);
+    }
+
+    fn write_logo_colors(path: &str, body: &str) {
+        if let Some(parent) = std::path::Path::new(path).parent() {
             if !parent.as_os_str().is_empty() {
                 let _ = std::fs::create_dir_all(parent);
             }
         }
-        let body = format!("low={lo} high={hi}\n");
         let tmp = format!("{path}.tmp");
         if std::fs::write(&tmp, body.as_bytes()).is_err() {
             return;
         }
-        if std::fs::rename(&tmp, &path).is_err() {
+        if std::fs::rename(&tmp, path).is_err() {
             let _ = std::fs::remove_file(&tmp);
         }
     }
@@ -2082,6 +2105,36 @@ mod tests {
             app.pick_logo();
             let body = std::fs::read_to_string(path).expect("logo colors published");
             assert_eq!(body, "low=38;5;32 high=38;5;221\n", "got {:?}", body);
+        });
+    }
+
+    #[test]
+    fn publish_logo_colors_follows_sharkvis_gradient() {
+        with_isolated_logo_colors(|path| {
+            let cfg_path = std::env::temp_dir().join(format!(
+                "jefetch-logo-grad-{}.jsonc",
+                std::process::id()
+            ));
+            std::fs::write(
+                &cfg_path,
+                r#"{"color": {"gradient_low": "ff00ff", "gradient_high": "88ff00"}}"#,
+            )
+            .unwrap();
+            let prev = std::env::var_os("JEFETCH_SHARKVIS_CONFIG");
+            std::env::set_var("JEFETCH_SHARKVIS_CONFIG", &cfg_path);
+            let mut app = App::new(CliOptions::default());
+            app.config.logo.source = Some("python".to_string());
+            app.config.logo.logo_type = Some("builtin".to_string());
+            app.config.logo.animation = Some("color=sharkvis".to_string());
+            app.pick_logo();
+            let body = std::fs::read_to_string(path).expect("logo colors published");
+            assert_eq!(body, "low=#ff00ff high=#88ff00\n", "got {:?}", body);
+            if let Some(v) = prev {
+                std::env::set_var("JEFETCH_SHARKVIS_CONFIG", v);
+            } else {
+                std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
+            }
+            let _ = std::fs::remove_file(&cfg_path);
         });
     }
 
