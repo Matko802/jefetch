@@ -1490,7 +1490,6 @@ pub fn render_cloud_with_fx(
     if *tint_key != tint_key_now {
         tint_rows.clear();
         if let Some(((lr, lg, lb), (hr, hg, hb))) = fx.grad {
-            let flat = lr == hr && lg == hg && lb == hb;
             for y in 0..h {
                 let mut t = if ink_bot > ink_top {
                     let yc = y.clamp(ink_top, ink_bot);
@@ -1507,14 +1506,7 @@ pub fn render_cloud_with_fx(
                 }
                 let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t + 0.5) as u8;
                 let c = (mix(lr, hr), mix(lg, hg), mix(lb, hb));
-                tint_rows.push(if flat || t <= 0.0 || t >= 1.0 {
-                    crate::sharkvis::rgb_ansi_start(c)
-                } else {
-                    crate::sharkvis::base_index_esc(crate::sharkvis::nearest_base_index(
-                        fx.term_pal.as_ref(),
-                        c,
-                    ))
-                });
+                tint_rows.push(crate::sharkvis::rgb_ansi_start(c));
             }
         }
         *tint_key = tint_key_now;
@@ -2470,38 +2462,34 @@ mod tests {
     }
 
     #[test]
-    fn gradient_uses_palette_between_exact_ends() {
+    fn gradient_stays_truecolor_like_the_text() {
         let cfg = AnimConfig::from_animation_str(Some("spin y speed=2.0"));
         let out = render_frame_with_fx(&solid_test_logo(), 5.0, &cfg, 36, 4, &fx_grad());
         let raw = out.lines.join("\n");
         assert!(raw.contains("\x1b[38;2;255;0;0m"), "top end stays exact");
         assert!(raw.contains("\x1b[38;2;0;0;255m"), "bottom end stays exact");
-        let mut base = 0;
+        let mut mids = 0;
         for line in &out.lines {
             let mut rest = line.as_str();
             while let Some(p) = rest.find("\x1b[") {
                 let esc = &rest[p..];
                 let end = esc.find('m').map(|i| i + 1).unwrap_or(esc.len());
-                if let Ok(n) = esc[2..end - 1].parse::<u32>() {
-                    if (30..=37).contains(&n) || (90..=97).contains(&n) {
-                        base += 1;
+                let code = &esc[2..end - 1];
+                if let Some(rgb) = code.strip_prefix("38;2;") {
+                    let vals: Vec<u32> = rgb.split(';').filter_map(|v| v.parse().ok()).collect();
+                    if vals.len() == 3 && vals[0] > 0 && vals[0] < 255 {
+                        mids += 1;
                     }
+                } else if let Ok(n) = code.parse::<u32>() {
+                    assert!(
+                        !(30..=37).contains(&n) && !(90..=97).contains(&n),
+                        "logo rows must not snap to the base palette"
+                    );
                 }
                 rest = &esc[end..];
             }
         }
-        assert!(base > 0, "middle rows snap to terminal palette");
-        let mut rest = raw.as_str();
-        while let Some(p) = rest.find("\x1b[38;2;") {
-            let esc = &rest[p..];
-            let end = esc.find('m').map(|i| i + 1).unwrap_or(esc.len());
-            let code = &esc[..end];
-            assert!(
-                code == "\x1b[38;2;255;0;0m" || code == "\x1b[38;2;0;0;255m",
-                "only the ends stay truecolor, got {code}"
-            );
-            rest = &esc[end..];
-        }
+        assert!(mids > 0, "middle rows blend in truecolor");
     }
 
     #[test]

@@ -562,9 +562,11 @@ impl App {
                     None
                 };
                 if want_colors {
-                    let tint = crate::sharkvis::logo_tint(&shark_live, live_pal.as_ref());
-                    if let Some(c) = tint {
-                        fx.grad = Some((c, c));
+                    if let Some(((lo, hi), amt)) =
+                        crate::sharkvis::logo_gradient(&shark_live, live_pal.as_ref())
+                    {
+                        fx.grad = Some((lo, hi));
+                        fx.grad_amt = amt;
                         fx.term_pal = live_pal;
                     }
                 }

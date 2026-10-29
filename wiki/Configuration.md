@@ -163,22 +163,24 @@ right, heavy left yaws it left, matched stereo pitches `x`, energy rolls
 `boom=N` makes it swell with volume.
 
 Colors stay the logo's own unless you add `color=sharkvis`, which hands the
-logo over to sharkvis's live color — the current point between
-`gradient_low` and `gradient_high` from `~/.config/sharkvis/config.jsonc`,
-blended by the audio energy. The logo takes that color as one flat tint
-instead of painting a gradient of its own. Add `textcolor=sharkvis` and the
-text (keys/title/separator) follows the same scheme as a truecolor gradient,
+logo over to sharkvis's live `gradient_low` → `gradient_high` from
+`~/.config/sharkvis/config.jsonc`. The logo paints that pair as the same
+vertical gradient the text uses, and the ends stay fixed — the beat never
+shifts the logo's colors. Add `textcolor=sharkvis` and the text
+(keys/title/separator) follows the same scheme as a truecolor gradient,
 always overriding its normal colors (which only show when idle). When the
 ends are 256-color indexes (`38;5;N`, sharkvis's `color_mode: "256"` or colors
-following the logo), they are resolved through the palette first and then go
-through the same blend, honoring sharkvis's `gradient` count. With no live
-state to read (sharkvis is not running, or only `--raw` backends publish),
-the logo and text fall back to their normal colors — no config gradient is
-painted. `sharkvis=on` is the exception: it keeps using the configured ends
-without a running process. While jefetch runs it keeps
-`$XDG_RUNTIME_DIR/sharkvis/logo_colors` pinned to the logo's own first/last
-colors, rewriting only on change, so sharkvis's `colors: "jefetch"` mode
-always returns to those colors instead of the scheme it followed before.
+following the logo), they are resolved through the palette first, honoring
+sharkvis's `gradient` count. When sharkvis itself follows the logo
+(`colors: "jefetch"`), the logo keeps its own theme colors untouched while
+the text follows the published pair. With no live state to read (sharkvis is
+not running, or only `--raw` backends publish), the logo and text fall back
+to their normal colors — no config gradient is painted. `sharkvis=on` is the
+exception: it keeps using the configured ends without a running process.
+While jefetch runs it keeps `$XDG_RUNTIME_DIR/sharkvis/logo_colors` pinned to
+the logo's own first/last colors, rewriting only on change, so sharkvis's
+`colors: "jefetch"` mode always returns to those colors instead of the scheme
+it followed before.
 Same deal with characters:
 `chars=sharkvis` mimics sharkvis's `chars` charset while it plays
 (blocks otherwise). Custom `chars=` ramps are ignored — the logo

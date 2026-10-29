@@ -46,7 +46,7 @@ pub struct LiveFrame {
     pub grad: Option<(Rgb, Rgb)>,
     pub grad_idx: Option<(String, String)>,
     pub flat: Option<Rgb>,
-    pub tint: Option<Rgb>,
+    pub colors_from_logo: bool,
     pub term_pal: Option<[Rgb; 16]>,
     pub glyphs: Option<Vec<String>>,
     pub energy: f32,
@@ -65,7 +65,7 @@ impl LiveFrame {
             grad: None,
             grad_idx: None,
             flat: None,
-            tint: None,
+            colors_from_logo: false,
             term_pal: None,
             glyphs: None,
             energy: 0.0,
@@ -159,9 +159,10 @@ pub fn glyph_ramp() -> Option<Vec<String>> {
     None
 }
 
-fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String>>) {
+fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String>>, bool) {
     let mut grad: Option<(Rgb, Rgb)> = None;
     let mut glyphs: Option<Vec<String>> = None;
+    let mut colors_from_logo: Option<bool> = None;
     for p in paths {
         let Ok(text) = std::fs::read_to_string(p) else {
             continue;
@@ -172,11 +173,26 @@ fn visual_from_paths(paths: &[String]) -> (Option<(Rgb, Rgb)>, Option<Vec<String
         if glyphs.is_none() {
             glyphs = parse_sharkvis_glyphs(&text);
         }
-        if grad.is_some() && glyphs.is_some() {
+        if colors_from_logo.is_none() {
+            colors_from_logo = parse_sharkvis_colors(&text);
+        }
+        if grad.is_some() && glyphs.is_some() && colors_from_logo.is_some() {
             break;
         }
     }
-    (grad, glyphs)
+    (grad, glyphs, colors_from_logo.unwrap_or(false))
+}
+
+fn parse_sharkvis_colors(text: &str) -> Option<bool> {
+    let root = crate::config::parse(text).ok()?;
+    let color = root.get("color")?;
+    let colors = color.get("colors")?.as_str()?;
+    let tok: String = colors
+        .trim_start()
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != ',')
+        .collect();
+    Some(tok.eq_ignore_ascii_case("jefetch"))
 }
 
 fn parse_sharkvis_glyphs(text: &str) -> Option<Vec<String>> {
@@ -1235,6 +1251,7 @@ pub struct Sync {
     running_at: Option<Instant>,
     gradients: Option<(Rgb, Rgb)>,
     glyphs: Option<Vec<String>>,
+    colors_from_logo: bool,
     visual_at: Option<Instant>,
     monitor: Option<BeatMonitor>,
     last: LiveFrame,
@@ -1252,6 +1269,7 @@ impl Sync {
             running_at: None,
             gradients: None,
             glyphs: None,
+            colors_from_logo: false,
             visual_at: None,
             monitor: None,
             last: LiveFrame::inactive(),
@@ -1275,9 +1293,10 @@ impl Sync {
             self.running_at = Some(now);
         }
         if self.visual_at.is_none_or(|t| now.duration_since(t) >= Duration::from_millis(500)) {
-            let (grad, glyphs) = visual_from_paths(&config_paths());
+            let (grad, glyphs, colors_from_logo) = visual_from_paths(&config_paths());
             self.gradients = grad;
             self.glyphs = glyphs;
+            self.colors_from_logo = colors_from_logo;
             self.visual_at = Some(now);
         }
         if !mode.enabled(self.running) {
@@ -1370,27 +1389,12 @@ impl Sync {
         } else {
             None
         };
-        let tint = if live_colors {
-            color
-                .or_else(|| {
-                    rgb_fresh.map(|(lo, hi)| {
-                        if lo == hi {
-                            hi
-                        } else {
-                            lerp_rgb(lo, hi, energy)
-                        }
-                    })
-                })
-                .or(self.last.tint)
-        } else {
-            None
-        };
         let frame = LiveFrame {
             active: true,
             grad,
             grad_idx,
             flat,
-            tint,
+            colors_from_logo: self.colors_from_logo,
             term_pal: None,
             glyphs: self.glyphs.clone(),
             energy,
@@ -1629,18 +1633,23 @@ pub fn has_display_color(frame: &LiveFrame) -> bool {
         && (frame.flat.is_some() || frame.grad.is_some() || frame.grad_idx.is_some())
 }
 
-pub fn logo_tint(frame: &LiveFrame, pal: Option<&[Rgb; 16]>) -> Option<Rgb> {
-    if let Some(c) = frame.tint {
-        return Some(c);
+pub fn logo_gradient(
+    frame: &LiveFrame,
+    pal: Option<&[Rgb; 16]>,
+) -> Option<((Rgb, Rgb), u32)> {
+    if frame.colors_from_logo {
+        return None;
     }
-    let (lo, hi) = frame.grad_idx.as_ref()?;
-    let a = spec_rgb(pal, lo)?;
-    let b = spec_rgb(pal, hi)?;
-    Some(if a == b {
-        a
-    } else {
-        lerp_rgb(a, b, frame.energy)
-    })
+    let ends = frame
+        .grad
+        .or_else(|| {
+            let (lo, hi) = frame.grad_idx.as_ref()?;
+            let a = spec_rgb(pal, lo)?;
+            let b = spec_rgb(pal, hi)?;
+            Some((a, b))
+        })
+        .or(frame.flat.map(|c| (c, c)))?;
+    Some((ends, frame.grad_amt))
 }
 
 pub fn rgb_ansi_start(rgb: Rgb) -> String {
@@ -2187,7 +2196,7 @@ mod tests {
     }
 
     #[test]
-    fn tint_holds_across_state_gap() {
+    fn gradient_holds_across_state_gap() {
         let _guard = super::test_env_lock();
         let path = std::env::temp_dir().join(format!("jefetch-sharkvis-hold-{}", std::process::id()));
         std::fs::write(&path, "color=#ff0000 energy=1 beat=1 color_low=#ff0000 color_high=#0000ff").unwrap();
@@ -2203,7 +2212,7 @@ mod tests {
         s.last_ok = Some(Instant::now() - Duration::from_secs(5));
         let f2 = s.poll(SharkvisMode::On, DEFAULT_BEAT_DEPTH, true);
         assert!(f2.active);
-        assert_eq!(f2.grad, f.grad, "tint must hold across gaps, not flash native");
+        assert_eq!(f2.grad, f.grad, "gradient must hold across gaps, not flash native");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
@@ -2296,7 +2305,6 @@ mod tests {
         assert!(f.active);
         assert_eq!(f.grad, None);
         assert_eq!(f.flat, Some((255, 136, 0)), "single live color without gradients");
-        assert_eq!(f.tint, Some((255, 136, 0)));
         assert!((f.beat - 1.0).abs() < 1e-5);
         assert!((f.speed_mult - 0.4).abs() < 1e-5, "beat dips by depth");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
@@ -2363,7 +2371,6 @@ mod tests {
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 255), (255, 0, 0))));
-        assert_eq!(f.tint, Some((128, 0, 128)), "live ends blend for the logo");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
@@ -2457,7 +2464,7 @@ mod tests {
             std::env::temp_dir().join(format!("jefetch-sharkvis-cfg-{}", std::process::id()));
         std::fs::write(
             &cfg_path,
-            r#"{"color": {"gradient_low": "000000", "gradient_high": "ff0000"}, "visualizer": {"chars": "123"}}"#,
+            r#"{"color": {"gradient_low": "000000", "gradient_high": "ff0000", "colors": "jefetch"}, "visualizer": {"chars": "123"}}"#,
         )
         .unwrap();
         let state_path =
@@ -2471,7 +2478,7 @@ mod tests {
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 0), (255, 0, 0))), "both gradient ends");
         assert_eq!(f.flat, None);
-        assert_eq!(f.tint, Some((128, 0, 0)), "flat logo tint at half energy");
+        assert!(f.colors_from_logo, "jefetch mode leaves the logo colors alone");
         assert_eq!(
             f.glyphs,
             Some(vec!["1".to_string(), "2".to_string(), "3".to_string()])
@@ -2613,7 +2620,6 @@ mod tests {
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, None, "static config must not shadow live logo colors");
-        assert_eq!(f.tint, None, "index ends resolve in the app with the palette");
         assert_eq!(
             f.grad_idx,
             Some(("34".to_string(), "36".to_string())),
@@ -2628,16 +2634,56 @@ mod tests {
     }
 
     #[test]
-    fn logo_tint_prefers_live_color_and_blends_index_ends() {
+    fn logo_gradient_is_static_and_respects_the_logo_mode() {
         let mut f = LiveFrame::inactive();
         f.active = true;
-        f.tint = Some((1, 2, 3));
-        assert_eq!(logo_tint(&f, None), Some((1, 2, 3)));
-        f.tint = None;
+        f.grad = Some(((1, 2, 3), (4, 5, 6)));
+        f.grad_amt = 7;
+        f.energy = 0.75;
+        assert_eq!(
+            logo_gradient(&f, None),
+            Some((((1, 2, 3), (4, 5, 6)), 7)),
+            "the logo paints the live ends, never the energy blend"
+        );
+        f.grad = None;
         f.grad_idx = Some(("34".to_string(), "36".to_string()));
-        f.energy = 0.5;
-        assert_eq!(logo_tint(&f, None), Some((0, 103, 222)));
-        assert_eq!(logo_tint(&f, Some(&[(0, 0, 0); 16])), Some((0, 0, 0)));
+        assert_eq!(
+            logo_gradient(&f, None),
+            Some((((0, 0, 238), (0, 205, 205)), 7))
+        );
+        assert_eq!(
+            logo_gradient(&f, Some(&[(0, 0, 0); 16])),
+            Some((((0, 0, 0), (0, 0, 0)), 7))
+        );
+        f.grad_idx = None;
+        f.flat = Some((9, 8, 7));
+        assert_eq!(
+            logo_gradient(&f, None),
+            Some((((9, 8, 7), (9, 8, 7)), 7))
+        );
+        f.colors_from_logo = true;
+        assert_eq!(logo_gradient(&f, None), None, "jefetch mode keeps the theme");
+    }
+
+    #[test]
+    fn sharkvis_colors_mode_parses() {
+        assert_eq!(
+            parse_sharkvis_colors(r#"{"color":{"colors":"jefetch"}}"#),
+            Some(true)
+        );
+        assert_eq!(
+            parse_sharkvis_colors(r#"{"color":{"colors":"JEFETCH, extra"}}"#),
+            Some(true)
+        );
+        assert_eq!(
+            parse_sharkvis_colors(r#"{"color":{"colors":"mpris"}}"#),
+            Some(false)
+        );
+        assert_eq!(
+            parse_sharkvis_colors(r#"{"color":{"colors":""}}"#),
+            Some(false)
+        );
+        assert_eq!(parse_sharkvis_colors(r#"{"color":{}}"#), None);
     }
 
     #[test]
@@ -2767,7 +2813,7 @@ mod tests {
             grad: Some(((0, 0, 0), (255, 255, 255))),
             grad_idx: None,
             flat: None,
-            tint: None,
+            colors_from_logo: false,
             term_pal: None,
             glyphs: None,
             energy: 0.0,
