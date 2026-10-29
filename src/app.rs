@@ -562,27 +562,13 @@ impl App {
                     None
                 };
                 if want_colors {
-                    if let Some(g) = shark_live.grad {
-                        fx.grad = Some(g);
-                        fx.grad_amt = shark_live.grad_amt;
-                        fx.term_pal = live_pal;
-                    } else if let Some(c) = shark_live.flat {
+                    let tint = crate::sharkvis::logo_tint(&shark_live, live_pal.as_ref());
+                    if let Some(c) = tint {
                         fx.grad = Some((c, c));
-                        fx.grad_amt = shark_live.grad_amt;
                         fx.term_pal = live_pal;
-                    } else if let Some((lo, hi)) = shark_live.grad_idx.as_ref() {
-                        let ends = (
-                            crate::sharkvis::spec_rgb(live_pal.as_ref(), lo),
-                            crate::sharkvis::spec_rgb(live_pal.as_ref(), hi),
-                        );
-                        if let (Some(a), Some(b)) = ends {
-                            fx.grad = Some((a, b));
-                            fx.grad_amt = shark_live.grad_amt;
-                            fx.term_pal = live_pal;
-                        }
                     }
                 }
-                self.publish_logo_colors(fx.grad);
+                self.publish_logo_colors();
                 if using_active {
                     if !cfg.original_glyphs && !cfg.shading_explicit {
                         fx.shading = shark_live.glyphs.clone();
@@ -834,7 +820,7 @@ impl App {
 
         self.apply_logo_colors();
         self.logo_colors_own = Self::logo_colors_body(self.logo.as_ref());
-        self.publish_logo_colors(None);
+        self.publish_logo_colors();
     }
 
     fn apply_logo_colors(&mut self) {
@@ -858,22 +844,13 @@ impl App {
         }
     }
 
-    /// Publish the exact pair the logo is rendering to
-    /// `$RUNTIME/sharkvis/logo_colors` (atomic tmp+rename), falling back to
-    /// the logo's own first/last foreground specs when no live pair is
-    /// active. Writes only when the body changes; removes the file when the
-    /// logo carries no color.
-    fn publish_logo_colors(
-        &mut self,
-        live: Option<(crate::sharkvis::Rgb, crate::sharkvis::Rgb)>,
-    ) {
-        let body = match live {
-            Some((lo, hi)) => Some(format!(
-                "low=#{:02x}{:02x}{:02x} high=#{:02x}{:02x}{:02x}\n",
-                lo.0, lo.1, lo.2, hi.0, hi.1, hi.2
-            )),
-            None => self.logo_colors_own.clone(),
-        };
+    /// Publish the logo's own first/last foreground spec pair to
+    /// `$RUNTIME/sharkvis/logo_colors` (atomic tmp+rename), so sharkvis in
+    /// `colors: "jefetch"` mode always returns to jefetch's colors instead
+    /// of whatever scheme was active before. Writes only when the body
+    /// changes; removes the file when the logo carries no color.
+    fn publish_logo_colors(&mut self) {
+        let body = self.logo_colors_own.clone();
         if self.logo_colors_last.as_ref() == Some(&body) {
             return;
         }
@@ -2168,28 +2145,27 @@ mod tests {
     }
 
     #[test]
-    fn publish_logo_colors_tracks_live_pair_on_change() {
+    fn publish_logo_colors_keeps_own_pair_after_scheme_changes() {
         with_isolated_logo_colors(|path| {
             let mut app = App::new(CliOptions::default());
             app.config.logo.source = Some("python".to_string());
             app.config.logo.logo_type = Some("builtin".to_string());
             app.pick_logo();
             let own = std::fs::read_to_string(path).expect("logo colors published");
-            let live = Some(((0x02, 0x5e, 0x93), (0xb5, 0x3f, 0x33)));
-            app.publish_logo_colors(live);
+            app.publish_logo_colors();
             assert_eq!(
                 std::fs::read_to_string(path).unwrap(),
-                "low=#025e93 high=#b53f33\n"
-            );
-            std::fs::write(path, "sentinel").unwrap();
-            app.publish_logo_colors(live);
-            assert_eq!(
-                std::fs::read_to_string(path).unwrap(),
-                "sentinel",
+                own,
                 "an unchanged pair must not be rewritten"
             );
-            app.publish_logo_colors(None);
-            assert_eq!(std::fs::read_to_string(path).unwrap(), own);
+            std::fs::write(path, "sentinel").unwrap();
+            app.logo_colors_last = None;
+            app.publish_logo_colors();
+            assert_eq!(
+                std::fs::read_to_string(path).unwrap(),
+                own,
+                "live scheme colors must never replace the logo's own pair"
+            );
         });
     }
 

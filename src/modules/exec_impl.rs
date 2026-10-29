@@ -1719,6 +1719,7 @@ mod tests {
             grad: Some(((10, 20, 30), (200, 210, 220))),
             grad_idx: None,
             flat: Some((255, 136, 0)),
+            tint: Some((255, 136, 0)),
             term_pal: None,
             glyphs: None,
             energy: 0.9,

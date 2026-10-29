@@ -46,6 +46,7 @@ pub struct LiveFrame {
     pub grad: Option<(Rgb, Rgb)>,
     pub grad_idx: Option<(String, String)>,
     pub flat: Option<Rgb>,
+    pub tint: Option<Rgb>,
     pub term_pal: Option<[Rgb; 16]>,
     pub glyphs: Option<Vec<String>>,
     pub energy: f32,
@@ -64,6 +65,7 @@ impl LiveFrame {
             grad: None,
             grad_idx: None,
             flat: None,
+            tint: None,
             term_pal: None,
             glyphs: None,
             energy: 0.0,
@@ -1368,11 +1370,25 @@ impl Sync {
         } else {
             None
         };
+        let tint = if live_colors {
+            color.or_else(|| {
+                rgb_fresh.map(|(lo, hi)| {
+                    if lo == hi {
+                        hi
+                    } else {
+                        lerp_rgb(lo, hi, energy)
+                    }
+                })
+            })
+        } else {
+            None
+        };
         let frame = LiveFrame {
             active: true,
             grad,
             grad_idx,
             flat,
+            tint,
             term_pal: None,
             glyphs: self.glyphs.clone(),
             energy,
@@ -1609,6 +1625,20 @@ pub fn grad_idx_for_row(frame: &LiveFrame, idx: usize, total: usize) -> Option<S
 pub fn has_display_color(frame: &LiveFrame) -> bool {
     frame.active
         && (frame.flat.is_some() || frame.grad.is_some() || frame.grad_idx.is_some())
+}
+
+pub fn logo_tint(frame: &LiveFrame, pal: Option<&[Rgb; 16]>) -> Option<Rgb> {
+    if let Some(c) = frame.tint {
+        return Some(c);
+    }
+    let (lo, hi) = frame.grad_idx.as_ref()?;
+    let a = spec_rgb(pal, lo)?;
+    let b = spec_rgb(pal, hi)?;
+    Some(if a == b {
+        a
+    } else {
+        lerp_rgb(a, b, frame.energy)
+    })
 }
 
 pub fn rgb_ansi_start(rgb: Rgb) -> String {
@@ -2264,6 +2294,7 @@ mod tests {
         assert!(f.active);
         assert_eq!(f.grad, None);
         assert_eq!(f.flat, Some((255, 136, 0)), "single live color without gradients");
+        assert_eq!(f.tint, Some((255, 136, 0)));
         assert!((f.beat - 1.0).abs() < 1e-5);
         assert!((f.speed_mult - 0.4).abs() < 1e-5, "beat dips by depth");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
@@ -2330,6 +2361,7 @@ mod tests {
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 255), (255, 0, 0))));
+        assert_eq!(f.tint, Some((128, 0, 128)), "live ends blend for the logo");
         std::env::remove_var("JEFETCH_SHARKVIS_CONFIG");
         std::env::remove_var("JEFETCH_SHARKVIS_STATE");
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
@@ -2437,6 +2469,7 @@ mod tests {
         assert!(f.active);
         assert_eq!(f.grad, Some(((0, 0, 0), (255, 0, 0))), "both gradient ends");
         assert_eq!(f.flat, None);
+        assert_eq!(f.tint, Some((128, 0, 0)), "flat logo tint at half energy");
         assert_eq!(
             f.glyphs,
             Some(vec!["1".to_string(), "2".to_string(), "3".to_string()])
@@ -2578,6 +2611,7 @@ mod tests {
         let f = s.poll(SharkvisMode::Auto, DEFAULT_BEAT_DEPTH, true);
         assert!(f.active);
         assert_eq!(f.grad, None, "static config must not shadow live logo colors");
+        assert_eq!(f.tint, None, "index ends resolve in the app with the palette");
         assert_eq!(
             f.grad_idx,
             Some(("34".to_string(), "36".to_string())),
@@ -2589,6 +2623,19 @@ mod tests {
         std::env::remove_var("JEFETCH_SHARKVIS_RUNNING");
         let _ = std::fs::remove_file(&cfg_path);
         let _ = std::fs::remove_file(&state_path);
+    }
+
+    #[test]
+    fn logo_tint_prefers_live_color_and_blends_index_ends() {
+        let mut f = LiveFrame::inactive();
+        f.active = true;
+        f.tint = Some((1, 2, 3));
+        assert_eq!(logo_tint(&f, None), Some((1, 2, 3)));
+        f.tint = None;
+        f.grad_idx = Some(("34".to_string(), "36".to_string()));
+        f.energy = 0.5;
+        assert_eq!(logo_tint(&f, None), Some((0, 103, 222)));
+        assert_eq!(logo_tint(&f, Some(&[(0, 0, 0); 16])), Some((0, 0, 0)));
     }
 
     #[test]
@@ -2718,6 +2765,7 @@ mod tests {
             grad: Some(((0, 0, 0), (255, 255, 255))),
             grad_idx: None,
             flat: None,
+            tint: None,
             term_pal: None,
             glyphs: None,
             energy: 0.0,
