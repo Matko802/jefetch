@@ -1371,15 +1371,17 @@ impl Sync {
             None
         };
         let tint = if live_colors {
-            color.or_else(|| {
-                rgb_fresh.map(|(lo, hi)| {
-                    if lo == hi {
-                        hi
-                    } else {
-                        lerp_rgb(lo, hi, energy)
-                    }
+            color
+                .or_else(|| {
+                    rgb_fresh.map(|(lo, hi)| {
+                        if lo == hi {
+                            hi
+                        } else {
+                            lerp_rgb(lo, hi, energy)
+                        }
+                    })
                 })
-            })
+                .or(self.last.tint)
         } else {
             None
         };
